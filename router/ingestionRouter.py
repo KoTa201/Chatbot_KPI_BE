@@ -11,47 +11,47 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from controller.ingestionController import IngestionController
 from databaseConfig import get_db
-from schema.ingestionSchema import IngestionResponse
+from schema.ingestionSchema import BulkIngestionResponse, SheetIngestionResult
 
 router = APIRouter()
 
 
 @router.post(
     "/google-sheets",
-    response_model=IngestionResponse,
-    summary="Ingest KPI dari Google Sheets (nama orang & tahun otomatis dari judul)",
+    response_model=BulkIngestionResponse,
+    summary="Ingest KPI dari Google Sheets — semua sheet otomatis",
 )
 async def ingest_from_google_sheets(
     sheet_url: str = Query(
         ...,
         description="URL Google Sheets yang sudah di-share ke email service account.",
     ),
-    sheet_name: Optional[str] = Query(
-        default=None,
-        description="Nama tab/sheet. Jika kosong pakai sheet pertama.",
-    ),
-    sheet_index: int = Query(
-        default=0,
-        description="Index tab/sheet (0-based). Dipakai jika sheet_name tidak diisi.",
-    ),
     nama_orang_override: Optional[str] = Query(
         default=None,
         description=(
-            "Opsional. Override nama orang jika tidak bisa diekstrak dari judul sheet. "
-            "Jika diisi, nilai ini yang dipakai meskipun judul sheet ada."
+            "Opsional. Override nama orang untuk SEMUA sheet jika tidak bisa "
+            "diekstrak dari judul. Jika diisi, nilai ini dipakai di semua sheet."
+        ),
+    ),
+    skip_on_error: bool = Query(
+        default=False,
+        description=(
+            "Jika True (default), sheet yang gagal di-parse dilewati dan dicatat "
+            "sebagai warning. Jika False, satu sheet gagal akan membatalkan seluruh proses."
         ),
     ),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Ingest data KPI dari Google Sheets ke PostgreSQL.
+    Ingest data KPI dari **semua sheet/tab** dalam satu Google Spreadsheet ke PostgreSQL.
 
-    **Nama orang dan periode (bulan/tahun) diekstrak otomatis** dari baris judul:
+    **Nama orang dan periode (bulan/tahun) diekstrak otomatis** dari baris judul
+    masing-masing sheet:
 
         KPI TRACKER – PIRMADI S  |  JANUARI 2025
 
     Parameter `nama_orang_override` hanya perlu diisi jika format judul berbeda
-    dari template standar.
+    dari template standar — nilai ini berlaku untuk semua sheet.
 
     **Prasyarat:**
     - Aktifkan Google Sheets API & Drive API di Google Cloud Console
@@ -59,11 +59,10 @@ async def ingest_from_google_sheets(
     - Share spreadsheet ke email service account sebagai **Viewer**
     """
     controller = IngestionController(db)
-    return await controller.ingest_from_google_sheets(
+    return await controller.ingest_all_sheets_from_google_sheets(
         sheet_url=sheet_url,
-        sheet_name=sheet_name,
-        sheet_index=sheet_index,
         nama_orang_override=nama_orang_override,
+        skip_on_error=skip_on_error,
     )
 
 

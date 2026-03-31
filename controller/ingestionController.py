@@ -1,8 +1,5 @@
 """
 controllers/ingestion_controller.py
-Menangani logika bisnis, validasi input, dan pembentukan response
-untuk semua endpoint ingestion KPI.
-Operasi database didelegasikan ke IngestionRepository.
 """
 
 from typing import Optional
@@ -23,7 +20,102 @@ class IngestionController:
         self.repo = IngestionRepository(db) if db else None
 
     # ------------------------------------------------------------------ #
-    #  POST /ingest/google-sheets                                          #
+    #  POST /ingest/google-sheets  (semua sheet)                           #
+    # ------------------------------------------------------------------ #
+
+    async def ingest_all_sheets_from_google_sheets(
+        self,
+        sheet_url: str,
+        nama_orang_override: Optional[str],
+        skip_on_error: bool = True,
+    ) -> dict:
+        """
+        Ingest semua sheet dalam satu spreadsheet.
+        Return agregasi result per-sheet + grand total.
+        """
+        all_sheets = self._fetch_all_sheets(sheet_url, skip_on_error)
+
+        sheets_result = []
+        grand_total_rows = 0
+        grand_ingested = 0
+        grand_failed = 0
+
+        for sheet in all_sheets:
+            # Sheet gagal di-parse (kosong / format tidak sesuai)
+            if sheet["error"]:
+                sheets_result.append({
+                    "sheet_name": sheet["sheet_name"],
+                    "status":     "skipped",
+                    "reason":     sheet["error"],
+                })
+                continue
+
+            df = sheet["df"]
+            meta = sheet["meta"]
+            spreadsheet_id = sheet["spreadsheet_id"]
+            active_sheet_name = sheet["sheet_name"]
+
+            nama_orang = nama_orang_override or meta.get(
+                "nama_orang") or "UNKNOWN"
+            tahun = meta.get("tahun")
+
+            # Parse DataFrame → records + errors
+            records, errors = self._parse_records(
+                df=df,
+                nama_orang=nama_orang,
+                tahun=tahun,
+                spreadsheet_id=spreadsheet_id,
+                active_sheet_name=active_sheet_name,
+            )
+
+            # Simpan ke DB
+            ingested_count = await self.repo.bulk_insert_kpi_records(records)
+
+            # Log per-sheet
+            status = self._resolve_status(ingested_count, errors)
+            log = await self.repo.create_ingestion_log(
+                sheet_url=sheet_url,
+                spreadsheet_id=spreadsheet_id,
+                sheet_name=active_sheet_name,
+                nama_orang=nama_orang,
+                total_rows=len(df),
+                ingested_count=ingested_count,
+                errors=errors,
+                status=status,
+            )
+
+            grand_total_rows += len(df)
+            grand_ingested += ingested_count
+            grand_failed += len(errors)
+
+            sheets_result.append({
+                "log_id":     log.id,
+                "sheet_name": active_sheet_name,
+                "meta": SheetMeta(
+                    nama_orang=nama_orang,
+                    bulan=meta.get("bulan"),
+                    bulan_num=meta.get("bulan_num"),
+                    tahun=tahun,
+                ),
+                "total_rows": len(df),
+                "ingested":   ingested_count,
+                "failed":     len(errors),
+                "errors":     errors,
+                "status":     status,
+            })
+
+        return {
+            "spreadsheet_url": sheet_url,
+            "total_sheets_processed": len(sheets_result),
+            "grand_total_rows": grand_total_rows,
+            "grand_ingested":   grand_ingested,
+            "grand_failed":     grand_failed,
+            "overall_status":   self._resolve_status(grand_ingested, [] if grand_failed == 0 else ["x"]),
+            "sheets":           sheets_result,
+        }
+
+    # ------------------------------------------------------------------ #
+    #  POST /ingest/google-sheets  (single sheet — tetap dipertahankan)   #
     # ------------------------------------------------------------------ #
 
     async def ingest_from_google_sheets(
@@ -33,18 +125,15 @@ class IngestionController:
         sheet_index: int,
         nama_orang_override: Optional[str],
     ) -> IngestionResponse:
-        # 1. Fetch sheet + ekstrak meta otomatis dari judul
         df, spreadsheet_id, active_sheet_name, meta = self._fetch_sheet(
             sheet_url=sheet_url,
             sheet_name=sheet_name,
             sheet_index=sheet_index,
         )
 
-        # 2. Tentukan nama_orang: override > dari judul > fallback
         nama_orang = nama_orang_override or meta.get("nama_orang") or "UNKNOWN"
         tahun = meta.get("tahun")
 
-        # 3. Parse DataFrame → records + errors
         records, errors = self._parse_records(
             df=df,
             nama_orang=nama_orang,
@@ -53,10 +142,8 @@ class IngestionController:
             active_sheet_name=active_sheet_name,
         )
 
-        # 4. Simpan KPI records ke DB (via repository)
         ingested_count = await self.repo.bulk_insert_kpi_records(records)
 
-        # 5. Tentukan status & simpan log ingestion (via repository)
         status = self._resolve_status(ingested_count, errors)
         log = await self.repo.create_ingestion_log(
             sheet_url=sheet_url,
@@ -144,13 +231,28 @@ class IngestionController:
     #  Private helpers                                                     #
     # ------------------------------------------------------------------ #
 
+    def _fetch_all_sheets(self, sheet_url: str, skip_on_error: bool) -> list:
+        """Fetch semua sheet, wrap exception jadi HTTP 500."""
+        try:
+            return GoogleSheetService().fetch_all_sheets_as_dataframes(
+                sheet_url=sheet_url,
+                skip_on_error=skip_on_error,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error saat fetch semua sheet: {str(e)}",
+            )
+
     def _fetch_sheet(
         self,
         sheet_url: str,
         sheet_name: Optional[str],
         sheet_index: int,
     ):
-        """Fetch sheet dari Google Sheets, wrap exception jadi HTTP 500."""
+        """Fetch satu sheet, wrap exception jadi HTTP 500."""
         try:
             return GoogleSheetService().fetch_sheet_as_dataframe(
                 sheet_url=sheet_url,
@@ -187,7 +289,6 @@ class IngestionController:
 
     @staticmethod
     def _resolve_status(ingested_count: int, errors: list) -> str:
-        """Tentukan status ingestion: success / partial / failed."""
         if not errors:
             return "success"
         if ingested_count > 0:
