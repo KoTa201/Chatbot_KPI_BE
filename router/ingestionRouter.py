@@ -4,7 +4,7 @@ Mendefinisikan route endpoint ingestion KPI.
 Semua logika request/response/validation ada di controller.
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,7 +95,8 @@ async def preview_sheet(
 @router.get("/logs", summary="Riwayat ingestion")
 async def get_ingestion_logs(
     limit: int = Query(default=20, le=100),
+    source_type: Optional[Literal["kpi_tracker", "kpi_master"]] = Query(default=None, description="kpi_tracker | kpi_master"),
     db: AsyncSession = Depends(get_db),
 ):
     controller = IngestionController(db)
-    return await controller.get_ingestion_logs(limit=limit)
+    return await controller.get_ingestion_logs(limit=limit, source_type=source_type)

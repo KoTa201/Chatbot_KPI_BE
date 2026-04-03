@@ -24,6 +24,9 @@ python-jose[cryptography]>=3.3.0
 #HTTP
 httpx>=0.24.0
 
+# Scheduler
+apscheduler>=3.10.4
+
 # Tester
 pytest==8.3.5
 pytest-asyncio==0.25.3

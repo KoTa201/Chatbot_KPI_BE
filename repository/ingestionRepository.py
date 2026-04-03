@@ -54,11 +54,12 @@ class IngestionRepository:
         sheet_url: str,
         spreadsheet_id: str,
         sheet_name: str,
-        nama_orang: str,
+        nama_orang: Optional[str],
         total_rows: int,
         ingested_count: int,
         errors: list[str],
         status: str,
+        source_type: str = "kpi_tracker",
     ) -> IngestionLogORM:
         """
         Insert satu baris log ingestion ke tabel IngestionLog.
@@ -74,20 +75,24 @@ class IngestionRepository:
             failed_count=len(errors),
             errors=json.dumps(errors, ensure_ascii=False) if errors else None,
             status=status,
+            source_type=source_type,
         )
         self.db.add(log)
         await self.db.commit()
         await self.db.refresh(log)
         return log
 
-    async def get_ingestion_logs(self, limit: int) -> list[IngestionLogORM]:
+    async def get_ingestion_logs(
+        self,
+        limit: int,
+        source_type: Optional[str] = None,
+    ) -> list[IngestionLogORM]:
         """
         Ambil riwayat ingestion log, diurutkan dari terbaru.
         Kembalikan list ORM instance.
         """
-        result = await self.db.execute(
-            select(IngestionLogORM)
-            .order_by(IngestionLogORM.created_at.desc())
-            .limit(limit)
-        )
+        query = select(IngestionLogORM).order_by(IngestionLogORM.created_at.desc())
+        if source_type:
+            query = query.where(IngestionLogORM.source_type == source_type)
+        result = await self.db.execute(query.limit(limit))
         return result.scalars().all()
