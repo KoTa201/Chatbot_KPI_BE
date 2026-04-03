@@ -5,8 +5,9 @@ SQLAlchemy ORM model untuk tabel users.
 
 import enum
 from datetime import datetime, timezone
+from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, String
+from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from databaseConfig import Base
 
@@ -19,7 +20,8 @@ class RoleEnum(str, enum.Enum):
 class UserORM(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    id: Mapped[UUID] = mapped_column(
+        UUID, primary_key=True, index=True, default=uuid4)
     username: Mapped[str] = mapped_column(
         String(100), unique=True, nullable=True, index=True)
     email: Mapped[str] = mapped_column(

@@ -5,6 +5,7 @@ Pydantic models untuk request/response endpoint authentication.
 
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -80,7 +81,7 @@ class UpdateUserRequest(BaseModel):
 
 class UserResponse(BaseModel):
     """Data user yang dikembalikan ke client (tanpa password)."""
-    id: int
+    id: UUID
     username: str
     email: str
     full_name: str
