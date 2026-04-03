@@ -1,22 +1,24 @@
 # ------------------------------------------------------------------ #
 #  Tabel: ingestion_logs                                               #
 # ------------------------------------------------------------------ #
-from sqlalchemy import Column, DateTime, Integer, String, Text, func
+from uuid import uuid4
+from sqlalchemy import UUID, DateTime, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column
 from databaseConfig import Base
 
 
 class IngestionLogORM(Base):
     __tablename__ = "ingestion_logs"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    sheet_url = Column(Text, nullable=False)
-    sheet_id = Column(String(255), nullable=True)
-    sheet_name = Column(String(255), nullable=True)
-    nama_orang = Column(String(255), nullable=True)
-    total_rows = Column(Integer, default=0)
-    ingested_count = Column(Integer, default=0)
-    failed_count = Column(Integer, default=0)
-    errors = Column(Text, nullable=True)   # JSON string
+    id: Mapped[UUID] = mapped_column(UUID, primary_key=True, index=True, default=uuid4)
+    sheet_url: Mapped[str] = mapped_column(Text, nullable=False)
+    sheet_id: Mapped[str] = mapped_column(String(255), nullable=True)
+    sheet_name: Mapped[str] = mapped_column(String(255), nullable=True)
+    nama_orang: Mapped[str] = mapped_column(String(255), nullable=True)
+    total_rows: Mapped[int] = mapped_column(Integer, default=0)
+    ingested_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    errors: Mapped[str] = mapped_column(Text, nullable=True)   # JSON string
     # success | partial | failed
-    status = Column(String(50), default="success")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    status: Mapped[str] = mapped_column(String(50), default="success")
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

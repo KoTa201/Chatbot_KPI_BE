@@ -24,7 +24,7 @@ ALGORITHM = "HS256"
 # Gunakan None pada METHOD untuk mengizinkan semua method pada path tsb.
 
 PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
-    ("POST", r"^/users/login$"),          # login
+    ("POST", r"^/api/v1/users/login$"),          # login
     (None,   r"^/docs$"),                # Swagger UI
     (None,   r"^/redoc$"),               # ReDoc
     (None,   r"^/openapi\.json$"),       # OpenAPI schema
