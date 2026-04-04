@@ -49,9 +49,14 @@ class GoogleSheetService:
         sheet_url: str,
         sheet_name: Optional[str] = None,
         sheet_index: int = 0,
+        header=True,
     ) -> tuple:
         """
         Ambil data dari satu sheet sebagai DataFrame + metadata.
+
+        Args:
+            header: If None, return all rows as raw DataFrame with integer columns
+                    (no header detection). Useful for KPI Master sheets.
 
         Returns:
             (DataFrame, spreadsheet_id, sheet_name_aktif, meta: dict)
@@ -62,6 +67,8 @@ class GoogleSheetService:
         worksheet = self._select_worksheet(
             spreadsheet, sheet_name, sheet_index)
 
+        if header is None:
+            return self._process_worksheet_raw(worksheet, spreadsheet_id)
         return self._process_worksheet(worksheet, spreadsheet_id)
 
     def fetch_all_sheets_as_dataframes(
@@ -177,6 +184,22 @@ class GoogleSheetService:
         df = self._build_dataframe(all_values, header_row_idx)
 
         return df, spreadsheet_id, worksheet.title, meta
+
+    def _process_worksheet_raw(
+        self,
+        worksheet: gspread.Worksheet,
+        spreadsheet_id: str,
+    ) -> tuple:
+        """Return all rows as a raw DataFrame with integer column indices."""
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Sheet '{worksheet.title}' kosong.",
+            )
+        df = pd.DataFrame(all_values)
+        df = df.replace("", None)
+        return df, spreadsheet_id, worksheet.title, {}
 
     # ------------------------------------------------------------------ #
     #  Auth                                                                #

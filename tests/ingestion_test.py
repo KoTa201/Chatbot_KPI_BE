@@ -401,3 +401,31 @@ class TestSchemas:
     def test_sheet_meta_all_optional(self):
         m = SheetMeta(nama_orang=None, bulan=None, bulan_num=None, tahun=None)
         assert m.tahun is None
+
+
+@pytest.mark.asyncio
+async def test_create_ingestion_log_with_source_type():
+    """create_ingestion_log deve aceitar e salvar source_type."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from repository.ingestionRepository import IngestionRepository
+
+    db = AsyncMock(spec=AsyncSession)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
+    with patch.object(db, "add") as mock_add:
+        repo = IngestionRepository(db)
+        await repo.create_ingestion_log(
+            sheet_url="https://docs.google.com/spreadsheets/d/X",
+            spreadsheet_id="X",
+            sheet_name="Sheet1",
+            nama_orang=None,
+            total_rows=5,
+            ingested_count=5,
+            errors=[],
+            status="success",
+            source_type="kpi_master",
+        )
+        call_args = mock_add.call_args[0][0]
+        assert call_args.source_type == "kpi_master"

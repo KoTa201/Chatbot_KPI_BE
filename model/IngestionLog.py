@@ -18,7 +18,7 @@ class IngestionLogORM(Base):
     total_rows: Mapped[int] = mapped_column(Integer, default=0)
     ingested_count: Mapped[int] = mapped_column(Integer, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, default=0)
-    errors: Mapped[str] = mapped_column(Text, nullable=True)   # JSON string
-    # success | partial | failed
+    errors: Mapped[str] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="success")
+    source_type: Mapped[str] = mapped_column(String(50), default="kpi_tracker")
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

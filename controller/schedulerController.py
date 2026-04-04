@@ -1,0 +1,80 @@
+"""
+controller/schedulerController.py
+"""
+
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from repository.schedulerRepository import SchedulerRepository
+from service.schedulerService import register_job, get_next_run_time
+
+
+class SchedulerController:
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.repo = SchedulerRepository(db)
+
+    async def get_config(self) -> dict:
+        config = await self.repo.get_config()
+        if not config:
+            return None
+        return self._to_dict(config)
+
+    async def create_config(
+        self,
+        sheet_url: str,
+        interval_value: int,
+        interval_unit: str,
+        is_enabled: bool,
+    ) -> dict:
+        existing = await self.repo.get_config()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail="Config sudah ada. Gunakan PATCH untuk mengubah.",
+            )
+        config = await self.repo.create_config(
+            sheet_url=sheet_url,
+            interval_value=interval_value,
+            interval_unit=interval_unit,
+            is_enabled=is_enabled,
+        )
+        await register_job(config)
+        next_run = get_next_run_time()
+        await self.repo.update_run_times(next_run_at=next_run)
+        config.next_run_at = next_run
+        return self._to_dict(config)
+
+    async def update_config(self, updates: dict) -> dict:
+        config = await self.repo.update_config(
+            {k: v for k, v in updates.items() if v is not None}
+        )
+        if not config:
+            raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
+        await register_job(config)
+        next_run = get_next_run_time()
+        await self.repo.update_run_times(next_run_at=next_run)
+        config.next_run_at = next_run
+        return self._to_dict(config)
+
+    async def trigger_now(self) -> dict:
+        """Manually fire the scheduled job once."""
+        from service.schedulerService import _run_ingestion_job
+        config = await self.repo.get_config()
+        if not config:
+            raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
+        await _run_ingestion_job(config.sheet_url)
+        return {"message": "Ingestion triggered successfully."}
+
+    @staticmethod
+    def _to_dict(config) -> dict:
+        return {
+            "id":             str(config.id),
+            "sheet_url":      config.sheet_url,
+            "interval_value": config.interval_value,
+            "interval_unit":  config.interval_unit,
+            "is_enabled":     config.is_enabled,
+            "last_run_at":    config.last_run_at,
+            "next_run_at":    config.next_run_at,
+        }

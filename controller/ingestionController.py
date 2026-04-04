@@ -82,6 +82,7 @@ class IngestionController:
                 ingested_count=ingested_count,
                 errors=errors,
                 status=status,
+                source_type="kpi_tracker",
             )
 
             grand_total_rows += len(df)
@@ -154,6 +155,7 @@ class IngestionController:
             ingested_count=ingested_count,
             errors=errors,
             status=status,
+            source_type="kpi_tracker",
         )
 
         return IngestionResponse(
@@ -208,22 +210,23 @@ class IngestionController:
     #  GET /ingest/logs                                                    #
     # ------------------------------------------------------------------ #
 
-    async def get_ingestion_logs(self, limit: int) -> dict:
-        logs = await self.repo.get_ingestion_logs(limit)
+    async def get_ingestion_logs(self, limit: int, source_type: Optional[str] = None) -> dict:
+        logs = await self.repo.get_ingestion_logs(limit, source_type=source_type)
         return {
             "total": len(logs),
             "logs": [
                 {
-                    "id":         l.id,
-                    "sheet_name": l.sheet_name,
-                    "nama_orang": l.nama_orang,
-                    "total_rows": l.total_rows,
-                    "ingested":   l.ingested_count,
-                    "failed":     l.failed_count,
-                    "status":     l.status,
-                    "created_at": l.created_at,
+                    "id":          log.id,
+                    "sheet_name":  log.sheet_name,
+                    "nama_orang":  log.nama_orang,
+                    "total_rows":  log.total_rows,
+                    "ingested":    log.ingested_count,
+                    "failed":      log.failed_count,
+                    "status":      log.status,
+                    "source_type": log.source_type,
+                    "created_at":  log.created_at,
                 }
-                for l in logs
+                for log in logs
             ],
         }
 
