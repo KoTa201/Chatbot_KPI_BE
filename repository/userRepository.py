@@ -5,6 +5,7 @@ Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
 """
 
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,7 +37,7 @@ class AuthRepository:
     #  Read                                                                #
     # ------------------------------------------------------------------ #
 
-    async def get_by_id(self, user_id: int) -> Optional[UserORM]:
+    async def get_by_id(self, user_id: UUID) -> Optional[UserORM]:
         result = await self.db.execute(
             select(UserORM).where(UserORM.id == user_id)
         )

@@ -1,4 +1,6 @@
 
+from uuid import UUID
+
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,11 +13,13 @@ from schema.authSchema import (
 )
 from repository.userRepository import AuthRepository
 from model.User import UserORM
+from service.authService import AuthService, require_admin
 
 
 class UserService:
     def __init__(self):
         self.repo = AuthRepository(Depends(get_db))
+        self.auth_service = AuthService()
 
         # ------------------------------------------------------------------ #
     #  User management                                                     #
@@ -37,7 +41,7 @@ class UserService:
             username=payload.username,
             email=payload.email,
             full_name=payload.full_name,
-            hashed_password=self.hash_password(payload.password),
+            hashed_password=self.auth_service.hash_password(payload.password),
             role=payload.role,
             is_active=True,
         )
@@ -54,14 +58,14 @@ class UserService:
             "users": [UserResponse.model_validate(u) for u in users],
         }
 
-    async def get_user_by_id(self, user_id: int) -> UserResponse:
-        user = await self._get_user_or_404(user_id)
+    async def get_user_by_id(self, user_id: UUID) -> UserResponse:
+        user = await self.auth_service._get_user_or_404(user_id)
         return UserResponse.model_validate(user)
 
     async def update_user(
-        self, user_id: int, payload: UpdateUserRequest
+        self, user_id: UUID, payload: UpdateUserRequest
     ) -> UserResponse:
-        user = await self._get_user_or_404(user_id)
+        user = await self.auth_service._get_user_or_404(user_id)
 
         if payload.email and payload.email != user.email:
             if await self.repo.email_exists(payload.email):
@@ -81,12 +85,12 @@ class UserService:
         updated = await self.repo.save(user)
         return UserResponse.model_validate(updated)
 
-    async def delete_user(self, user_id: int, admin_id: int) -> MessageResponse:
+    async def delete_user(self, user_id: UUID, admin_id: UUID) -> MessageResponse:
         if user_id == admin_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin tidak dapat menghapus akun sendiri.",
             )
-        user = await self._get_user_or_404(user_id)
+        user = await self.auth_service._get_user_or_404(user_id)
         await self.repo.delete_user(user)
         return MessageResponse(message=f"User '{user.username}' berhasil dihapus.")

@@ -12,6 +12,8 @@ Aturan utama:
 - Update & delete user hanya bisa dilakukan oleh admin.
 """
 
+from uuid import UUID
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -181,7 +183,7 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def create_user(
-        self, payload: UserCreateRequest
+        self, payload: UserCreateRequest, admin: UserORM
     ) -> UserResponse:
         # -- validasi input --
         if not payload.username or not payload.username.strip():
@@ -236,14 +238,8 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def get_user_by_id(
-        self, user_id: int, admin: UserORM
+        self, user_id: UUID, admin: UserORM
     ) -> UserResponse:
-        # -- validasi input --
-        if user_id < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'user_id' harus berupa bilangan positif.",
-            )
 
         # -- delegasi --
         result = await self.user_svc.get_user_by_id(user_id=user_id)
@@ -264,14 +260,9 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def update_user(
-        self, user_id: int, payload: UpdateUserRequest
+        self, user_id: UUID, payload: UpdateUserRequest, admin: UserORM
     ) -> UserResponse:
         # -- validasi input --
-        if user_id < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'user_id' harus berupa bilangan positif.",
-            )
         if not any([payload.email, payload.full_name,
                     payload.role, payload.is_active is not None]):
             raise HTTPException(
@@ -318,14 +309,8 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def delete_user(
-        self, user_id: int, admin: UserORM
+        self, user_id: UUID, admin: UserORM
     ) -> MessageResponse:
-        # -- validasi input --
-        if user_id < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'user_id' harus berupa bilangan positif.",
-            )
 
         # -- delegasi --
         result = await self.user_svc.delete_user(

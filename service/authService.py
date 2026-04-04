@@ -68,9 +68,10 @@ class AuthService:
     """
 
     def __init__(self):
+        self.repo = AuthRepository(Depends(get_db))
         pass
 
-    async def _get_user_or_404(self, user_id: int) -> UserORM:
+    async def _get_user_or_404(self, user_id: UUID) -> UserORM:
         user = await self.repo.get_by_id(user_id)
         if not user:
             raise HTTPException(
