@@ -23,6 +23,21 @@ jobs:
         run: |
           pip install -r requirement.txt
           pip install pytest
+      - name: Create .env file
+        run: |
+          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env
+          echo "GOOGLE_CREDENTIALS_PATH=chatbotkpi-491800-2ff5e01549b5.json" >> .env
+          echo "APP_ENV=test" >> .env
+          echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+          echo "ACCESS_TOKEN_EXPIRE_MINUTES=60" >> .env
+          echo "REFRESH_SECRET_KEY=${{ secrets.REFRESH_SECRET_KEY }}" >> .env
+          echo "REFRESH_TOKEN_EXPIRE_DAYS=7" >> .env
+          echo "RESET_SECRET_KEY=${{ secrets.RESET_SECRET_KEY }}" >> .env
+          echo "SMTP_FROM=Chatbot KPI <chatbotkpi@example.com>" >> .env
+          echo "SMTP_HOST=sandbox.smtp.mailtrap.io" >> .env
+          echo "SMTP_PORT=587" >> .env
+          echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> .env
+          echo "SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}" >> .env
 
       - name: Run tests
         run: |
