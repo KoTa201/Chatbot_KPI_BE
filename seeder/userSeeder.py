@@ -71,8 +71,8 @@ SEED_USERS = [
         "is_active": True,
     },
     {
-        "username": "rizky_pratama",
-        "email": "rizky.pratama@kpiapp.id",
+        "username": "Daiva",
+        "email": "daivaraditya36@gmail.com",
         "full_name": "Rizky Pratama",
         "password": "User1234",
         "role": RoleEnum.user,

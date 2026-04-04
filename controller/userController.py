@@ -27,7 +27,15 @@ from schema.authSchema import (
     UserCreateRequest,
     UserResponse,
 )
-from service.userService import AuthService
+from service.authService import AuthService
+from service.userService import UserService
+# Tambahkan import schema baru
+from schema.authSchema import (
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ResetTokenResponse,
+    VerifyResetPinRequest,
+)
 
 
 class AuthController:
@@ -36,6 +44,7 @@ class AuthController:
         self.db = db
         self.repo = AuthRepository(db)
         self.svc = AuthService()
+        self.user_svc = UserService()
 
     # ------------------------------------------------------------------ #
     #  POST /auth/login                                                    #
@@ -91,6 +100,67 @@ class AuthController:
             refresh_expires_in=refresh_exp,
         )
 
+    async def forgot_password(
+        self, payload: ForgotPasswordRequest
+    ) -> MessageResponse:
+        # -- validasi input --
+        if not payload.email or not payload.email.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Field 'email' tidak boleh kosong.",
+            )
+
+        # -- delegasi --
+        result = await self.svc.request_password_reset(email=payload.email.strip(), repo=self.repo)
+
+        # -- mapping output --
+        return MessageResponse.model_validate(result)
+
+    async def verify_reset_pin(
+        self, payload: VerifyResetPinRequest
+    ) -> ResetTokenResponse:
+        # -- validasi input --
+        if not payload.pin.isdigit() or len(payload.pin) != 6:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="PIN harus berupa 6 digit angka.",
+            )
+
+        # -- delegasi --
+        result = await self.svc.verify_reset_pin(
+            email=payload.email,
+            pin=payload.pin,
+            repo=self.repo,
+        )
+
+        # -- mapping output --
+        return ResetTokenResponse.model_validate(result)
+
+    async def reset_password(
+        self, payload: ResetPasswordRequest
+    ) -> MessageResponse:
+        # -- validasi input --
+        if len(payload.new_password) < 8:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Password baru minimal 8 karakter.",
+            )
+        if not payload.reset_token or not payload.reset_token.strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Field 'reset_token' tidak boleh kosong.",
+            )
+
+        # -- delegasi --
+        result = await self.svc.reset_password(
+            reset_token=payload.reset_token.strip(),
+            new_password=payload.new_password,
+            repo=self.repo,
+        )
+
+        # -- mapping output --
+        return MessageResponse.model_validate(result)
+
     # ------------------------------------------------------------------ #
     #  POST /auth/logout                                                   #
     # ------------------------------------------------------------------ #
@@ -110,56 +180,83 @@ class AuthController:
     #  POST /auth/users  (admin only)                                      #
     # ------------------------------------------------------------------ #
 
-    async def create_user(self, payload: UserCreateRequest, admin: UserORM) -> UserResponse:
-        if await self.repo.username_exists(payload.username):
+    async def create_user(
+        self, payload: UserCreateRequest
+    ) -> UserResponse:
+        # -- validasi input --
+        if not payload.username or not payload.username.strip():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Username '{payload.username}' sudah digunakan.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Field 'username' tidak boleh kosong.",
             )
-        if await self.repo.email_exists(payload.email):
+        if not payload.email or not payload.email.strip():
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Email '{payload.email}' sudah terdaftar.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Field 'email' tidak boleh kosong.",
             )
 
-        new_user = UserORM(
-            username=payload.username,
-            email=payload.email,
-            full_name=payload.full_name,
-            hashed_password=self.svc.hash_password(payload.password),
-            role=payload.role,
-            is_active=True,
-        )
-        created = await self.repo.create_user(new_user)
-        return UserResponse.model_validate(created)
+        # -- delegasi --
+        result = await self.user_svc.create_user(payload=payload)
+
+        # -- validasi & mapping output --
+        return UserResponse.model_validate(result)
 
     # ------------------------------------------------------------------ #
     #  GET /auth/users  (admin only)                                       #
     # ------------------------------------------------------------------ #
 
-    async def get_all_users(self, limit: int, offset: int, admin: UserORM) -> dict:
-        users = await self.repo.get_all_users(limit=limit, offset=offset)
-        total = await self.repo.count_all_users()
+    async def get_all_users(
+        self, limit: int, offset: int, admin: UserORM
+    ) -> dict:
+        # -- validasi input --
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'limit' harus antara 1 dan 100.",
+            )
+        if offset < 0:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'offset' tidak boleh negatif.",
+            )
+
+        # -- delegasi --
+        result = await self.user_svc.get_all_users(limit=limit, offset=offset)
+
+        # -- validasi & mapping output --
         return {
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "users": [UserResponse.model_validate(u) for u in users],
+            "total": result["total"],
+            "limit": result["limit"],
+            "offset": result["offset"],
+            "users": [UserResponse.model_validate(u) for u in result["users"]],
         }
 
     # ------------------------------------------------------------------ #
     #  GET /auth/users/{user_id}  (admin only)                             #
     # ------------------------------------------------------------------ #
 
-    async def get_user_by_id(self, user_id: int, admin: UserORM) -> UserResponse:
-        user = await self._get_user_or_404(user_id)
-        return UserResponse.model_validate(user)
+    async def get_user_by_id(
+        self, user_id: int, admin: UserORM
+    ) -> UserResponse:
+        # -- validasi input --
+        if user_id < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'user_id' harus berupa bilangan positif.",
+            )
+
+        # -- delegasi --
+        result = await self.user_svc.get_user_by_id(user_id=user_id)
+
+        # -- validasi & mapping output --
+        return UserResponse.model_validate(result)
 
     # ------------------------------------------------------------------ #
     #  GET /auth/me                                                        #
     # ------------------------------------------------------------------ #
 
     async def get_me(self, current_user: UserORM) -> UserResponse:
+        # Tidak ada input dari client, langsung mapping dari injected user
         return UserResponse.model_validate(current_user)
 
     # ------------------------------------------------------------------ #
@@ -167,27 +264,26 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def update_user(
-        self, user_id: int, payload: UpdateUserRequest, admin: UserORM
+        self, user_id: int, payload: UpdateUserRequest
     ) -> UserResponse:
-        user = await self._get_user_or_404(user_id)
+        # -- validasi input --
+        if user_id < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'user_id' harus berupa bilangan positif.",
+            )
+        if not any([payload.email, payload.full_name,
+                    payload.role, payload.is_active is not None]):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Tidak ada field yang diupdate.",
+            )
 
-        if payload.email and payload.email != user.email:
-            if await self.repo.email_exists(payload.email):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Email '{payload.email}' sudah digunakan oleh user lain.",
-                )
-            user.email = payload.email
+        # -- delegasi --
+        result = await self.user_svc.update_user(user_id=user_id, payload=payload)
 
-        if payload.full_name is not None:
-            user.full_name = payload.full_name
-        if payload.role is not None:
-            user.role = payload.role
-        if payload.is_active is not None:
-            user.is_active = payload.is_active
-
-        updated = await self.repo.save(user)
-        return UserResponse.model_validate(updated)
+        # -- validasi & mapping output --
+        return UserResponse.model_validate(result)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/me/change-password                                       #
@@ -196,45 +292,46 @@ class AuthController:
     async def change_password(
         self, payload: ChangePasswordRequest, current_user: UserORM
     ) -> MessageResponse:
-        if not self.svc.verify_password(payload.old_password, current_user.hashed_password):
+        # -- validasi input --
+        if not payload.old_password or not payload.new_password:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password lama tidak sesuai.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Password lama dan baru wajib diisi.",
             )
-        if payload.old_password == payload.new_password:
+        if len(payload.new_password) < 8:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password baru tidak boleh sama dengan password lama.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Password baru minimal 8 karakter.",
             )
 
-        current_user.hashed_password = self.svc.hash_password(
-            payload.new_password)
-        await self.repo.save(current_user)
-        return MessageResponse(message="Password berhasil diubah.")
+        # -- delegasi --
+        result = await self.svc.change_password(
+            payload=payload,
+            current_user=current_user,
+        )
+
+        # -- validasi & mapping output --
+        return MessageResponse.model_validate(result)
 
     # ------------------------------------------------------------------ #
     #  DELETE /auth/users/{user_id}  (admin only)                          #
     # ------------------------------------------------------------------ #
 
-    async def delete_user(self, user_id: int, admin: UserORM) -> MessageResponse:
-        if user_id == admin.id:
+    async def delete_user(
+        self, user_id: int, admin: UserORM
+    ) -> MessageResponse:
+        # -- validasi input --
+        if user_id < 1:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Admin tidak dapat menghapus akun sendiri.",
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'user_id' harus berupa bilangan positif.",
             )
-        user = await self._get_user_or_404(user_id)
-        await self.repo.delete_user(user)
-        return MessageResponse(message=f"User '{user.username}' berhasil dihapus.")
 
-    # ------------------------------------------------------------------ #
-    #  Private helpers                                                     #
-    # ------------------------------------------------------------------ #
+        # -- delegasi --
+        result = await self.user_svc.delete_user(
+            user_id=user_id,
+            admin_id=admin.id,
+        )
 
-    async def _get_user_or_404(self, user_id: int) -> UserORM:
-        user = await self.repo.get_by_id(user_id)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User dengan ID {user_id} tidak ditemukan.",
-            )
-        return user
+        # -- validasi & mapping output --
+        return MessageResponse.model_validate(result)

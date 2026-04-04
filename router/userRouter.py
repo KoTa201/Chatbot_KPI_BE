@@ -32,8 +32,12 @@ from schema.authSchema import (
     UpdateUserRequest,
     UserCreateRequest,
     UserResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ResetTokenResponse,
+    VerifyResetPinRequest,
 )
-from service.userService import get_current_user, require_admin
+from service.authService import get_current_user, require_admin
 
 router = APIRouter()
 
@@ -70,6 +74,30 @@ async def refresh(
 ):
     controller = AuthController(db)
     return await controller.refresh(payload)
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await AuthController(db).forgot_password(payload)
+
+
+@router.post("/verify-reset-pin", response_model=ResetTokenResponse)
+async def verify_reset_pin(
+    payload: VerifyResetPinRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await AuthController(db).verify_reset_pin(payload)
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    payload: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    return await AuthController(db).reset_password(payload)
 
 
 @router.post(
