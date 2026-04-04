@@ -53,7 +53,7 @@ NOT_FOUND_ID = "00000000-0000-0000-0000-000000009999"   # dijamin tidak ada di D
 # AuthRepository yg di-import controller
 _REPO = "controller.userController.AuthRepository"
 # AuthService (verify_password ada di sini)
-_SVC = "service.userService.AuthService"
+_SVC = "service.authService.AuthService"
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +126,7 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 def _make_tokens(user_id: uuid.UUID = USER_ID, role: str = "user"):
     """Pasangan (access_token, refresh_token) nyata dari AuthService."""
     from model.User import RoleEnum
-    from service.userService import AuthService
+    from service.authService import AuthService
 
     svc = AuthService()
     access, _ = svc.create_access_token(
@@ -141,7 +141,7 @@ def _make_admin_tokens():
 
 def _expired_access_token():
     from model.User import RoleEnum
-    from service.userService import AuthService
+    from service.authService import AuthService
     svc = AuthService()
     token, _ = svc.create_access_token(
         user_id=USER_ID, username="testuser",
@@ -151,7 +151,7 @@ def _expired_access_token():
 
 
 def _expired_refresh_token():
-    from service.userService import AuthService
+    from service.authService import AuthService
     svc = AuthService()
     token, _ = svc.create_refresh_token(
         user_id=USER_ID, expires_delta=timedelta(seconds=-1),
@@ -947,7 +947,7 @@ class TestDeleteUser:
 class TestAuthServiceUnit:
 
     def test_hash_dan_verify_password(self):
-        from service.userService import AuthService
+        from service.authService import AuthService
         svc = AuthService()
         hashed = svc.hash_password("MySecret1")
         assert svc.verify_password("MySecret1", hashed) is True
@@ -955,7 +955,7 @@ class TestAuthServiceUnit:
 
     def test_create_access_token_berisi_field_wajib(self):
         from model.User import RoleEnum
-        from service.userService import AuthService, ALGORITHM
+        from service.authService import AuthService, ALGORITHM
         from jose import jwt
         from config import settings
 
@@ -973,7 +973,7 @@ class TestAuthServiceUnit:
         assert exp > 0
 
     def test_create_refresh_token_berisi_field_minimal(self):
-        from service.userService import AuthService, ALGORITHM
+        from service.authService import AuthService, ALGORITHM
         from jose import jwt
         from config import settings
 
@@ -990,7 +990,7 @@ class TestAuthServiceUnit:
 
     def test_decode_access_token_tolak_refresh_token(self):
         from fastapi import HTTPException
-        from service.userService import AuthService
+        from service.authService import AuthService
 
         svc = AuthService()
         _, refresh = _make_tokens()
@@ -1001,7 +1001,7 @@ class TestAuthServiceUnit:
 
     def test_decode_refresh_token_tolak_access_token(self):
         from fastapi import HTTPException
-        from service.userService import AuthService
+        from service.authService import AuthService
 
         svc = AuthService()
         access, _ = _make_tokens()
@@ -1012,7 +1012,7 @@ class TestAuthServiceUnit:
 
     def test_decode_token_kadaluarsa(self):
         from fastapi import HTTPException
-        from service.userService import AuthService
+        from service.authService import AuthService
 
         svc = AuthService()
         expired = _expired_access_token()
@@ -1023,7 +1023,7 @@ class TestAuthServiceUnit:
 
     @pytest.mark.asyncio
     async def test_authenticate_user_sukses(self):
-        from service.userService import AuthService
+        from service.authService import AuthService
 
         svc = AuthService()
         mock_user = _make_user()
@@ -1037,7 +1037,7 @@ class TestAuthServiceUnit:
 
     @pytest.mark.asyncio
     async def test_rotate_tokens_revoke_lama_terbit_baru(self):
-        from service.userService import AuthService
+        from service.authService import AuthService
 
         svc = AuthService()
         mock_user = _make_user()
@@ -1058,7 +1058,7 @@ class TestAuthServiceUnit:
     @pytest.mark.asyncio
     async def test_rotate_tokens_reuse_ditolak(self):
         from fastapi import HTTPException
-        from service.userService import AuthService
+        from service.authService import AuthService
 
         svc = AuthService()
         mock_repo = MagicMock()
