@@ -27,6 +27,9 @@ ALGORITHM = "HS256"
 PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
     ("OPTIONS", r"^/api/v1"),             # CORS preflight for all API routes
     ("POST", r"^/api/v1/users/login$"),   # login
+    ("POST", r"^/api/v1/users/forgot-password$"),  # forgot password
+    ("POST", r"^/api/v1/users/verify-reset-pin$"),  # verify reset pin
+    ("POST", r"^/api/v1/users/reset-password$"),   # reset password
     (None,   r"^/docs$"),                 # Swagger UI
     (None,   r"^/redoc$"),                # ReDoc
     (None,   r"^/openapi\.json$"),        # OpenAPI schema

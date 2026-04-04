@@ -118,3 +118,24 @@ class TokenResponse(BaseModel):
     refresh_expires_in: int | None = None
     # None saat /refresh (tidak perlu kirim ulang)
     user: UserResponse | None = None
+
+# Tambahkan ke file schema yang sudah ada
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyResetPinRequest(BaseModel):
+    email: EmailStr
+    pin: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str = Field(..., min_length=8)
+
+
+class ResetTokenResponse(BaseModel):
+    reset_token: str
+    expires_in: int  # detik

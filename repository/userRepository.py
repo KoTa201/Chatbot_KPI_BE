@@ -8,6 +8,9 @@ from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from model.PasswordReset import PasswordResetORM
+from datetime import datetime, timezone
+from sqlalchemy import delete, select
 
 from model.User import UserORM
 from model.RevokedToken import RevokedTokenORM          # ← model baru
@@ -134,3 +137,40 @@ class AuthRepository:
             select(RevokedTokenORM.id).where(RevokedTokenORM.token == token)
         )
         return result.scalar_one_or_none() is not None
+
+    async def get_active_reset_pin(self, user_id: int) -> PasswordResetORM | None:
+        """Ambil PIN reset aktif (belum dipakai, belum expired)."""
+        now = datetime.now(timezone.utc)
+        result = await self.db.execute(
+            select(PasswordResetORM)
+            .where(
+                PasswordResetORM.user_id == user_id,
+                PasswordResetORM.expires_at > now,
+                PasswordResetORM.used_at.is_(None),
+            )
+            .order_by(PasswordResetORM.expires_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_reset_pin(self, record: PasswordResetORM) -> PasswordResetORM:
+        """Hapus PIN lama user (jika ada) lalu simpan yang baru."""
+        await self.db.execute(
+            delete(PasswordResetORM).where(
+                PasswordResetORM.user_id == record.user_id)
+        )
+        self.db.add(record)
+        await self.db.commit()
+        await self.db.refresh(record)
+        return record
+
+    async def mark_reset_pin_used(self, record: PasswordResetORM) -> None:
+        """Tandai PIN sebagai sudah dipakai."""
+        record.used_at = datetime.now(timezone.utc)
+        await self.db.commit()
+
+    async def get_by_email(self, email: str) -> UserORM | None:
+        result = await self.db.execute(
+            select(UserORM).where(UserORM.email == email)
+        )
+        return result.scalar_one_or_none()

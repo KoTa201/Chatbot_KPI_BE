@@ -5,11 +5,15 @@ SQLAlchemy ORM model untuk tabel users.
 
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from databaseConfig import Base
+from model.PasswordReset import PasswordResetORM
+if TYPE_CHECKING:
+    from model.PasswordReset import PasswordResetORM
 
 
 class RoleEnum(str, enum.Enum):
@@ -42,6 +46,10 @@ class UserORM(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+
+    password_resets: Mapped[list["PasswordResetORM"]] = relationship(
+        "PasswordResetORM", back_populates="user", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
