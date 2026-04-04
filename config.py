@@ -4,6 +4,9 @@ class Settings:
     APP_ENV = "development"
     SECRET_KEY = "daffa-kampret-123"
     ACCESS_TOKEN_EXPIRE_MINUTES = 60
+    # secret terpisah, bukan SECRET_KEY yang sama
+    REFRESH_SECRET_KEY = "chatbot-kpi-amani-123"
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
 
 settings = Settings()

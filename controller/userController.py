@@ -5,7 +5,9 @@ untuk semua endpoint authentication & user management.
 
 Aturan utama:
 - Registrasi user HANYA bisa dilakukan oleh user dengan role admin.
-- Login terbuka untuk semua user aktif.
+- Login terbuka untuk semua user aktif, mengembalikan access + refresh token.
+- Refresh token dipakai untuk mendapatkan pasangan token baru (rotation).
+- Logout merevoke refresh token aktif.
 - Ganti password hanya untuk diri sendiri.
 - Update & delete user hanya bisa dilakukan oleh admin.
 """
@@ -19,6 +21,7 @@ from schema.authSchema import (
     ChangePasswordRequest,
     LoginRequest,
     MessageResponse,
+    RefreshRequest,         # ← schema baru
     TokenResponse,
     UpdateUserRequest,
     UserCreateRequest,
@@ -40,7 +43,7 @@ class AuthController:
 
     async def login(self, payload: LoginRequest) -> TokenResponse:
         """
-        Verifikasi credential dan kembalikan JWT access token.
+        Verifikasi credential dan kembalikan access token + refresh token.
         Terbuka untuk semua user aktif tanpa autentikasi sebelumnya.
         """
         user = await self.svc.authenticate_user(
@@ -49,32 +52,65 @@ class AuthController:
             repo=self.repo,
         )
 
-        token, expires_in = self.svc.create_access_token(
+        access_token, expires_in = self.svc.create_access_token(
             user_id=user.id,
             username=user.username,
             role=user.role,
         )
+        refresh_token, refresh_expires_in = self.svc.create_refresh_token(
+            user_id=user.id,
+        )
 
         return TokenResponse(
-            access_token=token,
+            access_token=access_token,
             expires_in=expires_in,
+            refresh_token=refresh_token,
+            refresh_expires_in=refresh_expires_in,
             user=UserResponse.model_validate(user),
         )
+
+    # ------------------------------------------------------------------ #
+    #  POST /auth/refresh                                                  #
+    # ------------------------------------------------------------------ #
+
+    async def refresh(self, payload: RefreshRequest) -> TokenResponse:
+        """
+        Tukar refresh token lama dengan pasangan access + refresh token baru.
+        Token lama langsung direvoke setelah dipakai (rotation).
+        Raise HTTP 401 jika token tidak valid atau sudah direvoke.
+        """
+        new_access, access_exp, new_refresh, refresh_exp = await self.svc.rotate_tokens(
+            refresh_token=payload.refresh_token,
+            repo=self.repo,
+        )
+
+        return TokenResponse(
+            access_token=new_access,
+            expires_in=access_exp,
+            refresh_token=new_refresh,
+            refresh_expires_in=refresh_exp,
+        )
+
+    # ------------------------------------------------------------------ #
+    #  POST /auth/logout                                                   #
+    # ------------------------------------------------------------------ #
+
+    async def logout(self, payload: RefreshRequest) -> MessageResponse:
+        """
+        Revoke refresh token agar tidak bisa dipakai ulang.
+        Access token tetap berlaku sampai expired — client wajib menghapusnya sendiri.
+        """
+        await self.svc.revoke_refresh_token(
+            refresh_token=payload.refresh_token,
+            repo=self.repo,
+        )
+        return MessageResponse(message="Logout berhasil. Refresh token telah dicabut.")
 
     # ------------------------------------------------------------------ #
     #  POST /auth/users  (admin only)                                      #
     # ------------------------------------------------------------------ #
 
-    async def create_user(
-        self,
-        payload: UserCreateRequest,
-        admin: UserORM,
-    ) -> UserResponse:
-        """
-        Tambah user baru. Hanya bisa dipanggil oleh admin.
-        Validasi duplikasi username & email sebelum insert.
-        """
-        # Validasi duplikasi
+    async def create_user(self, payload: UserCreateRequest, admin: UserORM) -> UserResponse:
         if await self.repo.username_exists(payload.username):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -101,13 +137,7 @@ class AuthController:
     #  GET /auth/users  (admin only)                                       #
     # ------------------------------------------------------------------ #
 
-    async def get_all_users(
-        self,
-        limit: int,
-        offset: int,
-        admin: UserORM,
-    ) -> dict:
-        """Ambil daftar semua user dengan pagination. Hanya untuk admin."""
+    async def get_all_users(self, limit: int, offset: int, admin: UserORM) -> dict:
         users = await self.repo.get_all_users(limit=limit, offset=offset)
         total = await self.repo.count_all_users()
         return {
@@ -122,7 +152,6 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def get_user_by_id(self, user_id: int, admin: UserORM) -> UserResponse:
-        """Ambil detail satu user berdasarkan ID. Hanya untuk admin."""
         user = await self._get_user_or_404(user_id)
         return UserResponse.model_validate(user)
 
@@ -131,7 +160,6 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def get_me(self, current_user: UserORM) -> UserResponse:
-        """Kembalikan profil user yang sedang login."""
         return UserResponse.model_validate(current_user)
 
     # ------------------------------------------------------------------ #
@@ -139,15 +167,8 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def update_user(
-        self,
-        user_id: int,
-        payload: UpdateUserRequest,
-        admin: UserORM,
+        self, user_id: int, payload: UpdateUserRequest, admin: UserORM
     ) -> UserResponse:
-        """
-        Update data user (full_name, email, role, is_active).
-        Hanya admin yang dapat mengakses. Validasi duplikasi email jika diubah.
-        """
         user = await self._get_user_or_404(user_id)
 
         if payload.email and payload.email != user.email:
@@ -173,14 +194,8 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def change_password(
-        self,
-        payload: ChangePasswordRequest,
-        current_user: UserORM,
+        self, payload: ChangePasswordRequest, current_user: UserORM
     ) -> MessageResponse:
-        """
-        Ganti password diri sendiri.
-        Verifikasi old_password sebelum menyimpan password baru.
-        """
         if not self.svc.verify_password(payload.old_password, current_user.hashed_password):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -202,16 +217,11 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def delete_user(self, user_id: int, admin: UserORM) -> MessageResponse:
-        """
-        Hard-delete user berdasarkan ID. Hanya untuk admin.
-        Admin tidak dapat menghapus akunnya sendiri.
-        """
         if user_id == admin.id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin tidak dapat menghapus akun sendiri.",
             )
-
         user = await self._get_user_or_404(user_id)
         await self.repo.delete_user(user)
         return MessageResponse(message=f"User '{user.username}' berhasil dihapus.")
@@ -221,7 +231,6 @@ class AuthController:
     # ------------------------------------------------------------------ #
 
     async def _get_user_or_404(self, user_id: int) -> UserORM:
-        """Ambil user by ID, raise HTTP 404 jika tidak ditemukan."""
         user = await self.repo.get_by_id(user_id)
         if not user:
             raise HTTPException(

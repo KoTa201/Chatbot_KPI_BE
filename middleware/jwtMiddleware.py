@@ -7,6 +7,7 @@ Middleware JWT untuk FastAPI.
 import json
 import re
 from typing import Optional
+from uuid import UUID
 
 from fastapi import Request, status
 from jose import JWTError, jwt
@@ -24,11 +25,12 @@ ALGORITHM = "HS256"
 # Gunakan None pada METHOD untuk mengizinkan semua method pada path tsb.
 
 PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
-    ("POST", r"^/api/v1/users/login$"),          # login
-    (None,   r"^/docs$"),                # Swagger UI
-    (None,   r"^/redoc$"),               # ReDoc
-    (None,   r"^/openapi\.json$"),       # OpenAPI schema
-    (None,   r"^/health$"),              # health check (jika ada)
+    ("OPTIONS", r"^/api/v1"),             # CORS preflight for all API routes
+    ("POST", r"^/api/v1/users/login$"),   # login
+    (None,   r"^/docs$"),                 # Swagger UI
+    (None,   r"^/redoc$"),                # ReDoc
+    (None,   r"^/openapi\.json$"),        # OpenAPI schema
+    (None,   r"^/health$"),               # health check (jika ada)
 ]
 
 
@@ -131,7 +133,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
 
         # 5. Inject payload ke request.state agar bisa diakses downstream
         request.state.jwt_payload = payload
-        request.state.user_id = int(user_id)
+        request.state.user_id = UUID(user_id)
         request.state.username = payload.get("username", "")
         request.state.role = payload.get("role", "")
 
