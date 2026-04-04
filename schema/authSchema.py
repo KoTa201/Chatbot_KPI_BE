@@ -104,3 +104,17 @@ class TokenResponse(BaseModel):
 class MessageResponse(BaseModel):
     """Response generik untuk operasi yang tidak mengembalikan data."""
     message: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    expires_in: int
+    # None saat rotate hanya return user-less response
+    refresh_token: str | None = None
+    refresh_expires_in: int | None = None
+    # None saat /refresh (tidak perlu kirim ulang)
+    user: UserResponse | None = None

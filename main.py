@@ -30,6 +30,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(JWTMiddleware)  # dieksekusi pertama sebelum router
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],          # sesuaikan dengan kebutuhan production
@@ -37,8 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(JWTMiddleware)  # dieksekusi pertama sebelum router
 
 app.include_router(
     ingestion.router, prefix="/api/v1/ingest", tags=["Ingestion"])

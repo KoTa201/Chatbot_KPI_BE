@@ -5,6 +5,8 @@ Semua logika request/response/validation ada di AuthController.
 
 Aturan akses:
 - POST   /auth/login                → publik
+- POST   /auth/refresh              → publik (bearer refresh token)
+- POST   /auth/logout               → publik (bearer refresh token)
 - GET    /auth/me                   → user login (semua role)
 - POST   /auth/me/change-password   → user login (semua role)
 - POST   /auth/users                → admin only
@@ -16,6 +18,7 @@ Aturan akses:
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 from controller.userController import AuthController
 from databaseConfig import get_db
@@ -24,6 +27,7 @@ from schema.authSchema import (
     ChangePasswordRequest,
     LoginRequest,
     MessageResponse,
+    RefreshRequest,         # ← schema baru
     TokenResponse,
     UpdateUserRequest,
     UserCreateRequest,
@@ -35,13 +39,13 @@ router = APIRouter()
 
 
 # ------------------------------------------------------------------ #
-#  Login                                                               #
+#  Login / Refresh / Logout                                            #
 # ------------------------------------------------------------------ #
 
 @router.post(
     "/login",
     response_model=TokenResponse,
-    summary="Login dan dapatkan JWT access token",
+    summary="Login dan dapatkan access + refresh token",
 )
 async def login(
     payload: LoginRequest,
@@ -49,6 +53,40 @@ async def login(
 ):
     controller = AuthController(db)
     return await controller.login(payload)
+
+
+@router.post(
+    "/refresh",
+    response_model=TokenResponse,
+    summary="Perbarui access token menggunakan refresh token",
+    description=(
+        "Kirim refresh token yang masih valid untuk mendapatkan "
+        "pasangan access + refresh token baru. Token lama langsung dinonaktifkan."
+    ),
+)
+async def refresh(
+    payload: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    controller = AuthController(db)
+    return await controller.refresh(payload)
+
+
+@router.post(
+    "/logout",
+    response_model=MessageResponse,
+    summary="Logout dan cabut refresh token",
+    description=(
+        "Merevoke refresh token sehingga tidak bisa dipakai ulang. "
+        "Client wajib menghapus access token dari sisi mereka sendiri."
+    ),
+)
+async def logout(
+    payload: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    controller = AuthController(db)
+    return await controller.logout(payload)
 
 
 # ------------------------------------------------------------------ #
@@ -87,7 +125,7 @@ async def change_password(
 # ------------------------------------------------------------------ #
 
 @router.post(
-    "/users",
+    "",
     response_model=UserResponse,
     status_code=201,
     summary="[Admin] Tambah user baru",
@@ -106,7 +144,7 @@ async def create_user(
 
 
 @router.get(
-    "/users",
+    "",
     response_model=dict,
     summary="[Admin] Daftar semua user",
 )
@@ -121,12 +159,12 @@ async def get_all_users(
 
 
 @router.get(
-    "/users/{user_id}",
+    "/{user_id}",
     response_model=UserResponse,
     summary="[Admin] Detail user berdasarkan ID",
 )
 async def get_user_by_id(
-    user_id: int,
+    user_id: UUID,
     admin: UserORM = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -135,12 +173,12 @@ async def get_user_by_id(
 
 
 @router.patch(
-    "/users/{user_id}",
+    "/{user_id}",
     response_model=UserResponse,
     summary="[Admin] Update data user",
 )
 async def update_user(
-    user_id: int,
+    user_id: UUID,
     payload: UpdateUserRequest,
     admin: UserORM = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
@@ -150,12 +188,12 @@ async def update_user(
 
 
 @router.delete(
-    "/users/{user_id}",
+    "/{user_id}",
     response_model=MessageResponse,
     summary="[Admin] Hapus user",
 )
 async def delete_user(
-    user_id: int,
+    user_id: UUID,
     admin: UserORM = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
