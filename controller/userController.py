@@ -46,7 +46,7 @@ class AuthController:
         self.db = db
         self.repo = AuthRepository(db)
         self.svc = AuthService()
-        self.user_svc = UserService()
+        self.user_svc = UserService(db)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/login                                                    #
