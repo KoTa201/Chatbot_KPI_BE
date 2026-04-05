@@ -1,8 +1,10 @@
 """
 seeders/user_seeder.py
 Seeder untuk mengisi tabel users dengan data awal.
-- 2 admin
-- 3 user biasa
+- 1 admin
+- 1 hrd
+- 2 kepala_divisi
+- 3 karyawan
 
 Jalankan:
     python -m seeders.user_seeder
@@ -45,21 +47,39 @@ SEED_USERS = [
         "role": RoleEnum.admin,
         "is_active": True,
     },
+    # ── HRD ────────────────────────────────────────────────────────
     {
-        "username": "admin_budi",
-        "email": "budi.admin@kpiapp.id",
-        "full_name": "Budi Santoso",
-        "password": "Admin123",
-        "role": RoleEnum.admin,
+        "username": "hrd_rina",
+        "email": "rina.hrd@kpiapp.id",
+        "full_name": "Rina Marlina",
+        "password": "Hrd12345",
+        "role": RoleEnum.hrd,
         "is_active": True,
     },
-    # ── User biasa ─────────────────────────────────────────────────
+    # ── Kepala Divisi ───────────────────────────────────────────────
+    {
+        "username": "kadiv_budi",
+        "email": "budi.kadiv@kpiapp.id",
+        "full_name": "Budi Santoso",
+        "password": "Kadiv123",
+        "role": RoleEnum.kepala_divisi,
+        "is_active": True,
+    },
+    {
+        "username": "kadiv_sari",
+        "email": "sari.kadiv@kpiapp.id",
+        "full_name": "Sari Dewi",
+        "password": "Kadiv123",
+        "role": RoleEnum.kepala_divisi,
+        "is_active": True,
+    },
+    # ── Karyawan ───────────────────────────────────────────────────
     {
         "username": "pirmadi",
         "email": "pirmadi@kpiapp.id",
         "full_name": "Pirmadi Surya",
         "password": "User1234",
-        "role": RoleEnum.user,
+        "role": RoleEnum.karyawan,
         "is_active": True,
     },
     {
@@ -67,7 +87,7 @@ SEED_USERS = [
         "email": "siti.rahayu@kpiapp.id",
         "full_name": "Siti Rahayu",
         "password": "User1234",
-        "role": RoleEnum.user,
+        "role": RoleEnum.karyawan,
         "is_active": True,
     },
     {
@@ -75,7 +95,7 @@ SEED_USERS = [
         "email": "daivaraditya36@gmail.com",
         "full_name": "Rizky Pratama",
         "password": "User1234",
-        "role": RoleEnum.user,
+        "role": RoleEnum.karyawan,
         "is_active": True,
     },
 ]
@@ -128,7 +148,7 @@ async def run_seeder() -> None:
     print("  Credential login:")
     print()
     print(f"  {'USERNAME':<20} {'PASSWORD':<12} {'ROLE'}")
-    print(f"  {'-'*20} {'-'*12} {'-'*10}")
+    print(f"  {'-'*20} {'-'*12} {'-'*15}")
     for u in SEED_USERS:
         print(f"  {u['username']:<20} {u['password']:<12} {u['role'].value}")
     print()

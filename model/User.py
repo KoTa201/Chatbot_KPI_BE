@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 class RoleEnum(str, enum.Enum):
     admin = "admin"
-    user = "user"
+    hrd = "hrd"
+    kepala_divisi = "kepala_divisi"
+    karyawan = "karyawan"
 
 
 class UserORM(Base):
@@ -33,7 +35,7 @@ class UserORM(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[RoleEnum] = mapped_column(
-        Enum(RoleEnum), default=RoleEnum.user, nullable=False)
+        Enum(RoleEnum), default=RoleEnum.karyawan, nullable=False)
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

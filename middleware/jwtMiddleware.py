@@ -1,7 +1,7 @@
 """
 middlewares/jwt_middleware.py
 Middleware JWT untuk FastAPI.
-
+Mendukung role: admin, hrd, kepala_divisi, karyawan
 """
 
 import json
@@ -19,21 +19,60 @@ from config import settings
 ALGORITHM = "HS256"
 
 # ------------------------------------------------------------------ #
+#  Role constants                                                      #
+# ------------------------------------------------------------------ #
+
+ADMIN = "admin"
+HRD = "hrd"
+KEPALA_DIVISI = "kepala_divisi"
+KARYAWAN = "karyawan"
+
+ALL_ROLES = {ADMIN, HRD, KEPALA_DIVISI, KARYAWAN}
+
+
+# ------------------------------------------------------------------ #
 #  Daftar route yang TIDAK memerlukan token                           #
 # ------------------------------------------------------------------ #
-# Format: (HTTP_METHOD, path_regex)
-# Gunakan None pada METHOD untuk mengizinkan semua method pada path tsb.
 
 PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
-    ("OPTIONS", r"^/api/v1"),             # CORS preflight for all API routes
-    ("POST", r"^/api/v1/users/login$"),   # login
-    ("POST", r"^/api/v1/users/forgot-password$"),  # forgot password
-    ("POST", r"^/api/v1/users/verify-reset-pin$"),  # verify reset pin
-    ("POST", r"^/api/v1/users/reset-password$"),   # reset password
-    (None,   r"^/docs$"),                 # Swagger UI
-    (None,   r"^/redoc$"),                # ReDoc
-    (None,   r"^/openapi\.json$"),        # OpenAPI schema
-    (None,   r"^/health$"),               # health check (jika ada)
+    ("OPTIONS", r"^/api/v1"),
+    ("POST",    r"^/api/v1/users/login$"),
+    ("POST",    r"^/api/v1/users/forgot-password$"),
+    ("POST",    r"^/api/v1/users/verify-reset-pin$"),
+    ("POST",    r"^/api/v1/users/reset-password$"),
+    (None,      r"^/docs$"),
+    (None,      r"^/redoc$"),
+    (None,      r"^/openapi\.json$"),
+    (None,      r"^/health$"),
+]
+
+
+# ------------------------------------------------------------------ #
+#  Role-based access control (RBAC)                                   #
+#                                                                     #
+#  Format: (HTTP_METHOD, path_regex, set_of_allowed_roles)            #
+#  Gunakan None pada METHOD untuk semua method pada path tsb.         #
+#  Urutan penting — rule pertama yang cocok akan dipakai.             #
+# ------------------------------------------------------------------ #
+
+ROLE_ROUTES: list[tuple[Optional[str], str, set[str]]] = [
+
+    # ── User management ────────────────────────────────────────────
+    # Admin: full CRUD
+    # Login tetap boleh untuk semua role
+    ("POST",  r"^/api/v1/users/login$",                 ALL_ROLES),
+    # Refresh token tetap boleh untuk semua role
+    ("POST",  r"^/api/v1/users/refresh$",               ALL_ROLES),
+    # Logout tetap boleh untuk semua role
+    ("POST",  r"^/api/v1/users/logout$",                ALL_ROLES),
+    ("POST",  r"^/api/v1/users/me/change-password$",    ALL_ROLES),
+    ("GET",   r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
+    ("PATCH", r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
+    (None,    r"^/api/v1/users",                        {ADMIN}),
+    (None,    r"^/api/v1/chatbots",                     {ADMIN}),
+    (None,    r"^/api/v1/ingest",                       {ADMIN, HRD}),
+    (None,    r"^/api/v1/scheduler",                    {ADMIN, HRD}),
+
 ]
 
 
@@ -42,7 +81,6 @@ PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
 # ------------------------------------------------------------------ #
 
 def _is_public_route(method: str, path: str) -> bool:
-    """Return True jika kombinasi method+path termasuk public route."""
     for allowed_method, pattern in PUBLIC_ROUTES:
         if allowed_method is not None and allowed_method != method:
             continue
@@ -51,11 +89,20 @@ def _is_public_route(method: str, path: str) -> bool:
     return False
 
 
+def _get_allowed_roles(method: str, path: str) -> Optional[set[str]]:
+    """
+    Return set role yang diizinkan untuk kombinasi method+path.
+    Return None jika tidak ada rule yang cocok (berarti akses ditolak by default).
+    """
+    for allowed_method, pattern, roles in ROLE_ROUTES:
+        if allowed_method is not None and allowed_method != method:
+            continue
+        if re.match(pattern, path):
+            return roles
+    return None
+
+
 def _extract_token(authorization: Optional[str]) -> Optional[str]:
-    """
-    Ambil token dari header 'Authorization: Bearer <token>'.
-    Return None jika header tidak ada atau formatnya salah.
-    """
     if not authorization:
         return None
     parts = authorization.split()
@@ -65,10 +112,6 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
 
 
 def _decode_token(token: str) -> Optional[dict]:
-    """
-    Decode dan validasi JWT. Return payload dict jika valid,
-    None jika token expired atau signature invalid.
-    """
     try:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError:
@@ -76,7 +119,6 @@ def _decode_token(token: str) -> Optional[dict]:
 
 
 def _json_response(status_code: int, detail: str) -> Response:
-    """Buat JSON error response secara manual (tanpa FastAPI JSONResponse)."""
     body = json.dumps({"detail": detail}, ensure_ascii=False)
     return Response(
         content=body,
@@ -91,26 +133,31 @@ def _json_response(status_code: int, detail: str) -> Response:
 
 class JWTMiddleware(BaseHTTPMiddleware):
     """
-    Middleware yang memvalidasi JWT pada setiap request non-publik.
+    Middleware JWT + RBAC.
 
-    Setelah validasi berhasil, payload token disimpan di:
-        request.state.jwt_payload  → dict  (e.g. {"sub": "1", "role": "admin", ...})
-        request.state.user_id      → int
-        request.state.username     → str
-        request.state.role         → str   ("admin" | "user")
+    Alur:
+        1. Public route  → langsung lolos tanpa token
+        2. Token absent  → 401
+        3. Token invalid → 401
+        4. Role check    → 403 jika role tidak diizinkan
+        5. Lolos         → inject ke request.state, teruskan ke handler
 
-    Penggunaan di controller/dependency (opsional, jika tidak pakai get_current_user):
-        def some_endpoint(request: Request):
-            user_id = request.state.user_id
-            role    = request.state.role
+    request.state setelah lolos:
+        .jwt_payload  → dict
+        .user_id      → UUID
+        .username     → str
+        .role         → str  ("admin" | "hrd" | "kepala_divisi" | "karyawan")
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # 1. Lewati validasi untuk public routes
-        if _is_public_route(request.method, request.url.path):
+        path = request.url.path
+        method = request.method
+
+        # 1. Public routes — skip semua validasi
+        if _is_public_route(method, path):
             return await call_next(request)
 
-        # 2. Ambil token dari header Authorization
+        # 2. Ambil & validasi token
         token = _extract_token(request.headers.get("Authorization"))
         if not token:
             return _json_response(
@@ -118,7 +165,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
                 "Token tidak ditemukan. Sertakan header: Authorization: Bearer <token>",
             )
 
-        # 3. Decode dan validasi token
+        # 3. Decode token
         payload = _decode_token(token)
         if payload is None:
             return _json_response(
@@ -126,7 +173,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
                 "Token tidak valid atau sudah kadaluarsa.",
             )
 
-        # 4. Pastikan klaim wajib ada di dalam payload
+        # 4. Klaim wajib
         user_id = payload.get("sub")
         if not user_id:
             return _json_response(
@@ -134,11 +181,28 @@ class JWTMiddleware(BaseHTTPMiddleware):
                 "Token tidak mengandung identitas user.",
             )
 
-        # 5. Inject payload ke request.state agar bisa diakses downstream
+        role: str = payload.get("role", "")
+
+        # 5. RBAC — cek apakah role diizinkan mengakses endpoint ini
+        allowed_roles = _get_allowed_roles(method, path)
+
+        if allowed_roles is None:
+            # Tidak ada rule yang cocok → tolak (deny by default)
+            return _json_response(
+                status.HTTP_403_FORBIDDEN,
+                f"Akses ditolak: endpoint tidak terdaftar dalam kebijakan akses.",
+            )
+
+        if role not in allowed_roles:
+            return _json_response(
+                status.HTTP_403_FORBIDDEN,
+                f"Akses ditolak: role '{role}' tidak memiliki izin untuk endpoint ini.",
+            )
+
+        # 6. Inject ke request.state
         request.state.jwt_payload = payload
         request.state.user_id = UUID(user_id)
         request.state.username = payload.get("username", "")
-        request.state.role = payload.get("role", "")
+        request.state.role = role
 
-        # 6. Teruskan request ke handler berikutnya
         return await call_next(request)
