@@ -1,10 +1,9 @@
 
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from databaseConfig import get_db
 from schema.authSchema import (
     MessageResponse,
     UpdateUserRequest,
@@ -17,8 +16,8 @@ from service.authService import AuthService, require_admin
 
 
 class UserService:
-    def __init__(self):
-        self.repo = AuthRepository(Depends(get_db))
+    def __init__(self, db: AsyncSession):
+        self.repo = AuthRepository(db)
         self.auth_service = AuthService()
 
         # ------------------------------------------------------------------ #

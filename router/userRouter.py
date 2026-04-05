@@ -1,20 +1,3 @@
-"""
-routers/auth.py
-Mendefinisikan route endpoint authentication & user management.
-Semua logika request/response/validation ada di AuthController.
-
-Aturan akses:
-- POST   /auth/login                → publik
-- POST   /auth/refresh              → publik (bearer refresh token)
-- POST   /auth/logout               → publik (bearer refresh token)
-- GET    /auth/me                   → user login (semua role)
-- POST   /auth/me/change-password   → user login (semua role)
-- POST   /auth/users                → admin only
-- GET    /auth/users                → admin only
-- GET    /auth/users/{id}           → admin only
-- PATCH  /auth/users/{id}           → admin only
-- DELETE /auth/users/{id}           → admin only
-"""
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
