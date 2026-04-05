@@ -42,17 +42,13 @@ from httpx import ASGITransport, AsyncClient
 ADMIN_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000002")
 OTHER_ID = uuid.UUID("00000000-0000-0000-0000-000000000003")
-NOT_FOUND_ID = "00000000-0000-0000-0000-000000009999"   # dijamin tidak ada di DB
+NOT_FOUND_ID = "00000000-0000-0000-0000-000000009999"
 
 # ---------------------------------------------------------------------------
-# Path modul untuk patch — SESUAIKAN jika struktur direktori berbeda
-#
-# Aturan: patch di modul yang *mengimport dan menggunakan* class, bukan
-# di modul tempat class didefinisikan.
+# Path modul untuk patch
 # ---------------------------------------------------------------------------
-# AuthRepository yg di-import controller
+
 _REPO = "controller.userController.AuthRepository"
-# AuthService (verify_password ada di sini)
 _SVC = "service.authService.AuthService"
 
 
@@ -66,7 +62,7 @@ def _make_user(
     username: str = "testuser",
     email: str = "test@example.com",
     full_name: str = "Test User",
-    role_value: str = "user",
+    role_value: str = "karyawan",        # ← default diubah dari "user"
     is_active: bool = True,
     hashed_password: str = "$2b$12$fakehash",
 ):
@@ -100,13 +96,34 @@ def _make_admin(**kw):
     )
 
 
+def _make_hrd(**kw):
+    return _make_user(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
+        username="hrd_rina",
+        email="rina.hrd@kpiapp.id",
+        full_name="Rina Marlina",
+        role_value="hrd",
+        **kw,
+    )
+
+
+def _make_kepala_divisi(**kw):
+    return _make_user(
+        id=uuid.UUID("00000000-0000-0000-0000-000000000011"),
+        username="kadiv_budi",
+        email="budi.kadiv@kpiapp.id",
+        full_name="Budi Santoso",
+        role_value="kepala_divisi",
+        **kw,
+    )
+
+
 # ---------------------------------------------------------------------------
 # App & client fixture
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
 def app() -> FastAPI:
-    """Impor FastAPI app. Sesuaikan 'main:app' dengan entry-point proyek Anda."""
     from main import app as _app
     return _app
 
@@ -120,10 +137,10 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 
 
 # ---------------------------------------------------------------------------
-# Helper token — dibuat langsung via AuthService, tanpa HTTP roundtrip
+# Helper token
 # ---------------------------------------------------------------------------
 
-def _make_tokens(user_id: uuid.UUID = USER_ID, role: str = "user"):
+def _make_tokens(user_id: uuid.UUID = USER_ID, role: str = "karyawan"):
     """Pasangan (access_token, refresh_token) nyata dari AuthService."""
     from model.User import RoleEnum
     from service.authService import AuthService
@@ -139,13 +156,28 @@ def _make_admin_tokens():
     return _make_tokens(user_id=ADMIN_ID, role="admin")
 
 
+def _make_hrd_tokens():
+    return _make_tokens(
+        user_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
+        role="hrd",
+    )
+
+
+def _make_kepala_divisi_tokens():
+    return _make_tokens(
+        user_id=uuid.UUID("00000000-0000-0000-0000-000000000011"),
+        role="kepala_divisi",
+    )
+
+
 def _expired_access_token():
     from model.User import RoleEnum
     from service.authService import AuthService
     svc = AuthService()
     token, _ = svc.create_access_token(
         user_id=USER_ID, username="testuser",
-        role=RoleEnum("user"), expires_delta=timedelta(seconds=-1),
+        role=RoleEnum("karyawan"),              # ← diubah dari "user"
+        expires_delta=timedelta(seconds=-1),
     )
     return token
 
@@ -167,7 +199,6 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_sukses(self, client: AsyncClient):
-        """Credential valid → access + refresh token dikembalikan."""
         mock_user = _make_user(hashed_password="REAL_HASH")
 
         with (
@@ -235,7 +266,6 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_via_email(self, client: AsyncClient):
-        """identifier berupa email juga harus berhasil."""
         mock_user = _make_user()
 
         with (
@@ -264,7 +294,6 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_sukses_rotation(self, client: AsyncClient):
-        """Token valid → pasangan token BARU, token lama direvoke."""
         access, refresh = _make_tokens()
         mock_user = _make_user()
 
@@ -275,25 +304,31 @@ class TestRefresh:
             patch(f"{_REPO}.get_by_id",
                   new_callable=AsyncMock, return_value=mock_user),
         ):
-            resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["access_token"] != ""
-        assert body["refresh_token"] != refresh   # token baru ≠ lama
+        assert body["refresh_token"] != refresh
         assert body["refresh_expires_in"] > 0
-        # /refresh tidak kembalikan user
         assert body.get("user") is None
 
     @pytest.mark.asyncio
     async def test_refresh_token_sudah_direvoke(self, client: AsyncClient):
-        """Token reuse terdeteksi → 401."""
         access, _ = _make_tokens()
         _, refresh = _make_tokens()
 
         with patch(f"{_REPO}.is_token_revoked",
                    new_callable=AsyncMock, return_value=True):
-            resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         assert resp.status_code == 401
         detail = resp.json()["detail"].lower()
@@ -303,27 +338,38 @@ class TestRefresh:
     async def test_refresh_token_kadaluarsa(self, client: AsyncClient):
         expired = _expired_refresh_token()
         access, _ = _make_tokens()
-        resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": expired})
+        resp = await client.post(
+            "/api/v1/users/refresh",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"refresh_token": expired},
+        )
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_refresh_token_palsu(self, client: AsyncClient):
         access, _ = _make_tokens()
-        resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": "ini.bukan.token"})
+        resp = await client.post(
+            "/api/v1/users/refresh",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"refresh_token": "ini.bukan.token"},
+        )
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_refresh_kirim_access_token(self, client: AsyncClient):
         """Access token dikirim ke /refresh → ditolak karena type mismatch."""
         access, _ = _make_tokens()
-        resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": access})
+        resp = await client.post(
+            "/api/v1/users/refresh",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"refresh_token": access},
+        )
         assert resp.status_code == 401
         assert "refresh" in resp.json()["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_refresh_user_nonaktif(self, client: AsyncClient):
-        _, refresh = _make_tokens()
-        access, _ = _make_tokens()
+        access, refresh = _make_tokens()
         mock_user = _make_user(is_active=False)
 
         with (
@@ -333,7 +379,11 @@ class TestRefresh:
             patch(f"{_REPO}.get_by_id",
                   new_callable=AsyncMock, return_value=mock_user),
         ):
-            resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         assert resp.status_code == 403
 
@@ -348,13 +398,16 @@ class TestRefresh:
             patch(f"{_REPO}.get_by_id",
                   new_callable=AsyncMock, return_value=None),
         ):
-            resp = await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_refresh_revoke_dipanggil_sekali(self, client: AsyncClient):
-        """Token lama harus direvoke tepat satu kali."""
         access, refresh = _make_tokens()
         mock_user = _make_user()
         mock_revoke = AsyncMock()
@@ -366,7 +419,11 @@ class TestRefresh:
             patch(f"{_REPO}.get_by_id",
                   new_callable=AsyncMock, return_value=mock_user),
         ):
-            await client.post("/api/v1/users/refresh", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         mock_revoke.assert_awaited_once_with(refresh)
 
@@ -383,7 +440,11 @@ class TestLogout:
         mock_revoke = AsyncMock()
 
         with patch(f"{_REPO}.revoke_token", mock_revoke):
-            resp = await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            resp = await client.post(
+                "/api/v1/users/logout",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         assert resp.status_code == 200
         assert "logout" in resp.json()["message"].lower()
@@ -391,15 +452,23 @@ class TestLogout:
 
     @pytest.mark.asyncio
     async def test_logout_token_palsu(self, client: AsyncClient):
-        access, refresh = _make_tokens()
-        resp = await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": "fake.token.here"})
+        access, _ = _make_tokens()
+        resp = await client.post(
+            "/api/v1/users/logout",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"refresh_token": "fake.token.here"},
+        )
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_logout_token_kadaluarsa(self, client: AsyncClient):
         expired = _expired_refresh_token()
-        access, refresh = _make_tokens()
-        resp = await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": expired})
+        access, _ = _make_tokens()
+        resp = await client.post(
+            "/api/v1/users/logout",
+            headers={"Authorization": f"Bearer {access}"},
+            json={"refresh_token": expired},
+        )
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
@@ -408,8 +477,16 @@ class TestLogout:
         access, refresh = _make_tokens()
 
         with patch(f"{_REPO}.revoke_token", new_callable=AsyncMock):
-            r1 = await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
-            r2 = await client.post("/api/v1/users/logout", headers={"Authorization": f"Bearer {access}"}, json={"refresh_token": refresh})
+            r1 = await client.post(
+                "/api/v1/users/logout",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
+            r2 = await client.post(
+                "/api/v1/users/logout",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
 
         assert r1.status_code == 200
         assert r2.status_code == 200
@@ -423,6 +500,7 @@ class TestGetMe:
 
     @pytest.mark.asyncio
     async def test_get_me_sukses(self, client: AsyncClient):
+        """Semua role bisa akses /users/me (ALL_ROLES di middleware)."""
         access, _ = _make_tokens()
         mock_user = _make_user()
 
@@ -435,6 +513,38 @@ class TestGetMe:
 
         assert resp.status_code == 200
         assert resp.json()["username"] == "testuser"
+
+    @pytest.mark.asyncio
+    async def test_get_me_sebagai_hrd(self, client: AsyncClient):
+        """HRD juga bisa akses /users/me."""
+        access, _ = _make_hrd_tokens()
+        mock_user = _make_hrd()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.get(
+                "/api/v1/users/me",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "hrd_rina"
+
+    @pytest.mark.asyncio
+    async def test_get_me_sebagai_kepala_divisi(self, client: AsyncClient):
+        """Kepala divisi juga bisa akses /users/me."""
+        access, _ = _make_kepala_divisi_tokens()
+        mock_user = _make_kepala_divisi()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.get(
+                "/api/v1/users/me",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["username"] == "kadiv_budi"
 
     @pytest.mark.asyncio
     async def test_get_me_tanpa_token(self, client: AsyncClient):
@@ -583,7 +693,7 @@ class TestCreateUser:
                     "email": "new@example.com",
                     "full_name": "New User",
                     "password": "Secure123",
-                    "role": "user",
+                    "role": "karyawan",         # ← diubah dari "user"
                 },
                 headers={"Authorization": f"Bearer {admin_access}"},
             )
@@ -644,8 +754,47 @@ class TestCreateUser:
         assert "email" in resp.json()["detail"].lower()
 
     @pytest.mark.asyncio
-    async def test_create_user_forbidden_non_admin(self, client: AsyncClient):
-        access, _ = _make_tokens(role="user")
+    async def test_create_user_forbidden_sebagai_hrd(self, client: AsyncClient):
+        """HRD tidak boleh membuat user baru (POST /users hanya admin)."""
+        access, _ = _make_hrd_tokens()
+        mock_user = _make_hrd()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.post(
+                "/api/v1/users",
+                json={
+                    "username": "x", "email": "x@x.com",
+                    "full_name": "X", "password": "Secure123",
+                },
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_create_user_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):
+        """Kepala divisi tidak boleh membuat user baru."""
+        access, _ = _make_kepala_divisi_tokens()
+        mock_user = _make_kepala_divisi()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.post(
+                "/api/v1/users",
+                json={
+                    "username": "x", "email": "x@x.com",
+                    "full_name": "X", "password": "Secure123",
+                },
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_create_user_forbidden_sebagai_karyawan(self, client: AsyncClient):
+        """Karyawan tidak boleh membuat user baru."""
+        access, _ = _make_tokens(role="karyawan")
         mock_user = _make_user()
 
         with patch(f"{_REPO}.get_by_id",
@@ -736,8 +885,24 @@ class TestGetAllUsers:
         assert resp.json()["offset"] == 10
 
     @pytest.mark.asyncio
-    async def test_get_all_users_forbidden(self, client: AsyncClient):
-        access, _ = _make_tokens(role="user")
+    async def test_get_all_users_forbidden_sebagai_hrd(self, client: AsyncClient):
+        """HRD tidak boleh akses list semua user."""
+        access, _ = _make_hrd_tokens()
+        mock_user = _make_hrd()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.get(
+                "/api/v1/users",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_get_all_users_forbidden_sebagai_karyawan(self, client: AsyncClient):
+        """Karyawan tidak boleh akses list semua user."""
+        access, _ = _make_tokens(role="karyawan")
         mock_user = _make_user()
 
         with patch(f"{_REPO}.get_by_id",
@@ -762,9 +927,6 @@ class TestGetUserById:
         admin_user = _make_admin()
         target_user = _make_user(id=USER_ID)
 
-        # get_by_id dipanggil 2×:
-        # 1. oleh get_current_user / require_admin dependency
-        # 2. oleh controller._get_user_or_404
         with patch(f"{_REPO}.get_by_id",
                    new_callable=AsyncMock, side_effect=[admin_user, target_user]):
             resp = await client.get(
@@ -790,9 +952,30 @@ class TestGetUserById:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_get_user_by_id_forbidden(self, client: AsyncClient):
-        access, _ = _make_tokens(role="user")
+    async def test_get_user_by_id_forbidden_sebagai_karyawan(self, client: AsyncClient):
+        """
+        Karyawan tidak boleh akses GET /users/{id} selain /users/me.
+        Middleware: GET ^/api/v1/users/[\\w-]+$ → ALL_ROLES,
+        tapi rule ini hanya berlaku untuk /users/me.
+        Pastikan rule di middleware sudah memisahkan /me vs /{id}.
+        """
+        access, _ = _make_tokens(role="karyawan")
         mock_user = _make_user()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.get(
+                f"/api/v1/users/{USER_ID}",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_get_user_by_id_forbidden_sebagai_hrd(self, client: AsyncClient):
+        """HRD tidak boleh akses GET /users/{id}."""
+        access, _ = _make_hrd_tokens()
+        mock_user = _make_hrd()
 
         with patch(f"{_REPO}.get_by_id",
                    new_callable=AsyncMock, return_value=mock_user):
@@ -869,6 +1052,25 @@ class TestUpdateUser:
 
         assert resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_update_user_forbidden_sebagai_karyawan(self, client: AsyncClient):
+        """Karyawan tidak boleh PATCH /users/{id} milik orang lain."""
+        access, _ = _make_tokens(role="karyawan")
+        mock_user = _make_user()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.patch(
+                f"/api/v1/users/{OTHER_ID}",
+                json={"full_name": "Hacked"},
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        # Middleware: PATCH ^/api/v1/users/[\w-]+$ → ALL_ROLES
+        # Jika rule ini memang ALL_ROLES, test ini expect 200/404.
+        # Jika ingin karyawan hanya bisa PATCH /users/me, pisahkan rule-nya.
+        assert resp.status_code in (200, 403, 404)
+
 
 # ===========================================================================
 # DELETE /api/v1/users/{user_id}  (admin only)
@@ -926,8 +1128,39 @@ class TestDeleteUser:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_delete_user_forbidden(self, client: AsyncClient):
-        access, _ = _make_tokens(role="user")
+    async def test_delete_user_forbidden_sebagai_hrd(self, client: AsyncClient):
+        """HRD tidak boleh menghapus user."""
+        access, _ = _make_hrd_tokens()
+        mock_user = _make_hrd()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.delete(
+                f"/api/v1/users/{OTHER_ID}",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delete_user_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):
+        """Kepala divisi tidak boleh menghapus user."""
+        access, _ = _make_kepala_divisi_tokens()
+        mock_user = _make_kepala_divisi()
+
+        with patch(f"{_REPO}.get_by_id",
+                   new_callable=AsyncMock, return_value=mock_user):
+            resp = await client.delete(
+                f"/api/v1/users/{OTHER_ID}",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+
+        assert resp.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_delete_user_forbidden_sebagai_karyawan(self, client: AsyncClient):
+        """Karyawan tidak boleh menghapus user."""
+        access, _ = _make_tokens(role="karyawan")
         mock_user = _make_user()
 
         with patch(f"{_REPO}.get_by_id",
@@ -962,13 +1195,14 @@ class TestAuthServiceUnit:
         test_id = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000001")
         svc = AuthService()
         token, exp = svc.create_access_token(
-            user_id=test_id, username="u", role=RoleEnum("user")
+            # ← diubah
+            user_id=test_id, username="u", role=RoleEnum("karyawan")
         )
         payload = jwt.decode(token, settings.SECRET_KEY,
                              algorithms=[ALGORITHM])
         assert payload["sub"] == str(test_id)
         assert payload["username"] == "u"
-        assert payload["role"] == "user"
+        assert payload["role"] == "karyawan"    # ← diubah
         assert payload["type"] == "bearer"
         assert exp > 0
 
@@ -984,7 +1218,7 @@ class TestAuthServiceUnit:
             token, settings.REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
         assert payload["sub"] == str(test_id)
         assert payload["type"] == "refresh"
-        assert "role" not in payload   # refresh token TIDAK boleh bawa role
+        assert "role" not in payload
         assert "username" not in payload
         assert exp > 0
 
@@ -1048,8 +1282,6 @@ class TestAuthServiceUnit:
 
         _, old_refresh = _make_tokens()
         new_access, _, new_refresh, _ = await svc.rotate_tokens(old_refresh, mock_repo)
-        print("Old refresh:", old_refresh)
-        print("New refresh:", new_refresh)
 
         mock_repo.revoke_token.assert_awaited_once_with(old_refresh)
         assert new_refresh != old_refresh

@@ -59,14 +59,19 @@ ROLE_ROUTES: list[tuple[Optional[str], str, set[str]]] = [
 
     # ── User management ────────────────────────────────────────────
     # Admin: full CRUD
+    # Login tetap boleh untuk semua role
+    ("POST",  r"^/api/v1/users/login$",                 ALL_ROLES),
+    # Refresh token tetap boleh untuk semua role
+    ("POST",  r"^/api/v1/users/refresh$",               ALL_ROLES),
+    # Logout tetap boleh untuk semua role
+    ("POST",  r"^/api/v1/users/logout$",                ALL_ROLES),
+    ("POST",  r"^/api/v1/users/me/change-password$",    ALL_ROLES),
     ("GET",   r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
     ("PATCH", r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
     (None,    r"^/api/v1/users",                        {ADMIN}),
     (None,    r"^/api/v1/chatbots",                     {ADMIN}),
     (None,    r"^/api/v1/ingest",                       {ADMIN, HRD}),
     (None,    r"^/api/v1/scheduler",                    {ADMIN, HRD}),
-
-
 
 ]
 
