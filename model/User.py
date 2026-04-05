@@ -18,7 +18,9 @@ if TYPE_CHECKING:
 
 class RoleEnum(str, enum.Enum):
     admin = "admin"
-    user = "user"
+    hrd = "hrd"
+    kepala_divisi = "kepala_divisi"
+    karyawan = "karyawan"
 
 
 class UserORM(Base):
