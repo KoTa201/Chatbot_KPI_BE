@@ -39,6 +39,7 @@ HEADER_KEYWORDS = [
 class GoogleSheetService:
     def __init__(self):
         self._client: Optional[gspread.Client] = None
+        self.google_credentials_path: str = settings.GOOGLE_CREDENTIALS_PATH
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -213,7 +214,7 @@ class GoogleSheetService:
     def _build_client(self) -> gspread.Client:
         try:
             creds = Credentials.from_service_account_file(
-                settings.GOOGLE_CREDENTIALS_PATH,
+                self.google_credentials_path,
                 scopes=SCOPES,
             )
             return gspread.authorize(creds)
@@ -221,7 +222,7 @@ class GoogleSheetService:
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"File credentials tidak ditemukan: '{settings.GOOGLE_CREDENTIALS_PATH}'. "
+                    f"File credentials tidak ditemukan: '{self.google_credentials_path}'. "
                     "Pastikan file JSON Service Account sudah ada dan path-nya benar di .env"
                 ),
             )

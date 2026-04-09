@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.schedulerRepository import SchedulerRepository
-from service.schedulerService import register_job, get_next_run_time
+from service.schedulerService import get_scheduler_service
 
 
 class SchedulerController:
@@ -14,6 +14,7 @@ class SchedulerController:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = SchedulerRepository(db)
+        self.scheduler_service = get_scheduler_service()
 
     async def get_config(self) -> dict:
         config = await self.repo.get_config()
@@ -40,8 +41,8 @@ class SchedulerController:
             interval_unit=interval_unit,
             is_enabled=is_enabled,
         )
-        await register_job(config)
-        next_run = get_next_run_time()
+        await self.scheduler_service.register_job(config)
+        next_run = self.scheduler_service.get_next_run_time()
         await self.repo.update_run_times(next_run_at=next_run)
         config.next_run_at = next_run
         return self._to_dict(config)
@@ -52,19 +53,18 @@ class SchedulerController:
         )
         if not config:
             raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
-        await register_job(config)
-        next_run = get_next_run_time()
+        await self.scheduler_service.register_job(config)
+        next_run = self.scheduler_service.get_next_run_time()
         await self.repo.update_run_times(next_run_at=next_run)
         config.next_run_at = next_run
         return self._to_dict(config)
 
     async def trigger_now(self) -> dict:
         """Manually fire the scheduled job once."""
-        from service.schedulerService import _run_ingestion_job
         config = await self.repo.get_config()
         if not config:
             raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
-        await _run_ingestion_job(config.sheet_url)
+        await self.scheduler_service._run_ingestion_job(config.sheet_url)
         return {"message": "Ingestion triggered successfully."}
 
     @staticmethod

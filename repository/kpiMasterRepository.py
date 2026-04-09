@@ -20,6 +20,8 @@ class KPIMasterRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.kpi_masters: list[KPIMasterORM] = []
+        self.upsert_count: int = 0
 
     async def upsert_by_tahun(self, records: list[dict]) -> int:
         """
@@ -27,7 +29,13 @@ class KPIMasterRepository:
         Returns count of upserted records.
         """
         if not records:
+            self.kpi_masters = []
+            self.upsert_count = 0
             return 0
+
+        # Track records dalam instance state
+        self.kpi_masters = records
+
         try:
             stmt = insert(KPIMasterORM).values(records)
             stmt = stmt.on_conflict_do_update(
@@ -36,9 +44,12 @@ class KPIMasterRepository:
             )
             await self.db.execute(stmt)
             await self.db.commit()
-            return len(records)
+            self.upsert_count = len(records)
+            return self.upsert_count
         except Exception as e:
             await self.db.rollback()
+            self.kpi_masters = []
+            self.upsert_count = 0
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal simpan KPI Master ke database: {str(e)}",

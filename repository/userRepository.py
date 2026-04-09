@@ -21,6 +21,8 @@ class AuthRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.user: UserORM = None
+        self.token: RevokedTokenORM = None
 
     # ------------------------------------------------------------------ #
     #  Create                                                              #
@@ -28,10 +30,11 @@ class AuthRepository:
 
     async def create_user(self, user: UserORM) -> UserORM:
         """Insert user baru. Kembalikan instance yang sudah ter-refresh (id terisi)."""
-        self.db.add(user)
+        self.user = user
+        self.db.add(self.user)
         await self.db.commit()
-        await self.db.refresh(user)
-        return user
+        await self.db.refresh(self.user)
+        return self.user
 
     # ------------------------------------------------------------------ #
     #  Read                                                                #
@@ -41,7 +44,8 @@ class AuthRepository:
         result = await self.db.execute(
             select(UserORM).where(UserORM.id == user_id)
         )
-        return result.scalar_one_or_none()
+        self.user = result.scalar_one_or_none()
+        return self.user
 
     async def get_by_username_or_email(self, identifier: str) -> Optional[UserORM]:
         if "@" in identifier:
@@ -85,18 +89,21 @@ class AuthRepository:
     # ------------------------------------------------------------------ #
 
     async def save(self, user: UserORM) -> UserORM:
-        self.db.add(user)
+        self.user = user
+        self.db.add(self.user)
         await self.db.commit()
-        await self.db.refresh(user)
-        return user
+        await self.db.refresh(self.user)
+        return self.user
 
     # ------------------------------------------------------------------ #
     #  Delete                                                              #
     # ------------------------------------------------------------------ #
 
     async def delete_user(self, user: UserORM) -> None:
-        await self.db.delete(user)
+        self.user = user
+        await self.db.delete(self.user)
         await self.db.commit()
+        self.user = None
 
     # ------------------------------------------------------------------ #
     #  Existence checks                                                    #
@@ -126,7 +133,8 @@ class AuthRepository:
         """
         already_revoked = await self.is_token_revoked(token)
         if not already_revoked:
-            self.db.add(RevokedTokenORM(token=token))
+            self.token = RevokedTokenORM(token=token)
+            self.db.add(self.token)
             await self.db.commit()
 
     async def is_token_revoked(self, token: str) -> bool:

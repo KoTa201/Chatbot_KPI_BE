@@ -8,6 +8,8 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from service.schedulerService import SchedulerService
+
 
 def make_db() -> AsyncMock:
     return AsyncMock(spec=AsyncSession)
@@ -51,30 +53,28 @@ async def test_scheduler_repo_create_stores_config():
 
 def test_build_trigger_hours():
     """_build_trigger must return IntervalTrigger with correct hours kwarg."""
-    from service.schedulerService import _build_trigger
+    from service.schedulerService import SchedulerService
     from apscheduler.triggers.interval import IntervalTrigger
 
-    trigger = _build_trigger(12, "hours")
+    trigger = SchedulerService()._build_trigger(12, "hours")
     assert isinstance(trigger, IntervalTrigger)
     assert trigger.interval.total_seconds() == 12 * 3600
 
 
 def test_build_trigger_months_converts_to_days():
     """Months must be converted to days*30."""
-    from service.schedulerService import _build_trigger
     from apscheduler.triggers.interval import IntervalTrigger
 
-    trigger = _build_trigger(1, "months")
+    trigger = SchedulerService()._build_trigger(1, "months")
     assert isinstance(trigger, IntervalTrigger)
     assert trigger.interval.total_seconds() == 30 * 86400
 
 
 def test_build_trigger_days():
     """Days must map to IntervalTrigger days."""
-    from service.schedulerService import _build_trigger
     from apscheduler.triggers.interval import IntervalTrigger
 
-    trigger = _build_trigger(7, "days")
+    trigger = SchedulerService()._build_trigger(7, "days")
     assert isinstance(trigger, IntervalTrigger)
     assert trigger.interval.total_seconds() == 7 * 86400
 
@@ -97,11 +97,15 @@ async def test_scheduler_controller_create_config():
     mock_config.next_run_at = None
 
     with (
-        patch.object(controller.repo, "get_config", new_callable=AsyncMock, return_value=None),
-        patch.object(controller.repo, "create_config", new_callable=AsyncMock, return_value=mock_config),
-        patch("controller.schedulerController.register_job", new_callable=AsyncMock),
-        patch("controller.schedulerController.get_next_run_time", return_value=None),
-        patch.object(controller.repo, "update_run_times", new_callable=AsyncMock),
+        patch.object(controller.repo, "get_config",
+                     new_callable=AsyncMock, return_value=None),
+        patch.object(controller.repo, "create_config",
+                     new_callable=AsyncMock, return_value=mock_config),
+        patch("service.schedulerService.register_job",
+              new_callable=AsyncMock),
+        patch("service.schedulerService.get_next_run_time", return_value=None),
+        patch.object(controller.repo, "update_run_times",
+                     new_callable=AsyncMock),
     ):
         result = await controller.create_config(
             sheet_url="https://docs.google.com/spreadsheets/d/X",

@@ -23,17 +23,18 @@ from middleware.jwtMiddleware import JWTMiddleware
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await create_tables()
-    from service.schedulerService import scheduler, register_job
+    from service.schedulerService import SchedulerService
     from repository.schedulerRepository import SchedulerRepository
     from databaseConfig import AsyncSessionLocal
-    scheduler.start()
+    scheduler_service = SchedulerService()
+    scheduler_service.scheduler.start()
     async with AsyncSessionLocal() as db:
         repo = SchedulerRepository(db)
         config = await repo.get_config()
         if config and config.is_enabled:
-            await register_job(config)
+            await scheduler_service.register_job(config)
     yield
-    scheduler.shutdown(wait=False)
+    scheduler_service.scheduler.shutdown(wait=False)
 
 
 app = FastAPI(

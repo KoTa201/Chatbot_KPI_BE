@@ -48,7 +48,7 @@ NOT_FOUND_ID = "00000000-0000-0000-0000-000000009999"
 # Path modul untuk patch
 # ---------------------------------------------------------------------------
 
-_REPO = "controller.userController.AuthRepository"
+_REPO = "repository.userRepository.AuthRepository"
 _SVC = "service.authService.AuthService"
 
 

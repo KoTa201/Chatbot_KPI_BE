@@ -19,6 +19,8 @@ class UserService:
     def __init__(self, db: AsyncSession):
         self.repo = AuthRepository(db)
         self.auth_service = AuthService()
+        # Akan di-set di Depends(require_admin) pada router
+        self.user: UserORM = None
 
         # ------------------------------------------------------------------ #
     #  User management                                                     #
@@ -36,7 +38,7 @@ class UserService:
                 detail=f"Email '{payload.email}' sudah terdaftar.",
             )
 
-        new_user = UserORM(
+        self.user = UserORM(
             username=payload.username,
             email=payload.email,
             full_name=payload.full_name,
@@ -44,8 +46,8 @@ class UserService:
             role=payload.role,
             is_active=True,
         )
-        created = await self.repo.create_user(new_user)
-        return UserResponse.model_validate(created)
+        self.user = await self.repo.create_user(self.user)
+        return UserResponse.model_validate(self.user)
 
     async def get_all_users(self, limit: int, offset: int) -> dict:
         users = await self.repo.get_all_users(limit=limit, offset=offset)
@@ -58,31 +60,31 @@ class UserService:
         }
 
     async def get_user_by_id(self, user_id: UUID) -> UserResponse:
-        user = await self.auth_service._get_user_or_404(user_id)
-        return UserResponse.model_validate(user)
+        self.user = await self.auth_service._get_user_or_404(user_id)
+        return UserResponse.model_validate(self.user)
 
     async def update_user(
         self, user_id: UUID, payload: UpdateUserRequest
     ) -> UserResponse:
-        user = await self.auth_service._get_user_or_404(user_id)
+        self.user = await self.auth_service._get_user_or_404(user_id)
 
-        if payload.email and payload.email != user.email:
+        if payload.email and payload.email != self.user.email:
             if await self.repo.email_exists(payload.email):
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"Email '{payload.email}' sudah digunakan oleh user lain.",
                 )
-            user.email = payload.email
+            self.user.email = payload.email
 
         if payload.full_name is not None:
-            user.full_name = payload.full_name
+            self.user.full_name = payload.full_name
         if payload.role is not None:
-            user.role = payload.role
+            self.user.role = payload.role
         if payload.is_active is not None:
-            user.is_active = payload.is_active
+            self.user.is_active = payload.is_active
 
-        updated = await self.repo.save(user)
-        return UserResponse.model_validate(updated)
+        self.user = await self.repo.save(self.user)
+        return UserResponse.model_validate(self.user)
 
     async def delete_user(self, user_id: UUID, admin_id: UUID) -> MessageResponse:
         if user_id == admin_id:
@@ -90,6 +92,6 @@ class UserService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin tidak dapat menghapus akun sendiri.",
             )
-        user = await self.auth_service._get_user_or_404(user_id)
-        await self.repo.delete_user(user)
-        return MessageResponse(message=f"User '{user.username}' berhasil dihapus.")
+        self.user = await self.auth_service._get_user_or_404(user_id)
+        await self.repo.delete_user(self.user)
+        return MessageResponse(message=f"User '{self.user.username}' berhasil dihapus.")

@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +19,7 @@ class ChatbotService:
 
     # ─── Helper ───────────────────────────────────────────────────────────────
 
-    async def _get_or_404(self, chatbot_id: int) -> Chatbot:
+    async def _get_or_404(self, chatbot_id: UUID) -> Chatbot:
         chatbot = await self.repo.get_by_id(chatbot_id)
         if not chatbot:
             raise HTTPException(
@@ -56,7 +57,7 @@ class ChatbotService:
             total_pages=total_pages,
         )
 
-    async def get_by_id(self, chatbot_id: int) -> ChatbotResponse:
+    async def get_by_id(self, chatbot_id: UUID) -> ChatbotResponse:
         chatbot = await self._get_or_404(chatbot_id)
         return ChatbotResponse.model_validate(chatbot)
 
@@ -65,17 +66,25 @@ class ChatbotService:
         chatbot = await self.repo.create(payload)
         return ChatbotResponse.model_validate(chatbot)
 
-    async def update(self, chatbot_id: int, payload: ChatbotUpdate) -> ChatbotResponse:
-        chatbot = await self._get_or_404(chatbot_id)
+    async def update(self, chatbot_id: UUID, payload: ChatbotUpdate) -> ChatbotResponse:
+        existing = await self.repo.get_by_id(chatbot_id)
+        if not existing:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chatbot id={chatbot_id} tidak ditemukan."
+            )
         if payload.nama_chatbot:
             await self._check_nama_unique(payload.nama_chatbot, exclude_id=chatbot_id)
-        updated = await self.repo.update(chatbot, payload)
+
+        self.repo.chatbot = existing
+
+        updated = await self.repo.update(payload)
         return ChatbotResponse.model_validate(updated)
 
-    async def delete(self, chatbot_id: int, hard: bool = False) -> dict:
-        chatbot = await self._get_or_404(chatbot_id)
+    async def delete(self, chatbot_id: UUID, hard: bool = False) -> dict:
+        await self._get_or_404(chatbot_id)
         if hard:
-            await self.repo.hard_delete(chatbot)
+            await self.repo.hard_delete()
             return {"message": f"Chatbot id={chatbot_id} berhasil dihapus permanen.", "success": True}
-        await self.repo.soft_delete(chatbot)
+        await self.repo.soft_delete()
         return {"message": f"Chatbot id={chatbot_id} berhasil dinonaktifkan.", "success": True}

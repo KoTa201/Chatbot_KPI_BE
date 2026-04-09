@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from controller.ingestionController import IngestionController
+from controller.kpiTrackerController import kpiTrackerController
 from schema.ingestionSchema import BulkIngestionResponse, SheetIngestionResult, SheetMeta
 
 # ---------------------------------------------------------------------------
@@ -58,13 +58,13 @@ def make_db() -> AsyncMock:
 
 
 # ---------------------------------------------------------------------------
-# 1. IngestionController — ingest_all_sheets_from_google_sheets
+# 1. kpiTrackerController — ingest_all_sheets_from_google_sheets
 # ---------------------------------------------------------------------------
 
 class TestIngestAllSheets:
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_all_sheets_success(self, MockService):
         """Semua sheet berhasil di-ingest → overall_status success."""
         mock_service = MockService.return_value
@@ -72,7 +72,7 @@ class TestIngestAllSheets:
             MOCK_SHEET_ENTRY]
 
         db = make_db()
-        controller = IngestionController(db)
+        controller = kpiTrackerController(db)
 
         with (
             patch.object(controller, "_parse_records",
@@ -95,7 +95,7 @@ class TestIngestAllSheets:
         assert result["sheets"][0]["status"] == "success"
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_sheet_skipped_on_error(self, MockService):
         """Sheet dengan error di-skip, tidak raise exception jika skip_on_error=True."""
         broken_sheet = {**MOCK_SHEET_ENTRY, "df": None,
@@ -105,7 +105,7 @@ class TestIngestAllSheets:
             broken_sheet]
 
         db = make_db()
-        controller = IngestionController(db)
+        controller = kpiTrackerController(db)
 
         result = await controller.ingest_all_sheets_from_google_sheets(
             sheet_url=SHEET_URL,
@@ -119,7 +119,7 @@ class TestIngestAllSheets:
         assert result["grand_ingested"] == 0
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_nama_orang_override_dipakai(self, MockService):
         """nama_orang_override menggantikan nilai dari meta sheet."""
         mock_service = MockService.return_value
@@ -127,7 +127,7 @@ class TestIngestAllSheets:
             MOCK_SHEET_ENTRY]
 
         db = make_db()
-        controller = IngestionController(db)
+        controller = kpiTrackerController(db)
 
         captured = {}
 
@@ -155,7 +155,7 @@ class TestIngestAllSheets:
         assert captured["nama_orang"] == "OVERRIDE NAME"
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_partial_status_ketika_ada_error_rows(self, MockService):
         """Jika ada baris gagal (errors) tapi ada yang berhasil → status partial."""
         mock_service = MockService.return_value
@@ -163,7 +163,7 @@ class TestIngestAllSheets:
             MOCK_SHEET_ENTRY]
 
         db = make_db()
-        controller = IngestionController(db)
+        controller = kpiTrackerController(db)
 
         with (
             patch.object(controller, "_parse_records",
@@ -183,7 +183,7 @@ class TestIngestAllSheets:
         assert result["grand_failed"] == 1
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_multi_sheet_grand_total(self, MockService):
         """Grand total aggregasi dari beberapa sheet."""
         second_sheet = {
@@ -196,7 +196,7 @@ class TestIngestAllSheets:
             MOCK_SHEET_ENTRY, second_sheet]
 
         db = make_db()
-        controller = IngestionController(db)
+        controller = kpiTrackerController(db)
 
         with (
             patch.object(controller, "_parse_records",
@@ -218,29 +218,29 @@ class TestIngestAllSheets:
 
 
 # ---------------------------------------------------------------------------
-# 2. IngestionController — _resolve_status
+# 2. kpiTrackerController — _resolve_status
 # ---------------------------------------------------------------------------
 
 class TestResolveStatus:
 
     def test_success(self):
-        assert IngestionController._resolve_status(10, []) == "success"
+        assert kpiTrackerController._resolve_status(10, []) == "success"
 
     def test_partial(self):
-        assert IngestionController._resolve_status(5, ["err"]) == "partial"
+        assert kpiTrackerController._resolve_status(5, ["err"]) == "partial"
 
     def test_failed(self):
-        assert IngestionController._resolve_status(0, ["err"]) == "failed"
+        assert kpiTrackerController._resolve_status(0, ["err"]) == "failed"
 
 
 # ---------------------------------------------------------------------------
-# 3. IngestionController — list_sheet_tabs & preview_sheet
+# 3. kpiTrackerController — list_sheet_tabs & preview_sheet
 # ---------------------------------------------------------------------------
 
 class TestListTabsAndPreview:
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_list_sheet_tabs(self, MockService):
         mock_service = MockService.return_value
         mock_service.list_sheets.return_value = [
@@ -248,7 +248,7 @@ class TestListTabsAndPreview:
             {"index": 1, "title": "Februari", "id": 222},
         ]
 
-        controller = IngestionController()
+        controller = kpiTrackerController()
         result = await controller.list_sheet_tabs(SHEET_URL)
 
         assert result == {"tabs": [
@@ -258,7 +258,7 @@ class TestListTabsAndPreview:
         mock_service.list_sheets.assert_called_once_with(SHEET_URL)
 
     @pytest.mark.asyncio
-    @patch("controller.ingestionController.GoogleSheetService")
+    @patch("controller.kpiTrackerController.GoogleSheetService")
     async def test_preview_sheet_returns_expected_keys(self, MockService):
         import pandas as pd
 
@@ -268,7 +268,7 @@ class TestListTabsAndPreview:
             df, "FAKE_ID", "Januari", MOCK_META
         )
 
-        controller = IngestionController()
+        controller = kpiTrackerController()
         result = await controller.preview_sheet(
             sheet_url=SHEET_URL,
             sheet_name="Januari",
@@ -408,14 +408,14 @@ async def test_create_ingestion_log_with_source_type():
     """create_ingestion_log deve aceitar e salvar source_type."""
     from unittest.mock import AsyncMock, MagicMock, patch
     from sqlalchemy.ext.asyncio import AsyncSession
-    from repository.ingestionRepository import IngestionRepository
+    from repository.kpiTrackerRepository import kpiTrackerRepository
 
     db = AsyncMock(spec=AsyncSession)
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
     with patch.object(db, "add") as mock_add:
-        repo = IngestionRepository(db)
+        repo = kpiTrackerRepository(db)
         await repo.create_ingestion_log(
             sheet_url="https://docs.google.com/spreadsheets/d/X",
             spreadsheet_id="X",

@@ -5,7 +5,7 @@ controller/kpiMasterController.py
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repository.ingestionRepository import IngestionRepository
+from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from service.googleSheetService import GoogleSheetService
 from utils.kpiMasterParser import parse_kpi_master_dataframe
@@ -16,7 +16,7 @@ class KPIMasterController:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.kpi_repo = KPIMasterRepository(db)
-        self.log_repo = IngestionRepository(db)
+        self.log_repo = IngestionLogRepository(db)
 
     async def ingest_kpi_master(self, sheet_url: str, tahun: int) -> dict:
         """Upsert KPI Master records from Google Sheets for the given year."""
@@ -25,7 +25,8 @@ class KPIMasterController:
         records, errors = self._parse(df, spreadsheet_id, sheet_name, tahun)
         ingested = await self.kpi_repo.upsert_by_tahun(records)
 
-        status = "success" if not errors else ("partial" if ingested > 0 else "failed")
+        status = "success" if not errors else (
+            "partial" if ingested > 0 else "failed")
         await self.log_repo.create_ingestion_log(
             sheet_url=sheet_url,
             spreadsheet_id=spreadsheet_id,
@@ -76,7 +77,8 @@ class KPIMasterController:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error fetching sheet: {str(e)}")
+            raise HTTPException(
+                status_code=500, detail=f"Error fetching sheet: {str(e)}")
 
     def _parse(self, df, spreadsheet_id: str, sheet_name: str, tahun: int):
         try:
