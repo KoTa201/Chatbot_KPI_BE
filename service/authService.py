@@ -54,22 +54,14 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 class AuthService:
-    """
-    Service untuk semua operasi authentication & otorisasi.
-
-    Menggunakan bcrypt langsung (tanpa passlib) untuk kompatibilitas
-    dengan bcrypt >= 4.x di Python 3.10+.
-
-    Penggunaan di controller:
-        service = AuthService()
-        hashed        = service.hash_password(plain)
-        access, exp   = service.create_access_token(user_id=1, username="x", role=...)
-        refresh, exp  = service.create_refresh_token(user_id=1)
-    """
 
     def __init__(self):
         self.repo = AuthRepository(Depends(get_db))
-        pass
+        self.secret_key = settings.SECRET_KEY
+        self.refresh_secret_key = settings.REFRESH_SECRET_KEY
+        self.reset_secret_key = settings.RESET_SECRET_KEY
+        self.access_token_expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        self.refresh_token_expire_days = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
     async def _get_user_or_404(self, user_id: UUID) -> UserORM:
         user = await self.repo.get_by_id(user_id)
@@ -114,7 +106,7 @@ class AuthService:
         expire_seconds = (
             int(expires_delta.total_seconds())
             if expires_delta
-            else settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+            else self.access_token_expire_minutes * 60
         )
         expire_at = datetime.now(timezone.utc) + \
             timedelta(seconds=expire_seconds)
@@ -126,7 +118,7 @@ class AuthService:
             "type": TOKEN_TYPE,          # ← tandai sebagai access token
             "exp": expire_at,
         }
-        token = jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+        token = jwt.encode(payload, self.secret_key, algorithm=ALGORITHM)
         return token, expire_seconds
 
     def decode_access_token(self, token: str) -> dict:
@@ -135,7 +127,7 @@ class AuthService:
         Raise HTTP 401 jika token tidak valid, kadaluarsa, atau bukan access token.
         """
         try:
-            payload = jwt.decode(token, settings.SECRET_KEY,
+            payload = jwt.decode(token, self.secret_key,
                                  algorithms=[ALGORITHM])
         except JWTError:
             raise HTTPException(
@@ -173,7 +165,7 @@ class AuthService:
         expire_seconds = (
             int(expires_delta.total_seconds())
             if expires_delta
-            else settings.REFRESH_TOKEN_EXPIRE_DAYS * 86_400
+            else self.refresh_token_expire_days * 86_400
         )
         expire_at = datetime.now(timezone.utc) + \
             timedelta(seconds=expire_seconds)
@@ -187,7 +179,7 @@ class AuthService:
         # Gunakan secret terpisah agar refresh token tidak bisa
         # dipalsukan dengan secret yang bocor dari access token.
         token = jwt.encode(
-            payload, settings.REFRESH_SECRET_KEY, algorithm=ALGORITHM
+            payload, self.refresh_secret_key, algorithm=ALGORITHM
         )
         return token, expire_seconds
 
@@ -198,7 +190,7 @@ class AuthService:
         """
         try:
             payload = jwt.decode(
-                token, settings.REFRESH_SECRET_KEY, algorithms=[ALGORITHM]
+                token, self.refresh_secret_key, algorithms=[ALGORITHM]
             )
         except JWTError:
             raise HTTPException(
@@ -406,7 +398,7 @@ class AuthService:
             "jti": secrets.token_hex(16),   # cegah reuse
         }
         reset_token = jwt.encode(
-            payload, settings.RESET_SECRET_KEY, algorithm=ALGORITHM
+            payload, self.reset_secret_key, algorithm=ALGORITHM
         )
         return ResetTokenResponse(reset_token=reset_token, expires_in=expire_seconds)
 
@@ -418,7 +410,7 @@ class AuthService:
         """
         try:
             payload = jwt.decode(
-                reset_token, settings.RESET_SECRET_KEY, algorithms=[ALGORITHM]
+                reset_token, self.reset_secret_key, algorithms=[ALGORITHM]
             )
         except JWTError:
             raise HTTPException(

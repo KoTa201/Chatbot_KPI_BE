@@ -3,6 +3,7 @@ from uuid import UUID
 from fastapi import Depends
 from sqlalchemy.orm import Session
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from databaseConfig import get_db
 from model.Chatbot import AuthorityEnum
 from schema.chatbotSchema import (
@@ -26,44 +27,35 @@ class ChatbotController:
     Bertanggung jawab memanggil service dan mengembalikan response schema.
     """
 
-    @staticmethod
+    def __init__(self, db: AsyncSession):
+        self.service = ChatbotService(db)
+
     async def list_chatbots(
+        self,
         page: int,
         page_size: int,
         otoritas: Optional[AuthorityEnum],
         search: Optional[str],
-        service: ChatbotService,
     ) -> ChatbotListResponse:
-        # ← await
-        return await service.get_all(page, page_size, otoritas, search)
+        return await self.service.get_all(page, page_size, otoritas, search)
 
-    @staticmethod
-    async def get_chatbot(
-        chatbot_id: UUID,
-        service: ChatbotService,
-    ) -> ChatbotResponse:
-        return await service.get_by_id(chatbot_id)  # ← await
+    async def get_chatbot(self, chatbot_id: UUID) -> ChatbotResponse:
+        return await self.service.get_by_id(chatbot_id)
 
-    @staticmethod
-    async def create_chatbot(
-        payload: ChatbotCreate,
-        service: ChatbotService,
-    ) -> ChatbotResponse:
-        return await service.create(payload)  # ← await
+    async def create_chatbot(self, payload: ChatbotCreate) -> ChatbotResponse:
+        return await self.service.create(payload)
 
-    @staticmethod
     async def update_chatbot(
+        self,
         chatbot_id: UUID,
         payload: ChatbotUpdate,
-        service: ChatbotService,
     ) -> ChatbotResponse:
-        return await service.update(chatbot_id, payload)  # ← await
+        return await self.service.update(chatbot_id, payload)
 
-    @staticmethod
     async def delete_chatbot(
+        self,
         chatbot_id: UUID,
         hard: bool,
-        service: ChatbotService,
     ) -> MessageResponse:
-        result = await service.delete(chatbot_id, hard=hard)  # ← await
+        result = await self.service.delete(chatbot_id, hard=hard)
         return MessageResponse(**result)

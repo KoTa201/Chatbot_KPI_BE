@@ -7,17 +7,17 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repository.ingestionRepository import IngestionRepository
+from repository.kpiTrackerRepository import kpiTrackerRepository
 from schema.ingestionSchema import IngestionResponse, SheetMeta
 from service.googleSheetService import GoogleSheetService
 from utils.parser import parse_dataframe
 
 
-class IngestionController:
+class kpiTrackerController:
 
     def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
-        self.repo = IngestionRepository(db) if db else None
+        self.repo = kpiTrackerRepository(db) if db else None
 
     # ------------------------------------------------------------------ #
     #  POST /ingest/google-sheets  (semua sheet)                           #

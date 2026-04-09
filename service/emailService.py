@@ -14,21 +14,28 @@ from config import settings
 
 class EmailService:
 
+    def __init__(self):
+        self.smtp_host: str = settings.SMTP_HOST
+        self.smtp_port: int = settings.SMTP_PORT
+        self.smtp_user: str = settings.SMTP_USER
+        self.smtp_password: str = settings.SMTP_PASSWORD
+        self.smtp_from: str = settings.SMTP_FROM
+
     def _build_message(self, to: str, subject: str, html: str) -> MIMEMultipart:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = settings.SMTP_FROM
+        msg["From"] = self.smtp_from
         msg["To"] = to
         msg.attach(MIMEText(html, "html", "utf-8"))
         return msg
 
     def _send(self, to: str, subject: str, html: str) -> None:
         msg = self._build_message(to, subject, html)
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+        with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
             server.ehlo()
             server.starttls()
-            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            server.sendmail(settings.SMTP_FROM, to, msg.as_string())
+            server.login(self.smtp_user, self.smtp_password)
+            server.sendmail(self.smtp_from, to, msg.as_string())
 
     def send_reset_pin(self, to_email: str, full_name: str, pin: str) -> None:
         """Kirim email berisi PIN 6 digit untuk reset password."""

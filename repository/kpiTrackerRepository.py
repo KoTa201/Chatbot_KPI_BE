@@ -1,5 +1,5 @@
 """
-repository/ingestionRepository.py
+repository/kpiTrackerRepository.py
 Semua operasi CRUD ke database untuk proses ingestion KPI.
 Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
 """
@@ -15,10 +15,11 @@ from model.IngestionLog import IngestionLogORM
 from model.KPITracker import KPIRecordORM
 
 
-class IngestionRepository:
+class kpiTrackerRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.ingestion_log: IngestionLogORM = None
 
     # ------------------------------------------------------------------ #
     #  KPIRecord                                                           #
@@ -65,7 +66,7 @@ class IngestionRepository:
         Insert satu baris log ingestion ke tabel IngestionLog.
         Kembalikan instance ORM yang sudah ter-refresh (id terisi).
         """
-        log = IngestionLogORM(
+        self.ingestion_log = IngestionLogORM(
             sheet_url=sheet_url,
             sheet_id=spreadsheet_id,
             sheet_name=sheet_name,
@@ -77,10 +78,10 @@ class IngestionRepository:
             status=status,
             source_type=source_type,
         )
-        self.db.add(log)
+        self.db.add(self.ingestion_log)
         await self.db.commit()
-        await self.db.refresh(log)
-        return log
+        await self.db.refresh(self.ingestion_log)
+        return self.ingestion_log
 
     async def get_ingestion_logs(
         self,
@@ -91,7 +92,8 @@ class IngestionRepository:
         Ambil riwayat ingestion log, diurutkan dari terbaru.
         Kembalikan list ORM instance.
         """
-        query = select(IngestionLogORM).order_by(IngestionLogORM.created_at.desc())
+        query = select(IngestionLogORM).order_by(
+            IngestionLogORM.created_at.desc())
         if source_type:
             query = query.where(IngestionLogORM.source_type == source_type)
         result = await self.db.execute(query.limit(limit))
