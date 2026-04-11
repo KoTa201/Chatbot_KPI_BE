@@ -58,6 +58,7 @@ class IngestionLogRepository:
         self,
         limit: int,
         source_type: Optional[str] = None,
+        success: Optional[bool] = None,
     ) -> list[IngestionLogORM]:
         """
         Ambil riwayat ingestion log, diurutkan dari terbaru.
@@ -67,5 +68,7 @@ class IngestionLogRepository:
             IngestionLogORM.created_at.desc())
         if source_type:
             query = query.where(IngestionLogORM.source_type == source_type)
+        if success:
+            query = query.where(IngestionLogORM.status == "success")
         result = await self.db.execute(query.limit(limit))
         return result.scalars().all()

@@ -1,10 +1,10 @@
 """
-tests/test_ingestion.py
-Unit test untuk endpoint & controller ingestion KPI.
+tests/test_kpiTracker.py
+Unit test untuk controller, service, dan schema KPI Tracker.
 
 Jalankan:
-    pytest tests/test_ingestion.py -v
-    pytest tests/test_ingestion.py -v --tb=short   # ringkas traceback
+    pytest tests/test_kpiTracker.py -v
+    pytest tests/test_kpiTracker.py -v --tb=short
 """
 
 import pytest
@@ -12,49 +12,53 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from controller.kpiTrackerController import kpiTrackerController
-from schema.ingestionSchema import BulkIngestionResponse, SheetIngestionResult, SheetMeta
+from schema.kpiTrackerSchema import (
+    BulkIngestionResponse,
+    IngestAllSheetsRequest,
+    SheetIngestionResult,
+    SheetMeta,
+)
 
 # ---------------------------------------------------------------------------
-# Fixtures shared
+# Fixtures & constants
 # ---------------------------------------------------------------------------
 
 SHEET_URL = "https://docs.google.com/spreadsheets/d/FAKE_ID/edit"
 
-MOCK_META = {
-    "nama_orang": "PIRMADI S",
-    "bulan": "Januari",
-    "bulan_num": 1,
-    "tahun": 2025,
-    "header_row": 2,
-}
+MOCK_SHEET_RESULT = SheetIngestionResult(
+    log_id=1,
+    sheet_name="Januari",
+    meta=SheetMeta(nama_orang="PIRMADI S", bulan="Januari",
+                   bulan_num=1, tahun=2025),
+    total_rows=6,
+    ingested=6,
+    failed=0,
+    errors=[],
+    status="success",
+)
 
-MOCK_SHEET_ENTRY = {
-    "sheet_index": 0,
-    "sheet_name": "Januari",
-    "sheet_id": 111,
-    "spreadsheet_id": "FAKE_ID",
-    "df": MagicMock(
-        columns=MagicMock(tolist=MagicMock(
-            return_value=["No", "Nama KPI", "Realisasi"])),
-        __len__=MagicMock(return_value=6),
-        head=MagicMock(return_value=MagicMock(
-            fillna=MagicMock(return_value=MagicMock(
-                to_dict=MagicMock(return_value=[])
-            ))
-        )),
-    ),
-    "meta": MOCK_META,
-    "error": None,
-}
-
-MOCK_LOG = MagicMock(id=1)
-
-MOCK_RECORDS = [MagicMock() for _ in range(6)]
-MOCK_ERRORS: list = []
+MOCK_BULK_RESPONSE = BulkIngestionResponse(
+    spreadsheet_url=SHEET_URL,
+    total_sheets_processed=1,
+    grand_total_rows=6,
+    grand_ingested=6,
+    grand_failed=0,
+    overall_status="success",
+    sheets=[MOCK_SHEET_RESULT],
+)
 
 
 def make_db() -> AsyncMock:
     return AsyncMock(spec=AsyncSession)
+
+
+def make_request(**overrides) -> IngestAllSheetsRequest:
+    defaults = dict(
+        sheet_url=SHEET_URL,
+        nama_orang_override=None,
+        skip_on_error=True,
+    )
+    return IngestAllSheetsRequest(**{**defaults, **overrides})
 
 
 # ---------------------------------------------------------------------------
@@ -64,312 +68,362 @@ def make_db() -> AsyncMock:
 class TestIngestAllSheets:
 
     @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_all_sheets_success(self, MockService):
-        """Semua sheet berhasil di-ingest → overall_status success."""
-        mock_service = MockService.return_value
-        mock_service.fetch_all_sheets_as_dataframes.return_value = [
-            MOCK_SHEET_ENTRY]
-
+    async def test_all_sheets_success(self):
+        """Delegates ke ingestion_service dan mengembalikan BulkIngestionResponse."""
         db = make_db()
         controller = kpiTrackerController(db)
+        controller.ingestion_service.ingest_all_sheets = AsyncMock(
+            return_value=MOCK_BULK_RESPONSE
+        )
 
-        with (
-            patch.object(controller, "_parse_records",
-                         return_value=(MOCK_RECORDS, MOCK_ERRORS)),
-            patch.object(controller.repo, "bulk_insert_kpi_records",
-                         new_callable=AsyncMock, return_value=6),
-            patch.object(controller.repo, "create_ingestion_log",
-                         new_callable=AsyncMock, return_value=MOCK_LOG),
-        ):
-            result = await controller.ingest_all_sheets_from_google_sheets(
-                sheet_url=SHEET_URL,
-                nama_orang_override=None,
-                skip_on_error=True,
-            )
+        request = make_request()
+        result = await controller.ingest_all_sheets_from_google_sheets(request)
 
-        assert result["overall_status"] == "success"
-        assert result["grand_ingested"] == 6
-        assert result["grand_failed"] == 0
-        assert result["total_sheets_processed"] == 1
-        assert result["sheets"][0]["status"] == "success"
-
-    @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_sheet_skipped_on_error(self, MockService):
-        """Sheet dengan error di-skip, tidak raise exception jika skip_on_error=True."""
-        broken_sheet = {**MOCK_SHEET_ENTRY, "df": None,
-                        "meta": None, "error": "Sheet kosong."}
-        mock_service = MockService.return_value
-        mock_service.fetch_all_sheets_as_dataframes.return_value = [
-            broken_sheet]
-
-        db = make_db()
-        controller = kpiTrackerController(db)
-
-        result = await controller.ingest_all_sheets_from_google_sheets(
+        controller.ingestion_service.ingest_all_sheets.assert_awaited_once_with(
             sheet_url=SHEET_URL,
             nama_orang_override=None,
             skip_on_error=True,
         )
-
-        assert result["total_sheets_processed"] == 1
-        assert result["sheets"][0]["status"] == "skipped"
-        assert result["sheets"][0]["reason"] == "Sheet kosong."
-        assert result["grand_ingested"] == 0
+        assert result.overall_status == "success"
+        assert result.grand_ingested == 6
+        assert result.grand_failed == 0
+        assert result.total_sheets_processed == 1
+        assert result.sheets[0].status == "success"
 
     @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_nama_orang_override_dipakai(self, MockService):
-        """nama_orang_override menggantikan nilai dari meta sheet."""
-        mock_service = MockService.return_value
-        mock_service.fetch_all_sheets_as_dataframes.return_value = [
-            MOCK_SHEET_ENTRY]
-
+    async def test_sheet_skipped_on_error(self):
+        """Sheet dengan error di-skip → status skipped di response."""
         db = make_db()
         controller = kpiTrackerController(db)
 
-        captured = {}
-
-        async def fake_bulk_insert(records):
-            return 6
-
-        async def fake_create_log(**kwargs):
-            captured["nama_orang"] = kwargs["nama_orang"]
-            return MOCK_LOG
-
-        with (
-            patch.object(controller, "_parse_records",
-                         return_value=(MOCK_RECORDS, MOCK_ERRORS)),
-            patch.object(controller.repo, "bulk_insert_kpi_records",
-                         side_effect=fake_bulk_insert),
-            patch.object(controller.repo, "create_ingestion_log",
-                         side_effect=fake_create_log),
-        ):
-            await controller.ingest_all_sheets_from_google_sheets(
-                sheet_url=SHEET_URL,
-                nama_orang_override="OVERRIDE NAME",
-                skip_on_error=True,
-            )
-
-        assert captured["nama_orang"] == "OVERRIDE NAME"
-
-    @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_partial_status_ketika_ada_error_rows(self, MockService):
-        """Jika ada baris gagal (errors) tapi ada yang berhasil → status partial."""
-        mock_service = MockService.return_value
-        mock_service.fetch_all_sheets_as_dataframes.return_value = [
-            MOCK_SHEET_ENTRY]
-
-        db = make_db()
-        controller = kpiTrackerController(db)
-
-        with (
-            patch.object(controller, "_parse_records",
-                         return_value=(MOCK_RECORDS, ["row 3 invalid"])),
-            patch.object(controller.repo, "bulk_insert_kpi_records",
-                         new_callable=AsyncMock, return_value=5),
-            patch.object(controller.repo, "create_ingestion_log",
-                         new_callable=AsyncMock, return_value=MOCK_LOG),
-        ):
-            result = await controller.ingest_all_sheets_from_google_sheets(
-                sheet_url=SHEET_URL,
-                nama_orang_override=None,
-                skip_on_error=True,
-            )
-
-        assert result["sheets"][0]["status"] == "partial"
-        assert result["grand_failed"] == 1
-
-    @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_multi_sheet_grand_total(self, MockService):
-        """Grand total aggregasi dari beberapa sheet."""
-        second_sheet = {
-            **MOCK_SHEET_ENTRY,
-            "sheet_name": "Februari",
-            "sheet_id": 222,
-        }
-        mock_service = MockService.return_value
-        mock_service.fetch_all_sheets_as_dataframes.return_value = [
-            MOCK_SHEET_ENTRY, second_sheet]
-
-        db = make_db()
-        controller = kpiTrackerController(db)
-
-        with (
-            patch.object(controller, "_parse_records",
-                         return_value=(MOCK_RECORDS, MOCK_ERRORS)),
-            patch.object(controller.repo, "bulk_insert_kpi_records",
-                         new_callable=AsyncMock, return_value=6),
-            patch.object(controller.repo, "create_ingestion_log",
-                         new_callable=AsyncMock, return_value=MOCK_LOG),
-        ):
-            result = await controller.ingest_all_sheets_from_google_sheets(
-                sheet_url=SHEET_URL,
-                nama_orang_override=None,
-                skip_on_error=True,
-            )
-
-        assert result["total_sheets_processed"] == 2
-        assert result["grand_ingested"] == 12  # 6 + 6
-        assert result["grand_total_rows"] == 12
-
-
-# ---------------------------------------------------------------------------
-# 2. kpiTrackerController — _resolve_status
-# ---------------------------------------------------------------------------
-
-class TestResolveStatus:
-
-    def test_success(self):
-        assert kpiTrackerController._resolve_status(10, []) == "success"
-
-    def test_partial(self):
-        assert kpiTrackerController._resolve_status(5, ["err"]) == "partial"
-
-    def test_failed(self):
-        assert kpiTrackerController._resolve_status(0, ["err"]) == "failed"
-
-
-# ---------------------------------------------------------------------------
-# 3. kpiTrackerController — list_sheet_tabs & preview_sheet
-# ---------------------------------------------------------------------------
-
-class TestListTabsAndPreview:
-
-    @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_list_sheet_tabs(self, MockService):
-        mock_service = MockService.return_value
-        mock_service.list_sheets.return_value = [
-            {"index": 0, "title": "Januari", "id": 111},
-            {"index": 1, "title": "Februari", "id": 222},
-        ]
-
-        controller = kpiTrackerController()
-        result = await controller.list_sheet_tabs(SHEET_URL)
-
-        assert result == {"tabs": [
-            {"index": 0, "title": "Januari", "id": 111},
-            {"index": 1, "title": "Februari", "id": 222},
-        ]}
-        mock_service.list_sheets.assert_called_once_with(SHEET_URL)
-
-    @pytest.mark.asyncio
-    @patch("controller.kpiTrackerController.GoogleSheetService")
-    async def test_preview_sheet_returns_expected_keys(self, MockService):
-        import pandas as pd
-
-        df = pd.DataFrame([{"Nama KPI": "X", "Realisasi": 100}])
-        mock_service = MockService.return_value
-        mock_service.fetch_sheet_as_dataframe.return_value = (
-            df, "FAKE_ID", "Januari", MOCK_META
+        skipped_response = BulkIngestionResponse(
+            spreadsheet_url=SHEET_URL,
+            total_sheets_processed=1,
+            grand_total_rows=0,
+            grand_ingested=0,
+            grand_failed=0,
+            overall_status="success",
+            sheets=[
+                SheetIngestionResult(
+                    sheet_name="Januari",
+                    status="skipped",
+                    reason="Sheet kosong.",
+                )
+            ],
+        )
+        controller.ingestion_service.ingest_all_sheets = AsyncMock(
+            return_value=skipped_response
         )
 
-        controller = kpiTrackerController()
-        result = await controller.preview_sheet(
+        result = await controller.ingest_all_sheets_from_google_sheets(
+            make_request(skip_on_error=True)
+        )
+
+        assert result.total_sheets_processed == 1
+        assert result.sheets[0].status == "skipped"
+        assert result.sheets[0].reason == "Sheet kosong."
+        assert result.grand_ingested == 0
+
+    @pytest.mark.asyncio
+    async def test_nama_orang_override_diteruskan(self):
+        """nama_orang_override diteruskan ke ingestion_service."""
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.ingestion_service.ingest_all_sheets = AsyncMock(
+            return_value=MOCK_BULK_RESPONSE
+        )
+
+        await controller.ingest_all_sheets_from_google_sheets(
+            make_request(nama_orang_override="OVERRIDE NAME")
+        )
+
+        controller.ingestion_service.ingest_all_sheets.assert_awaited_once_with(
             sheet_url=SHEET_URL,
+            nama_orang_override="OVERRIDE NAME",
+            skip_on_error=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_partial_status_ketika_ada_error_rows(self):
+        """Ada baris gagal → status partial pada sheet terkait."""
+        db = make_db()
+        controller = kpiTrackerController(db)
+
+        partial_response = BulkIngestionResponse(
+            spreadsheet_url=SHEET_URL,
+            total_sheets_processed=1,
+            grand_total_rows=6,
+            grand_ingested=5,
+            grand_failed=1,
+            overall_status="partial",
+            sheets=[
+                SheetIngestionResult(
+                    log_id=1,
+                    sheet_name="Januari",
+                    total_rows=6,
+                    ingested=5,
+                    failed=1,
+                    errors=["row 3 invalid"],
+                    status="partial",
+                )
+            ],
+        )
+        controller.ingestion_service.ingest_all_sheets = AsyncMock(
+            return_value=partial_response
+        )
+
+        result = await controller.ingest_all_sheets_from_google_sheets(make_request())
+
+        assert result.sheets[0].status == "partial"
+        assert result.grand_failed == 1
+
+    @pytest.mark.asyncio
+    async def test_multi_sheet_grand_total(self):
+        """Grand total diagregasi dari beberapa sheet."""
+        db = make_db()
+        controller = kpiTrackerController(db)
+
+        multi_response = BulkIngestionResponse(
+            spreadsheet_url=SHEET_URL,
+            total_sheets_processed=2,
+            grand_total_rows=12,
+            grand_ingested=12,
+            grand_failed=0,
+            overall_status="success",
+            sheets=[
+                SheetIngestionResult(
+                    log_id=1, sheet_name="Januari",
+                    total_rows=6, ingested=6, failed=0, errors=[], status="success",
+                ),
+                SheetIngestionResult(
+                    log_id=2, sheet_name="Februari",
+                    total_rows=6, ingested=6, failed=0, errors=[], status="success",
+                ),
+            ],
+        )
+        controller.ingestion_service.ingest_all_sheets = AsyncMock(
+            return_value=multi_response
+        )
+
+        result = await controller.ingest_all_sheets_from_google_sheets(make_request())
+
+        assert result.total_sheets_processed == 2
+        assert result.grand_ingested == 12
+        assert result.grand_total_rows == 12
+
+
+# ---------------------------------------------------------------------------
+# 2. kpiTrackerController — get_ingestion_logs
+# ---------------------------------------------------------------------------
+
+class TestGetIngestionLogs:
+
+    @pytest.mark.asyncio
+    async def test_returns_formatted_logs(self):
+        """get_ingestion_logs memformat hasil repo menjadi dict."""
+        db = make_db()
+        controller = kpiTrackerController(db)
+
+        mock_log = MagicMock(
+            id=1,
             sheet_name="Januari",
-            sheet_index=0,
+            nama_orang="PIRMADI S",
+            total_rows=6,
+            ingested_count=6,
+            failed_count=0,
+            status="success",
+            source_type="kpi_tracker",
+            created_at="2025-01-01T00:00:00",
+        )
+        controller.repo.get_ingestion_logs = AsyncMock(return_value=[mock_log])
+
+        result = await controller.get_ingestion_logs(limit=20)
+
+        assert result["total"] == 1
+        assert result["logs"][0]["sheet_name"] == "Januari"
+        assert result["logs"][0]["ingested"] == 6
+        assert result["logs"][0]["source_type"] == "kpi_tracker"
+
+    @pytest.mark.asyncio
+    async def test_source_type_filter_diteruskan(self):
+        """source_type filter diteruskan ke repo."""
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.repo.get_ingestion_logs = AsyncMock(return_value=[])
+
+        await controller.get_ingestion_logs(limit=10, source_type="kpi_master")
+
+        controller.repo.get_ingestion_logs.assert_awaited_once_with(
+            10, source_type="kpi_master"
         )
 
-        assert "spreadsheet_id" in result
-        assert "sheet_name" in result
-        assert "extracted_meta" in result
-        assert "columns" in result
-        assert "total_data_rows" in result
-        assert "preview" in result
-        assert result["total_data_rows"] == 1
+
+# ---------------------------------------------------------------------------
+# 3. kpiTrackerController — bulk_create_records
+# ---------------------------------------------------------------------------
+
+class TestBulkCreateRecords:
+
+    @pytest.mark.asyncio
+    async def test_bulk_create_success(self):
+        """bulk_create_records meneruskan ke service dan return BulkCreateResponse."""
+        from schema.kpiTrackerSchema import BulkCreateKPIRecordsRequest, CreateKPIRecordRequest
+
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.bulk_create_records = AsyncMock(return_value={
+            "status": "success",
+            "count": 2,
+            "message": "2 records created",
+        })
+
+        request = BulkCreateKPIRecordsRequest(records=[
+            CreateKPIRecordRequest(nama_kpi="KPI A", tahun=2025),
+            CreateKPIRecordRequest(nama_kpi="KPI B", tahun=2025),
+        ])
+
+        result = await controller.bulk_create_records(request)
+
+        assert result.status == "success"
+        assert result.count == 2
 
 
 # ---------------------------------------------------------------------------
-# 4. GoogleSheetService — unit
+# 4. kpiTrackerController — READ operations
 # ---------------------------------------------------------------------------
 
-class TestGoogleSheetService:
+class TestReadOperations:
 
-    def test_extract_spreadsheet_id_valid(self):
-        from service.googleSheetService import GoogleSheetService
-        svc = GoogleSheetService()
-        sid = svc._extract_spreadsheet_id(
-            "https://docs.google.com/spreadsheets/d/ABC123xyz/edit#gid=0"
+    @pytest.mark.asyncio
+    async def test_get_records_count(self):
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.get_records_count = AsyncMock(
+            return_value={"total": 42})
+
+        result = await controller.get_records_count()
+
+        assert result.total == 42
+
+    @pytest.mark.asyncio
+    async def test_get_all_records_with_filters(self):
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.get_all_records = AsyncMock(return_value={
+            "records": [],
+            "pagination": {"skip": 0, "limit": 100, "total": 0, "has_more": False},
+        })
+
+        result = await controller.get_all_records(
+            nama_kpi="KPI A", tahun=2025, nama_orang="Budi", skip=0, limit=100
         )
-        assert sid == "ABC123xyz"
 
-    def test_extract_spreadsheet_id_invalid(self):
-        from fastapi import HTTPException
-        from service.googleSheetService import GoogleSheetService
-        svc = GoogleSheetService()
-        with pytest.raises(HTTPException) as exc_info:
-            svc._extract_spreadsheet_id("https://google.com/not-a-sheet")
-        assert exc_info.value.status_code == 422
+        controller.service.get_all_records.assert_awaited_once_with(
+            nama_kpi="KPI A", tahun=2025, nama_orang="Budi", skip=0, limit=100
+        )
+        assert result.pagination.total == 0
 
-    def test_find_header_row_found(self):
-        from service.googleSheetService import GoogleSheetService
-        rows = [
-            ["KPI TRACKER – PIRMADI S | JANUARI 2025"],
-            ["Catatan: ini diabaikan"],
-            ["No", "Tanggal", "Nama KPI", "Jenis KPI", "Realisasi", "Keterangan"],
-            ["1",  "01-01",   "KPI A",    "Kuantitatif", "100",      "ok"],
-        ]
-        idx = GoogleSheetService._find_header_row(rows)
-        assert idx == 2
+    @pytest.mark.asyncio
+    async def test_get_grouped_records(self):
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.get_grouped_records = AsyncMock(return_value={
+            "groups": [],
+            "pagination": {"skip": 0, "limit": 100, "total": 0, "has_more": False},
+        })
 
-    def test_find_header_row_not_found(self):
-        from fastapi import HTTPException
-        from service.googleSheetService import GoogleSheetService
-        rows = [["foo", "bar"], ["baz", "qux"]]
-        with pytest.raises(HTTPException) as exc_info:
-            GoogleSheetService._find_header_row(rows)
-        assert exc_info.value.status_code == 422
+        result = await controller.get_grouped_records(skip=0, limit=100)
 
-    def test_extract_meta_from_title(self):
-        from service.googleSheetService import GoogleSheetService
-        rows = [
-            ["KPI TRACKER – BUDI SANTOSO | MARET 2024"],
-            ["No", "Nama KPI", "Jenis KPI", "Realisasi"],
-        ]
-        meta = GoogleSheetService._extract_meta_from_title(rows, header_row=1)
-        assert meta["nama_orang"] == "BUDI SANTOSO"
-        assert meta["bulan"] == "Maret"
-        assert meta["bulan_num"] == 3
-        assert meta["tahun"] == 2024
+        assert result.groups == []
 
-    def test_extract_meta_no_title(self):
-        from service.googleSheetService import GoogleSheetService
-        rows = [["No", "Nama KPI", "Jenis KPI", "Realisasi"]]
-        meta = GoogleSheetService._extract_meta_from_title(rows, header_row=0)
-        assert meta["nama_orang"] is None
-        assert meta["bulan"] is None
+    @pytest.mark.asyncio
+    async def test_get_grouped_records_with_filters(self):
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.get_grouped_records_with_filters = AsyncMock(return_value={
+            "groups": [],
+            "pagination": {"skip": 0, "limit": 100, "total": 0, "has_more": False},
+        })
 
-    def test_clean_headers_dedup(self):
-        from service.googleSheetService import GoogleSheetService
-        raw = ["No", "Nama KPI", "Nama KPI", "", "Status"]
-        cleaned = GoogleSheetService._clean_headers(raw)
-        assert cleaned[1] == "Nama KPI"
-        assert cleaned[2] == "Nama KPI_2"
-        assert cleaned[3].startswith("_empty_")
-        assert cleaned[4] == "Status"
+        await controller.get_grouped_records_with_filters(
+            tahun=2025, nama_orang="Budi", skip=0, limit=100
+        )
 
-    def test_build_dataframe_drops_empty_cols_and_rows(self):
-        from service.googleSheetService import GoogleSheetService
-        import pandas as pd
-        all_values = [
-            ["KPI TRACKER – X | JANUARI 2025"],
-            ["No", "Nama KPI", ""],
-            ["1", "A", ""],
-            ["", "", ""],  # baris kosong — harus di-drop
-        ]
-        svc = GoogleSheetService()
-        df = svc._build_dataframe(all_values, header_row_idx=1)
-        assert "_empty_2" not in df.columns
-        assert len(df) == 1  # baris kosong sudah di-drop
+        controller.service.get_grouped_records_with_filters.assert_awaited_once_with(
+            tahun=2025, nama_orang="Budi", skip=0, limit=100
+        )
 
 
 # ---------------------------------------------------------------------------
-# 5. Schema — validasi Pydantic
+# 5. kpiTrackerController — UPDATE / DELETE operations
+# ---------------------------------------------------------------------------
+
+class TestWriteOperations:
+
+    @pytest.mark.asyncio
+    async def test_update_record(self):
+        from uuid import uuid4
+        from schema.kpiTrackerSchema import UpdateKPIRecordRequest
+
+        db = make_db()
+        controller = kpiTrackerController(db)
+
+        mock_record = MagicMock()
+        mock_record.id = uuid4()
+        mock_record.nama_kpi = "KPI Updated"
+        controller.service.update_record = AsyncMock(return_value=mock_record)
+
+        record_id = mock_record.id
+        request = UpdateKPIRecordRequest(nama_kpi="KPI Updated")
+
+        with patch(
+            "controller.kpiTrackerController.KPIRecordResponse.from_orm",
+            return_value=MagicMock(nama_kpi="KPI Updated"),
+        ):
+            result = await controller.update_record(record_id, request)
+
+        controller.service.update_record.assert_awaited_once_with(
+            record_id, {"nama_kpi": "KPI Updated"}
+        )
+        assert result.nama_kpi == "KPI Updated"
+
+    @pytest.mark.asyncio
+    async def test_delete_record(self):
+        from uuid import uuid4
+
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.delete_record = AsyncMock(
+            return_value={"message": "Record deleted"}
+        )
+
+        result = await controller.delete_record(uuid4())
+
+        assert result.message == "Record deleted"
+
+    @pytest.mark.asyncio
+    async def test_delete_records_by_ids(self):
+        from uuid import uuid4
+        from schema.kpiTrackerSchema import BulkDeleteKPIRecordsRequest
+
+        db = make_db()
+        controller = kpiTrackerController(db)
+        controller.service.delete_records_by_ids = AsyncMock(return_value={
+            "status": "success",
+            "count": 2,
+            "message": "2 records deleted",
+        })
+
+        ids = [uuid4(), uuid4()]
+        request = BulkDeleteKPIRecordsRequest(record_ids=ids)
+        result = await controller.delete_records_by_ids(request)
+
+        controller.service.delete_records_by_ids.assert_awaited_once_with(ids)
+        assert result.count == 2
+
+
+# ---------------------------------------------------------------------------
+# 6. Schema — validasi Pydantic
 # ---------------------------------------------------------------------------
 
 class TestSchemas:
@@ -384,15 +438,15 @@ class TestSchemas:
             overall_status="success",
             sheets=[
                 SheetIngestionResult(sheet_name="Januari", status="success"),
-                SheetIngestionResult(sheet_name="Februari",
-                                     status="skipped", reason="Sheet kosong."),
+                SheetIngestionResult(
+                    sheet_name="Februari", status="skipped", reason="Sheet kosong."
+                ),
             ],
         )
         assert resp.overall_status == "success"
         assert resp.sheets[1].reason == "Sheet kosong."
 
     def test_sheet_ingestion_result_optional_fields(self):
-        """Semua field opsional kecuali sheet_name dan status."""
         r = SheetIngestionResult(sheet_name="Maret", status="skipped")
         assert r.log_id is None
         assert r.meta is None
@@ -402,20 +456,37 @@ class TestSchemas:
         m = SheetMeta(nama_orang=None, bulan=None, bulan_num=None, tahun=None)
         assert m.tahun is None
 
+    def test_ingest_all_sheets_request_defaults(self):
+        req = IngestAllSheetsRequest(sheet_url=SHEET_URL, tahun=2025)
+        assert req.skip_on_error is True
+        assert req.nama_orang_override is None
+
+    def test_ingest_all_sheets_request_override(self):
+        req = IngestAllSheetsRequest(
+            sheet_url=SHEET_URL,
+            tahun=2025,
+            nama_orang_override="Budi",
+            skip_on_error=False,
+        )
+        assert req.nama_orang_override == "Budi"
+        assert req.skip_on_error is False
+
+
+# ---------------------------------------------------------------------------
+# 7. Repository — create_ingestion_log with source_type
+# ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_create_ingestion_log_with_source_type():
-    """create_ingestion_log deve aceitar e salvar source_type."""
-    from unittest.mock import AsyncMock, MagicMock, patch
-    from sqlalchemy.ext.asyncio import AsyncSession
-    from repository.kpiTrackerRepository import kpiTrackerRepository
+    """create_ingestion_log menyimpan source_type dengan benar."""
+    from repository.ingestionLogRepository import IngestionLogRepository
 
     db = AsyncMock(spec=AsyncSession)
     db.commit = AsyncMock()
     db.refresh = AsyncMock()
 
     with patch.object(db, "add") as mock_add:
-        repo = kpiTrackerRepository(db)
+        repo = IngestionLogRepository(db)
         await repo.create_ingestion_log(
             sheet_url="https://docs.google.com/spreadsheets/d/X",
             spreadsheet_id="X",
