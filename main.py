@@ -9,8 +9,7 @@ from fastapi import FastAPI
 import model
 from databaseConfig import create_tables
 from router import (
-    ingestionRouter as ingestion,
-    recordRouter as records,
+    kpiTrackerRouter as ingestion,
     userRouter as users,
     chatbotRouter as chatbot_router,
     kpiMasterRouter as kpi_master,
@@ -59,7 +58,6 @@ app.add_middleware(JWTMiddleware)
 
 app.include_router(
     ingestion.router, prefix="/api/v1/ingest", tags=["Ingestion"])
-app.include_router(records.router, prefix="/api/v1/records", tags=["Records"])
 app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
 app.include_router(
     chatbot_router.router, prefix="/api/v1/chatbots", tags=["Chatbots"])

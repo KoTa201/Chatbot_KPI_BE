@@ -1,14 +1,38 @@
 """
-controllers/ingestion_controller.py
+controllers/kpiTrackerController.py
+Controller untuk KPI Tracker management.
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.kpiTrackerRepository import kpiTrackerRepository
-from schema.ingestionSchema import IngestionResponse, SheetMeta
+from service.kpiTrackerService import KPITrackerService
+from service.ingestionService import IngestionService
+from schema.kpiTrackerSchema import (
+    # Request schemas
+    CreateKPIRecordRequest,
+    UpdateKPIRecordRequest,
+    BulkCreateKPIRecordsRequest,
+    BulkDeleteKPIRecordsRequest,
+    IngestAllSheetsRequest,
+    # Response schemas
+    KPIRecordResponse,
+    ListResponse,
+    GroupedKPIResponse,
+    DetailRecordsResponse,
+    BulkCreateResponse,
+    BulkDeleteResponse,
+    DeleteResponse,
+    CountResponse,
+    BulkIngestionResponse,
+    # Legacy schemas
+    IngestionResponse,
+    SheetMeta,
+)
 from service.googleSheetService import GoogleSheetService
 from utils.parser import parse_dataframe
 
@@ -18,6 +42,9 @@ class kpiTrackerController:
     def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
         self.repo = kpiTrackerRepository(db) if db else None
+        self.service = KPITrackerService(self.repo) if self.repo else None
+        self.ingestion_service = IngestionService(
+            self.repo, self.service) if (self.repo and self.service) else None
 
     # ------------------------------------------------------------------ #
     #  POST /ingest/google-sheets  (semua sheet)                           #
@@ -25,186 +52,22 @@ class kpiTrackerController:
 
     async def ingest_all_sheets_from_google_sheets(
         self,
-        sheet_url: str,
-        nama_orang_override: Optional[str],
-        skip_on_error: bool = True,
-    ) -> dict:
+        request: IngestAllSheetsRequest,
+    ) -> BulkIngestionResponse:
         """
-        Ingest semua sheet dalam satu spreadsheet.
-        Return agregasi result per-sheet + grand total.
+        Ingest semua sheet dalam satu spreadsheet via service.
+
+        Args:
+            request: IngestAllSheetsRequest dengan sheet_url dan options
+
+        Returns:
+            BulkIngestionResponse: Agregasi result per-sheet + grand total
         """
-        all_sheets = self._fetch_all_sheets(sheet_url, skip_on_error)
-
-        sheets_result = []
-        grand_total_rows = 0
-        grand_ingested = 0
-        grand_failed = 0
-
-        for sheet in all_sheets:
-            # Sheet gagal di-parse (kosong / format tidak sesuai)
-            if sheet["error"]:
-                sheets_result.append({
-                    "sheet_name": sheet["sheet_name"],
-                    "status":     "skipped",
-                    "reason":     sheet["error"],
-                })
-                continue
-
-            df = sheet["df"]
-            meta = sheet["meta"]
-            spreadsheet_id = sheet["spreadsheet_id"]
-            active_sheet_name = sheet["sheet_name"]
-
-            nama_orang = nama_orang_override or meta.get(
-                "nama_orang") or "UNKNOWN"
-            tahun = meta.get("tahun")
-
-            # Parse DataFrame → records + errors
-            records, errors = self._parse_records(
-                df=df,
-                nama_orang=nama_orang,
-                tahun=tahun,
-                spreadsheet_id=spreadsheet_id,
-                active_sheet_name=active_sheet_name,
-            )
-
-            # Simpan ke DB
-            ingested_count = await self.repo.bulk_insert_kpi_records(records)
-
-            # Log per-sheet
-            status = self._resolve_status(ingested_count, errors)
-            log = await self.repo.create_ingestion_log(
-                sheet_url=sheet_url,
-                spreadsheet_id=spreadsheet_id,
-                sheet_name=active_sheet_name,
-                nama_orang=nama_orang,
-                total_rows=len(df),
-                ingested_count=ingested_count,
-                errors=errors,
-                status=status,
-                source_type="kpi_tracker",
-            )
-
-            grand_total_rows += len(df)
-            grand_ingested += ingested_count
-            grand_failed += len(errors)
-
-            sheets_result.append({
-                "log_id":     log.id,
-                "sheet_name": active_sheet_name,
-                "meta": SheetMeta(
-                    nama_orang=nama_orang,
-                    bulan=meta.get("bulan"),
-                    bulan_num=meta.get("bulan_num"),
-                    tahun=tahun,
-                ),
-                "total_rows": len(df),
-                "ingested":   ingested_count,
-                "failed":     len(errors),
-                "errors":     errors,
-                "status":     status,
-            })
-
-        return {
-            "spreadsheet_url": sheet_url,
-            "total_sheets_processed": len(sheets_result),
-            "grand_total_rows": grand_total_rows,
-            "grand_ingested":   grand_ingested,
-            "grand_failed":     grand_failed,
-            "overall_status":   self._resolve_status(grand_ingested, [] if grand_failed == 0 else ["x"]),
-            "sheets":           sheets_result,
-        }
-
-    # ------------------------------------------------------------------ #
-    #  POST /ingest/google-sheets  (single sheet — tetap dipertahankan)   #
-    # ------------------------------------------------------------------ #
-
-    async def ingest_from_google_sheets(
-        self,
-        sheet_url: str,
-        sheet_name: Optional[str],
-        sheet_index: int,
-        nama_orang_override: Optional[str],
-    ) -> IngestionResponse:
-        df, spreadsheet_id, active_sheet_name, meta = self._fetch_sheet(
-            sheet_url=sheet_url,
-            sheet_name=sheet_name,
-            sheet_index=sheet_index,
+        return await self.ingestion_service.ingest_all_sheets(
+            sheet_url=request.sheet_url,
+            nama_orang_override=request.nama_orang_override,
+            skip_on_error=request.skip_on_error,
         )
-
-        nama_orang = nama_orang_override or meta.get("nama_orang") or "UNKNOWN"
-        tahun = meta.get("tahun")
-
-        records, errors = self._parse_records(
-            df=df,
-            nama_orang=nama_orang,
-            tahun=tahun,
-            spreadsheet_id=spreadsheet_id,
-            active_sheet_name=active_sheet_name,
-        )
-
-        ingested_count = await self.repo.bulk_insert_kpi_records(records)
-
-        status = self._resolve_status(ingested_count, errors)
-        log = await self.repo.create_ingestion_log(
-            sheet_url=sheet_url,
-            spreadsheet_id=spreadsheet_id,
-            sheet_name=active_sheet_name,
-            nama_orang=nama_orang,
-            total_rows=len(df),
-            ingested_count=ingested_count,
-            errors=errors,
-            status=status,
-            source_type="kpi_tracker",
-        )
-
-        return IngestionResponse(
-            log_id=log.id,
-            sheet_id=spreadsheet_id,
-            sheet_name=active_sheet_name,
-            meta=SheetMeta(
-                nama_orang=nama_orang,
-                bulan=meta.get("bulan"),
-                bulan_num=meta.get("bulan_num"),
-                tahun=tahun,
-            ),
-            total_rows=len(df),
-            ingested=ingested_count,
-            failed=len(errors),
-            errors=errors,
-            status=status,
-        )
-
-    # ------------------------------------------------------------------ #
-    #  GET /ingest/sheets/tabs                                             #
-    # ------------------------------------------------------------------ #
-
-    async def list_sheet_tabs(self, sheet_url: str) -> dict:
-        return {"tabs": GoogleSheetService().list_sheets(sheet_url)}
-
-    # ------------------------------------------------------------------ #
-    #  GET /ingest/sheets/preview                                          #
-    # ------------------------------------------------------------------ #
-
-    async def preview_sheet(
-        self,
-        sheet_url: str,
-        sheet_name: Optional[str],
-        sheet_index: int,
-    ) -> dict:
-        df, spreadsheet_id, active_sheet_name, meta = self._fetch_sheet(
-            sheet_url=sheet_url,
-            sheet_name=sheet_name,
-            sheet_index=sheet_index,
-        )
-        return {
-            "spreadsheet_id":  spreadsheet_id,
-            "sheet_name":      active_sheet_name,
-            "extracted_meta":  meta,
-            "columns":         df.columns.tolist(),
-            "total_data_rows": len(df),
-            "preview":         df.head(5).fillna("").to_dict(orient="records"),
-        }
 
     # ------------------------------------------------------------------ #
     #  GET /ingest/logs                                                    #
@@ -230,70 +93,211 @@ class kpiTrackerController:
             ],
         }
 
-    # ------------------------------------------------------------------ #
-    #  Private helpers                                                     #
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
+    #  CREATE Operations                                               #
+    # ================================================================ #
 
-    def _fetch_all_sheets(self, sheet_url: str, skip_on_error: bool) -> list:
-        """Fetch semua sheet, wrap exception jadi HTTP 500."""
-        try:
-            return GoogleSheetService().fetch_all_sheets_as_dataframes(
-                sheet_url=sheet_url,
-                skip_on_error=skip_on_error,
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error saat fetch semua sheet: {str(e)}",
-            )
+    async def bulk_create_records(self, request: BulkCreateKPIRecordsRequest) -> BulkCreateResponse:
+        """
+        Buat multiple KPI records sekaligus (bulk insert).
 
-    def _fetch_sheet(
-        self,
-        sheet_url: str,
-        sheet_name: Optional[str],
-        sheet_index: int,
-    ):
-        """Fetch satu sheet, wrap exception jadi HTTP 500."""
-        try:
-            return GoogleSheetService().fetch_sheet_as_dataframe(
-                sheet_url=sheet_url,
-                sheet_name=sheet_name,
-                sheet_index=sheet_index,
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error saat fetch Google Sheets: {str(e)}",
-            )
+        Args:
+            request: BulkCreateKPIRecordsRequest dengan list record data
 
-    def _parse_records(
-        self,
-        df,
-        nama_orang: str,
-        tahun: Optional[int],
-        spreadsheet_id: str,
-        active_sheet_name: str,
-    ):
-        """Parse DataFrame → (records, errors). Raise HTTP 422 jika format tidak valid."""
-        try:
-            return parse_dataframe(
-                df=df,
-                nama_orang=nama_orang,
-                tahun_override=tahun,
-                spreadsheet_id=spreadsheet_id,
-                sheet_name=active_sheet_name,
-            )
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+        Returns:
+            BulkCreateResponse: Hasil bulk create dengan count dan status
+        """
+        records_dict = [r.dict() for r in request.records]
+        result = await self.service.bulk_create_records(records_dict)
+        return BulkCreateResponse(**result)
 
-    @staticmethod
-    def _resolve_status(ingested_count: int, errors: list) -> str:
-        if not errors:
-            return "success"
-        if ingested_count > 0:
-            return "partial"
-        return "failed"
+    # ================================================================ #
+    #  READ Operations                                                 #
+    # ================================================================ #
+
+    async def get_record_by_id(self, record_id: UUID) -> KPIRecordResponse:
+        """
+        Ambil satu KPI record by ID.
+
+        Args:
+            record_id: UUID dari record
+
+        Returns:
+            KPIRecordResponse: KPI record detail
+        """
+        result = await self.service.get_record_by_id(record_id)
+        return KPIRecordResponse.from_orm(result)
+
+    async def get_all_records(self,
+                              nama_kpi: Optional[str] = None,
+                              tahun: Optional[int] = None,
+                              nama_orang: Optional[str] = None,
+                              skip: int = 0,
+                              limit: int = 100) -> ListResponse:
+        """
+        Ambil semua KPI records dengan optional filters dan pagination.
+
+        Args:
+            nama_kpi: Filter by nama KPI
+            tahun: Filter by tahun
+            nama_orang: Filter by nama orang
+            skip: Pagination offset
+            limit: Pagination limit
+
+        Returns:
+            ListResponse dengan records dan pagination info
+        """
+        result = await self.service.get_all_records(
+            nama_kpi=nama_kpi,
+            tahun=tahun,
+            nama_orang=nama_orang,
+            skip=skip,
+            limit=limit
+        )
+        records = [KPIRecordResponse.from_orm(r) for r in result["records"]]
+        return ListResponse(
+            records=records,
+            pagination=result["pagination"]
+        )
+
+    async def get_records_by_tahun(self, tahun: int, skip: int = 0, limit: int = 100) -> ListResponse:
+        """
+        Ambil KPI records untuk tahun tertentu.
+
+        Args:
+            tahun: Tahun yang dicari
+            skip: Pagination offset
+            limit: Pagination limit
+
+        Returns:
+            ListResponse dengan records dan pagination info
+        """
+        result = await self.service.get_records_by_tahun(tahun, skip, limit)
+        records = [KPIRecordResponse.from_orm(r) for r in result["records"]]
+        return ListResponse(
+            records=records,
+            pagination=result["pagination"]
+        )
+
+    async def get_records_count(self) -> CountResponse:
+        """
+        Ambil total count KPI records.
+
+        Returns:
+            CountResponse dengan total count
+        """
+        result = await self.service.get_records_count()
+        return CountResponse(**result)
+
+    # ================================================================ #
+    #  GROUP/AGGREGATE Operations (Grouped by Nama KPI)                #
+    # ================================================================ #
+
+    async def get_grouped_records(self, skip: int = 0, limit: int = 100) -> GroupedKPIResponse:
+        """
+        Ambil KPI records yang dikelompokkan berdasarkan nama_kpi.
+        Setiap group menampilkan: nama_kpi, total_count, tahun_list, sheet_names, sheet_count, last_updated.
+
+        Args:
+            skip: Pagination offset
+            limit: Pagination limit
+
+        Returns:
+            GroupedKPIResponse dengan groups dan pagination info
+        """
+        result = await self.service.get_grouped_records(skip=skip, limit=limit)
+        return GroupedKPIResponse(**result)
+
+    async def get_grouped_records_with_filters(self,
+                                               tahun: Optional[int] = None,
+                                               nama_orang: Optional[str] = None,
+                                               skip: int = 0,
+                                               limit: int = 100) -> GroupedKPIResponse:
+        """
+        Ambil KPI records grouped by nama_kpi dengan optional filters.
+
+        Args:
+            tahun: Filter by tahun
+            nama_orang: Filter by nama orang
+            skip: Pagination offset
+            limit: Pagination limit
+
+        Returns:
+            GroupedKPIResponse dengan filtered groups dan pagination info
+        """
+        result = await self.service.get_grouped_records_with_filters(
+            tahun=tahun,
+            nama_orang=nama_orang,
+            skip=skip,
+            limit=limit
+        )
+        return GroupedKPIResponse(**result)
+
+    async def get_detail_records_by_nama_kpi(self, nama_kpi: str, skip: int = 0, limit: int = 100) -> DetailRecordsResponse:
+        """
+        Ambil detail records untuk satu nama_kpi tertentu (expand group).
+        Menampilkan semua individual records dalam satu group KPI.
+
+        Args:
+            nama_kpi: Nama KPI yang dicari
+            skip: Pagination offset
+            limit: Pagination limit
+
+        Returns:
+            DetailRecordsResponse dengan detail records dan pagination info
+        """
+        result = await self.service.get_detail_records_by_nama_kpi(nama_kpi, skip, limit)
+        records = [KPIRecordResponse.from_orm(r) for r in result["records"]]
+        return DetailRecordsResponse(
+            nama_kpi=result["nama_kpi"],
+            records=records,
+            pagination=result["pagination"]
+        )
+
+    # ================================================================ #
+    #  UPDATE Operations                                               #
+    # ================================================================ #
+
+    async def update_record(self, record_id: UUID, request: UpdateKPIRecordRequest) -> KPIRecordResponse:
+        """
+        Update KPI record.
+
+        Args:
+            record_id: UUID dari record yang diupdate
+            request: UpdateKPIRecordRequest dengan field yang diupdate
+
+        Returns:
+            KPIRecordResponse: KPI record yang sudah diupdate
+        """
+        result = await self.service.update_record(record_id, request.dict(exclude_unset=True))
+        return KPIRecordResponse.from_orm(result)
+
+    # ================================================================ #
+    #  DELETE Operations                                               #
+    # ================================================================ #
+
+    async def delete_record(self, record_id: UUID) -> DeleteResponse:
+        """
+        Hapus satu KPI record.
+
+        Args:
+            record_id: UUID dari record yang dihapus
+
+        Returns:
+            DeleteResponse dengan message
+        """
+        result = await self.service.delete_record(record_id)
+        return DeleteResponse(**result)
+
+    async def delete_records_by_ids(self, request: BulkDeleteKPIRecordsRequest) -> BulkDeleteResponse:
+        """
+        Hapus multiple KPI records.
+
+        Args:
+            request: BulkDeleteKPIRecordsRequest dengan list record IDs
+
+        Returns:
+            BulkDeleteResponse dengan count dan status
+        """
+        result = await self.service.delete_records_by_ids(request.record_ids)
+        return BulkDeleteResponse(**result)

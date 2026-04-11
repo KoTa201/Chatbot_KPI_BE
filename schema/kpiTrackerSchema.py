@@ -1,0 +1,251 @@
+"""
+schemas/kpiTrackerSchema.py
+Pydantic models untuk request/response endpoint KPI Tracker management.
+"""
+
+from typing import Optional, List, Any
+from datetime import datetime
+from uuid import UUID
+from pydantic import BaseModel, Field
+
+
+# ================================================================ #
+#  REQUEST Schemas (Input Validation)                              #
+# ================================================================ #
+
+class CreateKPIRecordRequest(BaseModel):
+    """Schema untuk create satu KPI record baru."""
+    nama_kpi: str = Field(..., min_length=1, max_length=255,
+                          description="Nama KPI (required)")
+    tahun: Optional[int] = Field(
+        None, ge=2000, le=2031, description="Tahun (2000-2031)")
+    realisasi: Optional[str] = Field(
+        None, max_length=100, description="Realisasi")
+    nama_orang: Optional[str] = Field(
+        None, max_length=255, description="Nama orang")
+    keterangan: Optional[str] = Field(None, description="Keterangan/catatan")
+    document_text: Optional[str] = Field(
+        None, description="Teks dokumen untuk RAG")
+    source_sheet_id: Optional[str] = Field(
+        None, max_length=255, description="ID sheet sumber")
+    source_sheet_name: Optional[str] = Field(
+        None, max_length=255, description="Nama sheet sumber")
+    source_row: Optional[int] = Field(
+        None, ge=1, description="Nomor baris sumber")
+
+    class Config:
+        example = {
+            "nama_kpi": "KPI Penjualan",
+            "tahun": 2026,
+            "realisasi": "95%",
+            "nama_orang": "John Doe",
+            "keterangan": "Achieved target",
+            "source_sheet_name": "Q1 Report"
+        }
+
+
+class UpdateKPIRecordRequest(BaseModel):
+    """Schema untuk update KPI record (semua field optional)."""
+    nama_kpi: Optional[str] = Field(None, min_length=1, max_length=255)
+    tahun: Optional[int] = Field(None, ge=2000, le=2031)
+    realisasi: Optional[str] = Field(None, max_length=100)
+    nama_orang: Optional[str] = Field(None, max_length=255)
+    keterangan: Optional[str] = None
+    document_text: Optional[str] = None
+    source_sheet_id: Optional[str] = Field(None, max_length=255)
+    source_sheet_name: Optional[str] = Field(None, max_length=255)
+    source_row: Optional[int] = Field(None, ge=1)
+
+    class Config:
+        example = {
+            "realisasi": "98%",
+            "keterangan": "Updated achievement"
+        }
+
+
+class BulkCreateKPIRecordsRequest(BaseModel):
+    """Schema untuk bulk create multiple KPI records."""
+    records: List[CreateKPIRecordRequest] = Field(
+        ..., min_items=1, max_items=10000)
+
+    class Config:
+        example = {
+            "records": [
+                {
+                    "nama_kpi": "KPI A",
+                    "tahun": 2026,
+                    "realisasi": "90%"
+                },
+                {
+                    "nama_kpi": "KPI B",
+                    "tahun": 2026,
+                    "realisasi": "85%"
+                }
+            ]
+        }
+
+
+class BulkDeleteKPIRecordsRequest(BaseModel):
+    """Schema untuk bulk delete multiple KPI records."""
+    record_ids: List[UUID] = Field(..., min_items=1, max_items=1000)
+
+    class Config:
+        example = {
+            "record_ids": [
+                "550e8400-e29b-41d4-a716-446655440000",
+                "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+            ]
+        }
+
+
+class IngestAllSheetsRequest(BaseModel):
+    """Schema untuk ingest semua sheet dari Google Sheets."""
+    sheet_url: str = Field(..., description="URL Google Sheets")
+    nama_orang_override: Optional[str] = Field(
+        None, max_length=255,
+        description="Override nama orang dari metadata sheet (optional)")
+    skip_on_error: bool = Field(
+        True, description="Skip sheet dengan error atau stop")
+
+    class Config:
+        example = {
+            "sheet_url": "https://docs.google.com/spreadsheets/d/abc123/edit",
+            "nama_orang_override": "John Doe",
+            "skip_on_error": True
+        }
+
+
+# ================================================================ #
+#  RESPONSE Schemas (Output Format)                                #
+# ================================================================ #
+
+class KPIRecordResponse(BaseModel):
+    """Schema untuk single KPI record response."""
+    id: UUID
+    nama_kpi: str
+    tahun: Optional[int]
+    realisasi: Optional[str]
+    nama_orang: Optional[str]
+    keterangan: Optional[str]
+    document_text: Optional[str]
+    source_sheet_id: Optional[str]
+    source_sheet_name: Optional[str]
+    source_row: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PaginationInfo(BaseModel):
+    """Schema untuk pagination metadata."""
+    skip: int = Field(..., ge=0, description="Offset records")
+    limit: int = Field(..., ge=1, le=500, description="Limit records per page")
+    total: int = Field(..., ge=0, description="Total records")
+    has_more: bool = Field(..., description="Ada records berikutnya")
+
+
+class GroupInfo(BaseModel):
+    """Schema untuk group info dalam grouped response."""
+    nama_kpi: str
+    total_count: int = Field(..., ge=0,
+                             description="Total records dalam group")
+    tahun_list: List[int] = Field(
+        default_factory=list, description="List tahun")
+    sheet_names: List[str] = Field(
+        default_factory=list, description="List sheet names")
+    sheet_count: int = Field(..., ge=0, description="Jumlah unique sheets")
+    last_updated: Optional[datetime] = Field(
+        None, description="Last update timestamp")
+
+
+class GroupedKPIResponse(BaseModel):
+    """Schema untuk grouped KPI records response."""
+    groups: List[GroupInfo]
+    pagination: PaginationInfo
+
+
+class DetailRecordsResponse(BaseModel):
+    """Schema untuk detail records (expand group) response."""
+    nama_kpi: str = Field(..., description="Nama KPI yang di-expand")
+    records: List[KPIRecordResponse]
+    pagination: PaginationInfo
+
+
+class BulkCreateResponse(BaseModel):
+    """Schema untuk bulk create response."""
+    status: str = Field(..., description="success/partial/failed")
+    count: int = Field(..., ge=0, description="Jumlah records berhasil dibuat")
+    message: str
+
+
+class BulkDeleteResponse(BaseModel):
+    """Schema untuk bulk delete response."""
+    status: str = Field(..., description="success/partial/failed")
+    count: int = Field(..., ge=0,
+                       description="Jumlah records berhasil dihapus")
+    message: str
+
+
+class DeleteResponse(BaseModel):
+    """Schema untuk delete single record response."""
+    message: str
+
+
+class CountResponse(BaseModel):
+    """Schema untuk count response."""
+    total: int = Field(..., ge=0, description="Total records")
+
+
+class ListResponse(BaseModel):
+    """Schema untuk list records response."""
+    records: List[KPIRecordResponse]
+    pagination: PaginationInfo
+
+
+# ================================================================ #
+#  Existing Schemas (untuk kompatibilitas)                         #
+# ================================================================ #
+
+class SheetMeta(BaseModel):
+    nama_orang: Optional[str]
+    bulan: Optional[str]
+    bulan_num: Optional[int]
+    tahun: Optional[int]
+
+
+class IngestionResponse(BaseModel):
+    log_id: int
+    sheet_id: str
+    sheet_name: str
+    meta: SheetMeta
+    total_rows: int
+    ingested: int
+    failed: int
+    errors: list[str]
+    status: str
+
+
+class SheetIngestionResult(BaseModel):
+    """Hasil ingestion per-sheet."""
+    log_id:     Optional[int] = None
+    sheet_name: str
+    meta:       Optional[SheetMeta] = None
+    total_rows: Optional[int] = None
+    ingested:   Optional[int] = None
+    failed:     Optional[int] = None
+    errors:     Optional[List[Any]] = None
+    status:     str                          # success / partial / failed / skipped
+    reason:     Optional[str] = None         # diisi jika status = skipped
+
+
+class BulkIngestionResponse(BaseModel):
+    """Response untuk ingest semua sheet sekaligus."""
+    spreadsheet_url:        str
+    total_sheets_processed: int
+    grand_total_rows:       int
+    grand_ingested:         int
+    grand_failed:           int
+    overall_status:         str
+    sheets:                 List[SheetIngestionResult]
