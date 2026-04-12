@@ -1,74 +1,128 @@
 """
 repository/ingestionLogRepository.py
-Semua operasi CRUD ke tabel IngestionLog.
-Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
+Operasi DB untuk IngestionLog — append-only, tidak ada update kecuali
+status akhir (running → success / partial / failed).
+
+Pola dua langkah:
+  1. create()        → buat log dengan status='running' sebelum proses mulai
+  2. update_status() → update setelah proses selesai (berhasil atau gagal)
+
+Ini memastikan setiap ingestion tercatat bahkan jika prosesnya crash di tengah.
 """
 
 from typing import Optional
+from uuid import UUID
+
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from model.IngestionLog import IngestionLogORM
-import json
+from model.Base import IngestionSourceType
 
 
 class IngestionLogRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.ingestion_log: IngestionLogORM = None
 
-    # ------------------------------------------------------------------ #
-    #  IngestionLog                                                        #
-    # ------------------------------------------------------------------ #
+    # ── CREATE ───────────────────────────────────────────────────────────────
 
-    async def create_ingestion_log(
+    async def create(
         self,
+        source_type: str,           # 'scheduler' | 'kpi_master' | 'kpi_tracker'
+        source_id: UUID,            # group_id atau scheduler_id
         sheet_url: str,
-        spreadsheet_id: str,
-        sheet_name: str,
-        nama_orang: Optional[str],
-        total_rows: int,
-        ingested_count: int,
-        errors: list[str],
-        status: str,
-        source_type: str = "kpi_tracker",
+        sheet_id: Optional[str] = None,
+        sheet_name: Optional[str] = None,
+        scheduler_id: Optional[UUID] = None,
     ) -> IngestionLogORM:
         """
-        Insert satu baris log ingestion ke tabel IngestionLog.
-        Kembalikan instance ORM yang sudah ter-refresh (id terisi).
-        """
-        self.ingestion_log = IngestionLogORM(
-            sheet_url=sheet_url,
-            sheet_id=spreadsheet_id,
-            sheet_name=sheet_name,
-            nama_orang=nama_orang,
-            total_rows=total_rows,
-            ingested_count=ingested_count,
-            failed_count=len(errors),
-            errors=json.dumps(errors, ensure_ascii=False) if errors else None,
-            status=status,
-            source_type=source_type,
-        )
-        self.db.add(self.ingestion_log)
-        await self.db.commit()
-        await self.db.refresh(self.ingestion_log)
-        return self.ingestion_log
+        Buat IngestionLog baru dengan status awal 'running'.
 
-    async def get_ingestion_logs(
+        source_id diisi dengan:
+          - group_id   jika source_type = 'kpi_master' atau 'kpi_tracker'
+          - scheduler_id jika source_type = 'scheduler'
+        """
+        try:
+            log = IngestionLogORM(
+                source_type=source_type,
+                source_id=source_id,
+                scheduler_id=scheduler_id,
+                sheet_url=sheet_url,
+                sheet_id=sheet_id,
+                sheet_name=sheet_name,
+                status="running",
+            )
+            self.db.add(log)
+            await self.db.flush()   # Dapat ID tanpa commit — masih satu transaksi
+            return log
+
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal buat IngestionLog: {str(e)}",
+            )
+
+    # ── UPDATE STATUS ────────────────────────────────────────────────────────
+
+    async def update_status(
         self,
-        limit: int,
-        source_type: Optional[str] = None,
-        success: Optional[bool] = None,
+        log_id: UUID,
+        status: str,                        # 'success' | 'partial' | 'failed'
+        total_rows: int = 0,
+        ingested_count: int = 0,
+        failed_count: int = 0,
+        errors: Optional[str] = None,
+    ) -> IngestionLogORM:
+        """
+        Update status akhir IngestionLog setelah proses selesai.
+        Dipanggil sekali — log tidak pernah diubah lagi setelah ini.
+        """
+        try:
+            log = await self.db.get(IngestionLogORM, log_id)
+            if not log:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"IngestionLog {log_id} tidak ditemukan",
+                )
+
+            log.status = status
+            log.total_rows = total_rows
+            log.ingested_count = ingested_count
+            log.failed_count = failed_count
+            log.errors = errors
+
+            await self.db.commit()
+            await self.db.refresh(log)
+            return log
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal update status IngestionLog: {str(e)}",
+            )
+
+    # ── READ ─────────────────────────────────────────────────────────────────
+
+    async def get_by_source(
+        self,
+        source_type: str,
+        source_id: UUID,
+        limit: int = 10,
     ) -> list[IngestionLogORM]:
-        """
-        Ambil riwayat ingestion log, diurutkan dari terbaru.
-        Kembalikan list ORM instance.
-        """
-        query = select(IngestionLogORM).order_by(
-            IngestionLogORM.created_at.desc())
-        if source_type:
-            query = query.where(IngestionLogORM.source_type == source_type)
-        if success:
-            query = query.where(IngestionLogORM.status == "success")
-        result = await self.db.execute(query.limit(limit))
+        """Audit: ambil semua log ingestion untuk satu entitas."""
+        result = await self.db.execute(
+            select(IngestionLogORM)
+            .where(
+                IngestionLogORM.source_type == source_type,
+                IngestionLogORM.source_id == source_id,
+            )
+            .order_by(IngestionLogORM.created_at.desc())
+            .limit(limit)
+        )
         return result.scalars().all()

@@ -50,7 +50,8 @@ def _is_category_row(row: pd.Series) -> bool:
         return False
     val = str(row.iloc[0]).strip()
     rest_empty = all(
-        v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() == ""
+        v is None or (isinstance(v, float) and pd.isna(v)
+                      ) or str(v).strip() == ""
         for v in row.iloc[1:]
     )
     return val.lower().startswith("kpi ") and rest_empty
@@ -123,11 +124,13 @@ def parse_kpi_master_dataframe(
             continue
 
         if current_category is None:
-            errors.append(f"Row {row_idx + 1}: no category header found before data row, skipped.")
+            errors.append(
+                f"Row {row_idx + 1}: no category header found before data row, skipped.")
             continue
 
         if not col_map:
-            errors.append(f"Row {row_idx + 1}: data row found but no column header row seen yet in category '{current_category}', skipped.")
+            errors.append(
+                f"Row {row_idx + 1}: data row found but no column header row seen yet in category '{current_category}', skipped.")
             continue
 
         kpi_name = _get_field(row, col_map, "kpi_name")
@@ -149,8 +152,6 @@ def parse_kpi_master_dataframe(
             "partial":                _get_field(row, col_map, "partial"),
             "fail":                   _get_field(row, col_map, "fail"),
             "responsibility_persons": _normalize_persons(_get_field(row, col_map, "responsibility_persons")),
-            "source_sheet_id":        spreadsheet_id,
-            "source_sheet_name":      sheet_name,
         })
 
     return records, errors

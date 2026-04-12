@@ -1,133 +1,199 @@
 """
-services/kpiMasterIngestionService.py
-Service untuk KPI Master ingestion dari Google Sheets.
+service/kpiMasterIngestionService.py
+Orchestrator ingestion KPI Master dari Google Sheets.
+
+Alur "trigger-like" saat ingest:
+  Ketika ingest dipanggil, secara otomatis dan transparan:
+    1. KPIGroup di-upsert (get_or_create) berdasarkan sheet_id.
+       → Implementasi mirip DB trigger: terjadi sebelum master disimpan,
+         tanpa controller/caller perlu tahu.
+    2. IngestionLog dibuat dengan status 'running'.
+    3. Records di-parse dan di-inject dengan group_id.
+    4. KPI Master di-upsert.
+    5. IngestionLog di-update ke status akhir (success/partial/failed).
+
+Mengapa tidak pakai PostgreSQL trigger murni?
+  - IngestionLog butuh konteks runtime (sheet_url, jumlah baris, error messages)
+    yang tidak tersedia di DB trigger.
+  - KPIGroup butuh data dari Google Sheets API (sheet_id, sheet_name)
+    yang hanya ada di application layer.
+  Solusi: SQLAlchemy session event (lihat _register_session_events) untuk
+  validasi group_id, orchestration tetap di service layer.
 """
 
-from typing import Optional, Dict, Any, List, Tuple
 import logging
+import traceback
+from typing import Optional
+from uuid import UUID
 
 from fastapi import HTTPException
 
-from repository.kpiMasterRepository import KPIMasterRepository
+from model.Base import IngestionSourceType
 from repository.ingestionLogRepository import IngestionLogRepository
+from repository.kpiGroupRepository import KPIGroupRepository
+from repository.kpiMasterRepository import KPIMasterRepository
 from service.kpiMasterService import KPIMasterService
-from service.googleSheetService import GoogleSheetService
-from utils.kpiMasterParser import parse_kpi_master_dataframe
-
 
 logger = logging.getLogger(__name__)
 
 
 class KPIMasterIngestionService:
-    """Service untuk menangani ingestion KPI Master dari Google Sheets."""
 
-    def __init__(self, repo: KPIMasterRepository, service: KPIMasterService, log_repo: IngestionLogRepository):
-        self.repo = repo
-        self.service = service
+    def __init__(
+        self,
+        kpi_repo:    KPIMasterRepository,
+        kpi_service: KPIMasterService,
+        log_repo:    IngestionLogRepository,
+        group_repo:  KPIGroupRepository,
+    ):
+        self.kpi_repo = kpi_repo
+        self.kpi_service = kpi_service
         self.log_repo = log_repo
-        self.google_service = GoogleSheetService()
+        self.group_repo = group_repo
+
+    # ================================================================ #
+    #  PUBLIC: Entry point ingestion                                    #
+    # ================================================================ #
 
     async def ingest_kpi_master(
         self,
         sheet_url: str,
-        tahun: int,
-    ) -> Dict[str, Any]:
+        tahun:     int,
+    ) -> dict:
         """
-        Ingest KPI Master dari Google Sheets untuk tahun tertentu.
+        Ingest KPI Master dari Google Sheets.
 
-        Args:
-            sheet_url: URL Google Sheets
-            tahun: Tahun untuk KPI Master
+        Side effects (otomatis, tanpa input dari caller):
+          - KPIGroup di-upsert
+          - IngestionLog dibuat dan diupdate
 
         Returns:
-            Dict dengan hasil ingestion (count, status, message)
+            {"status", "count", "message", "group_id", "log_id"}
         """
-        try:
-            # Validasi tahun
-            self.service._validate_tahun(tahun)
+        log_id = None
+        group_id = None
 
-            # Fetch sheet
+        try:
+            # ── STEP 1: Fetch sheet ──────────────────────────────────
+            logger.info(f"[ingest_kpi_master] Fetching sheet: {sheet_url}")
             df, spreadsheet_id, sheet_name = self._fetch_sheet(sheet_url)
 
-            # Parse records
-            records, errors = self._parse_records(
-                df=df,
-                spreadsheet_id=spreadsheet_id,
+            logger.error(f"{sheet_name}")
+
+            # ── STEP 2: Auto-create KPIGroup (trigger-like) ──────────
+            # Dipanggil sebelum apapun disimpan ke kpi_master_records.
+            # Jika grup sudah ada (re-ingest), data sheet di-refresh.
+            logger.info(
+                f"[ingest_kpi_master] Upserting KPIGroup for sheet_id={spreadsheet_id}")
+            group = await self.group_repo.get_or_create(
+                sheet_id=spreadsheet_id,
+                group_type="master",
+                sheet_url=sheet_url,
                 sheet_name=sheet_name,
-                tahun=tahun,
+                nama_grup=sheet_name + " Master " + str(tahun),
+            )
+            group_id = group.id
+            logger.info(
+                f"[ingest_kpi_master] KPIGroup ready: group_id={group_id}")
+
+            # ── STEP 3: Create IngestionLog (status=running) ─────────
+            # Log dibuat SEBELUM proses dimulai sehingga crash di tengah
+            # tetap terekam dengan status 'running' (detectable sebagai hung).
+            log = await self.log_repo.create(
+                source_type=IngestionSourceType.KPI_MASTER,
+                source_id=group_id,
+                sheet_url=sheet_url,
+                sheet_id=spreadsheet_id,
+                sheet_name=sheet_name,
+            )
+            log_id = log.id
+            logger.info(
+                f"[ingest_kpi_master] IngestionLog created: log_id={log_id}")
+
+            # ── STEP 4: Parse records ────────────────────────────────
+            records, errors = self._parse(
+                df, spreadsheet_id, sheet_name, tahun)
+
+            logger.error(f"{errors}")
+
+            if not records:
+                await self.log_repo.update_status(
+                    log_id=log_id,
+                    status="failed",
+                    total_rows=0,
+                    ingested_count=0,
+                    errors="Tidak ada records valid setelah parsing.",
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail="Sheet tidak menghasilkan records valid.",
+                )
+
+            # Inject group_id ke setiap record (tidak boleh ada di parser)
+            for record in records:
+                record["group_id"] = group_id
+
+            total_rows = len(records)
+            logger.info(
+                f"[ingest_kpi_master] Parsed {total_rows} records, {len(errors)} errors")
+
+            # ── STEP 5: Upsert KPI Master records ───────────────────
+            ingested_count = await self.kpi_repo.upsert_by_group(records)
+
+            # ── STEP 6: Finalize IngestionLog ────────────────────────
+            status = self._resolve_status(ingested_count, total_rows, errors)
+            error_summary = self._format_errors(errors) if errors else None
+
+            await self.log_repo.update_status(
+                log_id=log_id,
+                status=status,
+                total_rows=total_rows,
+                ingested_count=ingested_count,
+                failed_count=total_rows - ingested_count,
+                errors=error_summary,
             )
 
-            # Upsert ke DB via service (bukan langsung repository)
-            try:
-                result = await self.service.upsert_records(records)
-                ingested_count = result.get("count", len(records))
-            except Exception as e:
-                logger.error(f"Error upsert KPI Master records: {str(e)}")
-                ingested_count = 0
-                errors.append(f"Database error: {str(e)}")
-
-            # Log ingestion
-            status = self._resolve_status(ingested_count, errors)
-            try:
-                await self.log_repo.create_ingestion_log(
-                    sheet_url=sheet_url,
-                    spreadsheet_id=spreadsheet_id,
-                    sheet_name=sheet_name,
-                    nama_orang=None,
-                    total_rows=len(records) + len(errors),
-                    ingested_count=ingested_count,
-                    errors=errors,
-                    status=status,
-                    source_type="kpi_master",
-                )
-            except Exception as e:
-                logger.error(f"Error create ingestion log: {str(e)}")
-
             logger.info(
-                f"Ingestion completed: {ingested_count} KPI Master records ingested")
+                f"[ingest_kpi_master] Done: {ingested_count}/{total_rows} "
+                f"records, status={status}"
+            )
 
             return {
-                "status": status,
-                "count": ingested_count,
-                "message": f"Berhasil ingest {ingested_count} KPI Master records untuk tahun {tahun}",
-                "sheet_id": spreadsheet_id,
-                "sheet_name": sheet_name,
-                "tahun": tahun,
-                "total_rows": len(records) + len(errors),
-                "failed": len(errors),
-                "errors": errors,
+                "status":   status,
+                "count":    ingested_count,
+                "message":  f"Berhasil ingest {ingested_count} dari {total_rows} KPI Master records.",
+                "group_id": str(group_id),
+                "log_id":   str(log_id),
             }
 
         except HTTPException:
+            # Update log ke 'failed' jika log sudah dibuat
+            if log_id:
+                await self._mark_log_failed(log_id, "HTTPException saat proses ingestion.")
             raise
+
         except Exception as e:
-            logger.error(f"Error ingest KPI Master: {str(e)}")
+            logger.error(
+                f"[ingest_kpi_master] Unexpected error: {traceback.format_exc()}")
+            if log_id:
+                await self._mark_log_failed(log_id, str(e))
             raise HTTPException(
                 status_code=500,
-                detail=f"Error saat ingest KPI Master: {str(e)}",
+                detail=f"Error tidak terduga saat ingestion: {str(e)}",
             )
 
     # ================================================================ #
-    #  Private Helpers                                                 #
+    #  PRIVATE Helpers                                                 #
     # ================================================================ #
 
-    def _fetch_sheet(self, sheet_url: str) -> Tuple:
-        """
-        Fetch sheet dari Google Sheets.
-
-        Args:
-            sheet_url: URL Google Sheets
-
-        Returns:
-            Tuple (df, spreadsheet_id, sheet_name)
-
-        Raises:
-            HTTPException jika error
-        """
+    def _fetch_sheet(self, sheet_url: str):
+        """Fetch first sheet as raw DataFrame."""
         try:
-            df, spreadsheet_id, sheet_name, _ = self.google_service.fetch_sheet_as_dataframe(
+            from service.googleSheetService import GoogleSheetService
+            svc = GoogleSheetService()
+            df, spreadsheet_id, sheet_name, _ = svc.fetch_sheet_as_dataframe(
                 sheet_url=sheet_url,
-                sheet_name=None,
+                sheet_name="KPI",
                 sheet_index=0,
                 header=None,
             )
@@ -135,59 +201,56 @@ class KPIMasterIngestionService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"Error fetch sheet: {str(e)}")
             raise HTTPException(
                 status_code=500,
-                detail=f"Error saat fetch Google Sheets: {str(e)}",
+                detail=f"Error fetching sheet: {str(e)}",
             )
 
-    def _parse_records(
-        self,
-        df,
-        spreadsheet_id: str,
-        sheet_name: str,
-        tahun: int,
-    ) -> Tuple[List[Dict[str, Any]], List[str]]:
+    def _parse(self, df, spreadsheet_id: str, sheet_name: str, tahun: int):
         """
-        Parse DataFrame → (records, errors).
-
-        Args:
-            df: DataFrame dari sheet
-            spreadsheet_id: ID spreadsheet
-            sheet_name: Nama sheet
-            tahun: Tahun untuk record
-
-        Returns:
-            Tuple (records list, errors list)
-
-        Raises:
-            HTTPException jika format tidak valid
+        Parse DataFrame ke list records KPI Master.
+        group_id TIDAK diisi di sini — diisi oleh caller setelah KPIGroup ready.
         """
         try:
+            from utils.kpiMasterParser import parse_kpi_master_dataframe
             return parse_kpi_master_dataframe(
-                df=df,
-                spreadsheet_id=spreadsheet_id,
-                sheet_name=sheet_name,
-                tahun=tahun,
+                df, spreadsheet_id, sheet_name, tahun=tahun
             )
         except ValueError as e:
-            logger.error(f"Error parse records: {str(e)}")
             raise HTTPException(status_code=422, detail=str(e))
 
-    @staticmethod
-    def _resolve_status(ingested_count: int, errors: list) -> str:
-        """
-        Resolve status berdasarkan ingestion result.
-
-        Args:
-            ingested_count: Jumlah records yang berhasil
-            errors: List errors
-
-        Returns:
-            Status: success / partial / failed
-        """
-        if not errors:
-            return "success"
-        if ingested_count > 0:
+    def _resolve_status(
+        self,
+        ingested_count: int,
+        total_rows:     int,
+        errors:         list,
+    ) -> str:
+        """Tentukan status akhir berdasarkan jumlah sukses vs gagal."""
+        if ingested_count == 0:
+            return "failed"
+        if ingested_count < total_rows or errors:
             return "partial"
-        return "failed"
+        return "success"
+
+    def _format_errors(self, errors: list) -> str:
+        """Format list error jadi string ringkas untuk disimpan di log."""
+        if not errors:
+            return ""
+        MAX_ERRORS = 20
+        summary = errors[:MAX_ERRORS]
+        result = "; ".join(str(e) for e in summary)
+        if len(errors) > MAX_ERRORS:
+            result += f" ... dan {len(errors) - MAX_ERRORS} error lainnya."
+        return result
+
+    async def _mark_log_failed(self, log_id: UUID, reason: str) -> None:
+        """Best-effort update log ke 'failed'. Tidak raise jika gagal."""
+        try:
+            await self.log_repo.update_status(
+                log_id=log_id,
+                status="failed",
+                errors=reason,
+            )
+        except Exception:
+            logger.warning(
+                f"[ingest_kpi_master] Gagal update log {log_id} ke 'failed'")

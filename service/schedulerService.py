@@ -32,11 +32,11 @@ class SchedulerService:
     async def _run_ingestion_job(self, sheet_url: str) -> None:
         """Dieksekusi oleh APScheduler pada setiap interval tick."""
         from databaseConfig import AsyncSessionLocal
-        from controller.kpiTrackerController import kpiTrackerController
+        from controller.kpiTrackerController import KPITrackerController
         from repository.schedulerRepository import SchedulerRepository
 
         async with AsyncSessionLocal() as db:
-            controller = kpiTrackerController(db)
+            controller = KPITrackerController(db)
             await controller.ingest_all_sheets_from_google_sheets(
                 sheet_url=sheet_url,
                 nama_orang_override=None,
