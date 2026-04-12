@@ -72,6 +72,7 @@ ROLE_ROUTES: list[tuple[Optional[str], str, set[str]]] = [
     (None,    r"^/api/v1/chatbots",                     {ADMIN}),
     (None,    r"^/api/v1/ingest",                       {ADMIN, HRD}),
     (None,    r"^/api/v1/scheduler",                    {ADMIN, HRD}),
+    (None,    r"^/api/v1/kpi",                          {ADMIN, HRD}),
 
 ]
 

@@ -101,17 +101,19 @@ class BulkDeleteKPIRecordsRequest(BaseModel):
 class IngestAllSheetsRequest(BaseModel):
     """Schema untuk ingest semua sheet dari Google Sheets."""
     sheet_url: str = Field(..., description="URL Google Sheets")
-    nama_orang_override: Optional[str] = Field(
-        None, max_length=255,
-        description="Override nama orang dari metadata sheet (optional)")
+    nama_orang_override: str = Field(
+        ..., max_length=255,
+        description="Override nama orang dari metadata sheet")
     skip_on_error: bool = Field(
         True, description="Skip sheet dengan error atau stop")
+    tahun: int = Field(..., ge=2000, le=2031, description="Tahun (2000-2031)")
 
     class Config:
         example = {
             "sheet_url": "https://docs.google.com/spreadsheets/d/abc123/edit",
             "nama_orang_override": "John Doe",
-            "skip_on_error": True
+            "skip_on_error": True,
+            "tahun": 2026
         }
 
 
@@ -229,7 +231,7 @@ class IngestionResponse(BaseModel):
 
 class SheetIngestionResult(BaseModel):
     """Hasil ingestion per-sheet."""
-    log_id:     Optional[int] = None
+    log_id:     Optional[UUID] = None
     sheet_name: str
     meta:       Optional[SheetMeta] = None
     total_rows: Optional[int] = None

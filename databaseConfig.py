@@ -14,6 +14,7 @@ from config import settings
 
 engine = create_async_engine(
     settings.DATABASE_URL,
+    connect_args={"server_settings": {"search_path": "public"}},
     echo=False,
     pool_size=10,
     max_overflow=20,

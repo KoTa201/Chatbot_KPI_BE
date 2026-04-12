@@ -1,41 +1,62 @@
 """
 repository/kpiTrackerRepository.py
-Semua operasi CRUD ke database untuk proses ingestion KPI.
-Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
+Semua operasi CRUD ke database untuk KPI Tracker.
+
+Perubahan dari versi sebelumnya:
+  - bulk_insert: records kini harus berisi group_id + kpi_master_id,
+    TIDAK lagi nama_kpi / tahun / source_sheet_name (dihapus dari model).
+  - get_all_kpi_records: filter nama_kpi dan tahun kini via LEFT JOIN ke
+    kpi_master_records. Filter nama_orang tetap langsung di tracker.
+  - get_grouped_by_nama_kpi: GROUP BY kpi_master.kpi_name (bukan kolom lokal).
+    sheet_names diambil dari kpi_groups via JOIN group_id.
+  - get_grouped_by_nama_kpi_with_filters: sama, filter tahun ke kpi_master.tahun.
+  - get_detail_records_by_nama_kpi: filter lewat JOIN ke kpi_master.kpi_name.
+  - Hapus: self.ingestion_log (pindah ke IngestionLogRepository).
+  - Hapus: create_ingestion_log (pindah ke IngestionLogRepository).
+
+Interface publik (nama metode & parameter) TIDAK BERUBAH agar service tidak perlu
+tahu detail JOIN internal — kecuali bulk_insert yang sekarang butuh group_id.
 """
 
-import json
 from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func
 
-from model.IngestionLog import IngestionLogORM
-from model.KPITracker import KPIRecordORM
+from model.KPIGroup import KPIGroupORM
+from model.KPIMaster import KPIMasterORM
+from model.KPITracker import KPITrackerORM
 
 
-class kpiTrackerRepository:
+class KPITrackerRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.ingestion_log: IngestionLogORM = None
 
-    # ------------------------------------------------------------------ #
-    #  KPIRecord                                                           #
-    # ------------------------------------------------------------------ #
+    # ================================================================ #
+    #  CREATE                                                           #
+    # ================================================================ #
 
     async def bulk_insert_kpi_records(self, records: list[dict]) -> int:
         """
-        Bulk-insert list of KPI record dicts ke tabel KPIRecord.
-        Kembalikan jumlah baris yang berhasil disimpan.
-        Raise HTTP 500 jika commit gagal.
+        Bulk-insert KPI Tracker records.
+
+        Records HARUS sudah berisi:
+          - group_id      (UUID) — diisi ingestion service setelah KPIGroup dibuat
+          - kpi_master_id (UUID | None) — diisi setelah master matching
+
+        Kolom yang TIDAK LAGI ADA di records: nama_kpi, tahun, source_sheet_name.
+
+        Returns:
+            Jumlah baris yang berhasil disimpan.
         """
         if not records:
             return 0
 
-        orm_records = [KPIRecordORM(**r) for r in records]
+        orm_records = [KPITrackerORM(**r) for r in records]
         self.db.add_all(orm_records)
         try:
             await self.db.commit()
@@ -44,17 +65,18 @@ class kpiTrackerRepository:
             await self.db.rollback()
             raise HTTPException(
                 status_code=500,
-                detail=f"Gagal simpan KPI records ke database: {str(e)}",
+                detail=f"Gagal simpan KPI Tracker records ke database: {str(e)}",
             )
 
-    async def get_kpi_record_by_id(self, record_id: UUID) -> Optional[KPIRecordORM]:
-        """
-        Ambil KPI record berdasarkan ID.
-        Return: KPIRecordORM atau None jika tidak ditemukan.
-        """
+    # ================================================================ #
+    #  READ — single record                                            #
+    # ================================================================ #
+
+    async def get_kpi_record_by_id(self, record_id: UUID) -> Optional[KPITrackerORM]:
         try:
-            query = select(KPIRecordORM).where(KPIRecordORM.id == record_id)
-            result = await self.db.execute(query)
+            result = await self.db.execute(
+                select(KPITrackerORM).where(KPITrackerORM.id == record_id)
+            )
             return result.scalar_one_or_none()
         except Exception as e:
             raise HTTPException(
@@ -62,64 +84,286 @@ class kpiTrackerRepository:
                 detail=f"Gagal ambil KPI record: {str(e)}",
             )
 
-    async def get_all_kpi_records(self,
-                                  nama_kpi: Optional[str] = None,
-                                  tahun: Optional[int] = None,
-                                  nama_orang: Optional[str] = None,
-                                  skip: int = 0,
-                                  limit: int = 100) -> list[KPIRecordORM]:
+    # ================================================================ #
+    #  READ — list dengan filter                                       #
+    # ================================================================ #
+
+    async def get_all_kpi_records(
+        self,
+        nama_kpi:   Optional[str] = None,
+        tahun:      Optional[int] = None,
+        nama_orang: Optional[str] = None,
+        skip:       int = 0,
+        limit:      int = 100,
+    ) -> list[KPITrackerORM]:
         """
-        Ambil semua KPI records dengan optional filters dan pagination.
-        Params:
-            nama_kpi: Filter by nama KPI (case-insensitive)
-            tahun: Filter by tahun
-            nama_orang: Filter by nama orang (case-insensitive)
-            skip: Pagination offset
-            limit: Pagination limit
-        Return: List[KPIRecordORM]
+        Ambil KPI Tracker records dengan optional filters.
+
+        nama_kpi dan tahun di-filter lewat LEFT JOIN ke kpi_master_records
+        karena kolom tersebut sudah tidak ada di kpi_tracker_records.
+        nama_orang masih langsung di tracker.
         """
         try:
-            query = select(KPIRecordORM)
+            query = select(KPITrackerORM)
 
-            if nama_kpi:
-                query = query.where(
-                    KPIRecordORM.nama_kpi.ilike(f"%{nama_kpi}%"))
-            if tahun:
-                query = query.where(KPIRecordORM.tahun == tahun)
+            # Jika filter yang butuh JOIN aktif, tambahkan LEFT JOIN
+            if nama_kpi or tahun:
+                query = query.outerjoin(
+                    KPIMasterORM,
+                    KPITrackerORM.kpi_master_id == KPIMasterORM.id,
+                )
+                if nama_kpi:
+                    query = query.where(
+                        KPIMasterORM.kpi_name.ilike(f"%{nama_kpi}%")
+                    )
+                if tahun:
+                    query = query.where(KPIMasterORM.tahun == tahun)
+
             if nama_orang:
                 query = query.where(
-                    KPIRecordORM.nama_orang.ilike(f"%{nama_orang}%"))
+                    KPITrackerORM.nama_orang.ilike(f"%{nama_orang}%")
+                )
 
-            query = query.offset(skip).limit(limit).order_by(
-                desc(KPIRecordORM.created_at))
+            query = (
+                query
+                .order_by(desc(KPITrackerORM.created_at))
+                .offset(skip)
+                .limit(limit)
+            )
             result = await self.db.execute(query)
             return result.scalars().all()
+
         except Exception as e:
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal ambil KPI records: {str(e)}",
             )
 
-    async def update_kpi_record(self, record_id: UUID, update_data: dict) -> KPIRecordORM:
+    async def count_kpi_records(self) -> int:
+        try:
+            result = await self.db.execute(
+                select(func.count(KPITrackerORM.id))
+            )
+            return result.scalar() or 0
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal hitung KPI records: {str(e)}",
+            )
+
+    # ================================================================ #
+    #  READ — grouped by KPI name (via JOIN kpi_master)                #
+    # ================================================================ #
+
+    async def get_grouped_by_nama_kpi(
+        self, skip: int = 0, limit: int = 100
+    ) -> list[dict]:
         """
-        Update KPI record berdasarkan ID.
-        Return: KPIRecordORM yang sudah diupdate.
-        Raise HTTPException 404 jika record tidak ditemukan.
+        KPI Tracker dikelompokkan berdasarkan nama KPI dari kpi_master.
+
+        Sebelumnya: GROUP BY kpi_tracker.nama_kpi (kolom lokal).
+        Sekarang:   GROUP BY kpi_master.kpi_name via LEFT JOIN.
+
+        Unmatched trackers (kpi_master_id IS NULL) dikelompokkan
+        sebagai nama_kpi = 'UNMATCHED'.
+
+        sheet_names sekarang dari kpi_groups.sheet_name via JOIN group_id.
+        tahun_list dari kpi_master.tahun (satu nilai per master).
         """
         try:
-            # Cari record yang ada
+            query = (
+                select(
+                    func.coalesce(
+                        KPIMasterORM.kpi_name, "UNMATCHED"
+                    ).label("nama_kpi"),
+                    KPIMasterORM.id.label("kpi_master_id"),
+                    func.count(KPITrackerORM.id).label("total_count"),
+                    func.array_agg(
+                        KPIMasterORM.tahun, distinct=True
+                    ).label("tahun_list"),
+                    func.array_agg(
+                        KPIGroupORM.sheet_name, distinct=True
+                    ).label("sheet_names"),
+                    func.count(
+                        KPITrackerORM.group_id, distinct=True
+                    ).label("sheet_count"),
+                    func.max(KPITrackerORM.updated_at).label("last_updated"),
+                )
+                .outerjoin(
+                    KPIMasterORM,
+                    KPITrackerORM.kpi_master_id == KPIMasterORM.id,
+                )
+                .join(
+                    KPIGroupORM,
+                    KPITrackerORM.group_id == KPIGroupORM.id,
+                )
+                .group_by(KPIMasterORM.id, KPIMasterORM.kpi_name)
+                .order_by(desc(func.max(KPITrackerORM.updated_at)))
+                .offset(skip)
+                .limit(limit)
+            )
+
+            result = await self.db.execute(query)
+            rows = result.fetchall()
+
+            return [
+                {
+                    "nama_kpi":       row.nama_kpi,
+                    "kpi_master_id":  str(row.kpi_master_id) if row.kpi_master_id else None,
+                    "total_count":    row.total_count or 0,
+                    "tahun_list":     sorted(
+                        [t for t in (row.tahun_list or []) if t is not None]
+                    ),
+                    "sheet_names":    sorted(
+                        [s for s in (row.sheet_names or []) if s is not None]
+                    ),
+                    "sheet_count":    row.sheet_count or 0,
+                    "last_updated":   row.last_updated,
+                }
+                for row in rows
+            ]
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal ambil grouped KPI records: {str(e)}",
+            )
+
+    async def get_grouped_by_nama_kpi_with_filters(
+        self,
+        tahun:      Optional[int] = None,
+        nama_orang: Optional[str] = None,
+        skip:       int = 0,
+        limit:      int = 100,
+    ) -> list[dict]:
+        """
+        Grouped by kpi_master.kpi_name dengan optional filters.
+
+        tahun: filter ke kpi_master.tahun (bukan kolom lokal).
+        nama_orang: filter langsung di tracker.
+
+        Menggunakan SQL GROUP BY + WHERE (bukan Python grouping manual)
+        agar efisien untuk data besar.
+        """
+        try:
+            query = (
+                select(
+                    func.coalesce(
+                        KPIMasterORM.kpi_name, "UNMATCHED"
+                    ).label("nama_kpi"),
+                    KPIMasterORM.id.label("kpi_master_id"),
+                    func.count(KPITrackerORM.id).label("total_count"),
+                    func.array_agg(
+                        KPIMasterORM.tahun, distinct=True
+                    ).label("tahun_list"),
+                    func.array_agg(
+                        KPIGroupORM.sheet_name, distinct=True
+                    ).label("sheet_names"),
+                    func.count(
+                        KPITrackerORM.group_id, distinct=True
+                    ).label("sheet_count"),
+                    func.max(KPITrackerORM.updated_at).label("last_updated"),
+                )
+                .outerjoin(
+                    KPIMasterORM,
+                    KPITrackerORM.kpi_master_id == KPIMasterORM.id,
+                )
+                .join(
+                    KPIGroupORM,
+                    KPITrackerORM.group_id == KPIGroupORM.id,
+                )
+            )
+
+            if tahun:
+                query = query.where(KPIMasterORM.tahun == tahun)
+            if nama_orang:
+                query = query.where(
+                    KPITrackerORM.nama_orang.ilike(f"%{nama_orang}%")
+                )
+
+            query = (
+                query
+                .group_by(KPIMasterORM.id, KPIMasterORM.kpi_name)
+                .order_by(desc(func.max(KPITrackerORM.updated_at)))
+                .offset(skip)
+                .limit(limit)
+            )
+
+            result = await self.db.execute(query)
+            rows = result.fetchall()
+
+            return [
+                {
+                    "nama_kpi":      row.nama_kpi,
+                    "kpi_master_id": str(row.kpi_master_id) if row.kpi_master_id else None,
+                    "total_count":   row.total_count or 0,
+                    "tahun_list":    sorted(
+                        [t for t in (row.tahun_list or []) if t is not None]
+                    ),
+                    "sheet_names":   sorted(
+                        [s for s in (row.sheet_names or []) if s is not None]
+                    ),
+                    "sheet_count":   row.sheet_count or 0,
+                    "last_updated":  row.last_updated,
+                }
+                for row in rows
+            ]
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal ambil grouped KPI records dengan filter: {str(e)}",
+            )
+
+    async def get_detail_records_by_nama_kpi(
+        self,
+        nama_kpi: str,
+        skip:     int = 0,
+        limit:    int = 100,
+    ) -> list[KPITrackerORM]:
+        """
+        Detail records untuk satu KPI. Filter by kpi_master.kpi_name via JOIN.
+        Sebelumnya: WHERE kpi_tracker.nama_kpi = nama_kpi (kolom lokal).
+        Sekarang:   LEFT JOIN kpi_master WHERE kpi_master.kpi_name = nama_kpi.
+        """
+        try:
+            query = (
+                select(KPITrackerORM)
+                .outerjoin(
+                    KPIMasterORM,
+                    KPITrackerORM.kpi_master_id == KPIMasterORM.id,
+                )
+                .where(KPIMasterORM.kpi_name == nama_kpi)
+                .order_by(desc(KPITrackerORM.created_at))
+                .offset(skip)
+                .limit(limit)
+            )
+            result = await self.db.execute(query)
+            return result.scalars().all()
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal ambil detail records by nama_kpi: {str(e)}",
+            )
+
+    # ================================================================ #
+    #  UPDATE / DELETE                                                  #
+    # ================================================================ #
+
+    async def update_kpi_record(
+        self, record_id: UUID, update_data: dict
+    ) -> KPITrackerORM:
+        try:
             record = await self.get_kpi_record_by_id(record_id)
             if not record:
                 raise HTTPException(
                     status_code=404,
                     detail=f"KPI record dengan ID {record_id} tidak ditemukan",
                 )
-
-            # Update fields yang diberikan
             for key, value in update_data.items():
                 if hasattr(record, key):
                     setattr(record, key, value)
-
             await self.db.commit()
             await self.db.refresh(record)
             return record
@@ -133,20 +377,13 @@ class kpiTrackerRepository:
             )
 
     async def delete_kpi_record(self, record_id: UUID) -> bool:
-        """
-        Hapus KPI record berdasarkan ID.
-        Return: True jika berhasil dihapus.
-        Raise HTTPException 404 jika record tidak ditemukan.
-        """
         try:
-            # Cari record yang ada
             record = await self.get_kpi_record_by_id(record_id)
             if not record:
                 raise HTTPException(
                     status_code=404,
                     detail=f"KPI record dengan ID {record_id} tidak ditemukan",
                 )
-
             await self.db.delete(record)
             await self.db.commit()
             return True
@@ -160,21 +397,15 @@ class kpiTrackerRepository:
             )
 
     async def delete_kpi_records_by_ids(self, record_ids: list[UUID]) -> int:
-        """
-        Hapus multiple KPI records berdasarkan list IDs.
-        Return: Jumlah records yang berhasil dihapus.
-        """
         if not record_ids:
             return 0
-
         try:
-            query = select(KPIRecordORM).where(KPIRecordORM.id.in_(record_ids))
-            result = await self.db.execute(query)
+            result = await self.db.execute(
+                select(KPITrackerORM).where(KPITrackerORM.id.in_(record_ids))
+            )
             records = result.scalars().all()
-
             for record in records:
                 await self.db.delete(record)
-
             await self.db.commit()
             return len(records)
         except Exception as e:
@@ -184,156 +415,23 @@ class kpiTrackerRepository:
                 detail=f"Gagal hapus multiple KPI records: {str(e)}",
             )
 
-    async def count_kpi_records(self) -> int:
+    async def delete_kpi_records_by_group(self, group_id: UUID) -> int:
         """
-        Hitung total jumlah KPI records.
-        Return: Total records.
+        Hapus semua tracker records dalam satu grup/sheet.
+        Dipakai saat re-ingest sheet tracker yang sama.
         """
         try:
-            from sqlalchemy import func
-            query = select(func.count(KPIRecordORM.id))
-            result = await self.db.execute(query)
-            return result.scalar() or 0
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Gagal hitung KPI records: {str(e)}",
+            result = await self.db.execute(
+                select(KPITrackerORM).where(KPITrackerORM.group_id == group_id)
             )
-
-    async def get_grouped_by_nama_kpi(self, skip: int = 0, limit: int = 100) -> list[dict]:
-        """
-        Ambil KPI records yang dikelompokkan berdasarkan nama_kpi.
-        Return: List[Dict] dengan struktur group
-        """
-        try:
-            from sqlalchemy import func
-            
-            # Query untuk aggregate data per nama_kpi
-            query = select(
-                KPIRecordORM.nama_kpi,
-                func.count(KPIRecordORM.id).label('total_count'),
-                func.array_agg(KPIRecordORM.tahun, distinct=True).label('tahun_list'),
-                func.array_agg(KPIRecordORM.source_sheet_name, distinct=True).label('sheet_names'),
-                func.count(distinct=KPIRecordORM.source_sheet_name).label('sheet_count'),
-                func.max(KPIRecordORM.updated_at).label('last_updated'),
-            ).group_by(KPIRecordORM.nama_kpi).order_by(desc(func.max(KPIRecordORM.updated_at)))
-            
-            # Apply pagination
-            query = query.offset(skip).limit(limit)
-            
-            result = await self.db.execute(query)
-            rows = result.all()
-            
-            # Convert ke list of dicts
-            grouped_data = []
-            for row in rows:
-                grouped_data.append({
-                    'nama_kpi': row[0],
-                    'total_count': row[1] or 0,
-                    'tahun_list': [t for t in (row[2] or []) if t is not None],
-                    'sheet_names': [s for s in (row[3] or []) if s is not None],
-                    'sheet_count': row[4] or 0,
-                    'last_updated': row[5]
-                })
-            
-            return grouped_data
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Gagal ambil grouped KPI records: {str(e)}",
-            )
-
-    async def get_grouped_by_nama_kpi_with_filters(self,
-                                                    tahun: Optional[int] = None,
-                                                    nama_orang: Optional[str] = None,
-                                                    skip: int = 0,
-                                                    limit: int = 100) -> list[dict]:
-        """
-        Ambil KPI records grouped by nama_kpi dengan optional filters.
-        Return: List[Dict] dengan struktur group
-        """
-        try:
-            from sqlalchemy import func
-            
-            # Base query
-            query = select(KPIRecordORM)
-            
-            # Apply filters
-            if tahun:
-                query = query.where(KPIRecordORM.tahun == tahun)
-            if nama_orang:
-                query = query.where(KPIRecordORM.nama_orang.ilike(f"%{nama_orang}%"))
-            
-            # Get filtered records
-            result = await self.db.execute(query)
             records = result.scalars().all()
-            
-            # Group manually
-            groups = {}
             for record in records:
-                kpi_name = record.nama_kpi
-                if kpi_name not in groups:
-                    groups[kpi_name] = {
-                        'nama_kpi': kpi_name,
-                        'total_count': 0,
-                        'tahun_set': set(),
-                        'sheet_set': set(),
-                        'last_updated': None
-                    }
-                
-                groups[kpi_name]['total_count'] += 1
-                if record.tahun:
-                    groups[kpi_name]['tahun_set'].add(record.tahun)
-                if record.source_sheet_name:
-                    groups[kpi_name]['sheet_set'].add(record.source_sheet_name)
-                
-                if record.updated_at:
-                    current_updated = groups[kpi_name]['last_updated']
-                    if current_updated is None or record.updated_at > current_updated:
-                        groups[kpi_name]['last_updated'] = record.updated_at
-            
-            # Convert sets to lists dan sort
-            grouped_data = []
-            for group in groups.values():
-                grouped_data.append({
-                    'nama_kpi': group['nama_kpi'],
-                    'total_count': group['total_count'],
-                    'tahun_list': sorted(list(group['tahun_set'])),
-                    'sheet_names': sorted(list(group['sheet_set'])),
-                    'sheet_count': len(group['sheet_set']),
-                    'last_updated': group['last_updated']
-                })
-            
-            # Sort by last_updated descending
-            grouped_data.sort(key=lambda x: x['last_updated'] or '', reverse=True)
-            
-            # Apply pagination
-            total = len(grouped_data)
-            grouped_data = grouped_data[skip:skip+limit]
-            
-            return grouped_data
+                await self.db.delete(record)
+            await self.db.commit()
+            return len(records)
         except Exception as e:
+            await self.db.rollback()
             raise HTTPException(
                 status_code=500,
-                detail=f"Gagal ambil grouped KPI records dengan filter: {str(e)}",
-            )
-
-    async def get_detail_records_by_nama_kpi(self, nama_kpi: str, 
-                                             skip: int = 0, 
-                                             limit: int = 100) -> list[KPIRecordORM]:
-        """
-        Ambil detail records untuk satu nama_kpi tertentu.
-        Return: List[KPIRecordORM]
-        """
-        try:
-            query = select(KPIRecordORM).where(
-                KPIRecordORM.nama_kpi == nama_kpi
-            ).offset(skip).limit(limit).order_by(desc(KPIRecordORM.created_at))
-            
-            result = await self.db.execute(query)
-            return result.scalars().all()
-        except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Gagal ambil detail records by nama_kpi: {str(e)}",
+                detail=f"Gagal hapus KPI records by group: {str(e)}",
             )

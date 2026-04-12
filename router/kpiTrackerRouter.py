@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from controller.kpiTrackerController import kpiTrackerController
+from controller.kpiTrackerController import KPITrackerController
 from databaseConfig import get_db
 from schema.kpiTrackerSchema import (
     BulkIngestionResponse,
@@ -35,22 +35,22 @@ class IngestionRouter:
         self.router = APIRouter()
         self.setup_routes()
 
-    def _get_controller(self, db: AsyncSession) -> kpiTrackerController:
-        return kpiTrackerController(db)
+    def _get_controller(self, db: AsyncSession) -> KPITrackerController:
+        return KPITrackerController(db)
 
     def setup_routes(self):
         """Register all routes."""
 
         # ── Ingestion ──────────────────────────────────────────────── #
         self.router.add_api_route(
-            "/ingest/google-sheets",
+            "/google-sheets",
             self.ingest_from_google_sheets,
             methods=["POST"],
             response_model=BulkIngestionResponse,
             summary="Ingest KPI dari Google Sheets",
         )
         self.router.add_api_route(
-            "/ingest/logs",
+            "/logs",
             self.get_ingestion_logs,
             methods=["GET"],
             summary="Riwayat ingestion",

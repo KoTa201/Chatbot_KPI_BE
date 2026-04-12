@@ -1,0 +1,163 @@
+"""
+schema/kpiGroupSchema.py
+
+Pydantic schemas untuk KPI Group endpoints.
+
+Catatan penamaan nested response:
+  Kelas nested di file ini sengaja diberi prefix 'KPIGroup' —
+  KPIGroupMasterRecord dan KPIGroupTrackerRecord — untuk menghindari
+  collision dengan KPIMasterResponse / KPIRecordResponse yang mungkin
+  sudah ada di kpiMasterSchema.py atau kpiTrackerSchema.py lain.
+
+  Kedua kelas ini hanya dipakai di dalam KPIGroupResponse dan
+  tidak dimaksudkan untuk menggantikan schema di file lain.
+
+Penyesuaian field terhadap ORM saat ini:
+  KPIGroupMasterRecord  (≈ KPIMasterORM):
+    - TIDAK ADA: source_sheet_id, source_sheet_name  → ada di KPIGroupResponse
+    - TIDAK ADA: updated_at                          → kolom tidak ada di ORM
+    - ADA:       group_id                            → FK yang ada di ORM
+
+  KPIGroupTrackerRecord (≈ KPITrackerORM):
+    - TIDAK ADA: nama_kpi                            → kolom dihapus dari ORM
+    - TIDAK ADA: source_sheet_id, source_sheet_name  → ada di KPIGroupResponse
+    - ADA:       group_id, kpi_master_id             → FK yang ada di ORM
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
+
+
+# ─── Konstanta group_type ─────────────────────────────────────────────────────
+GROUP_TYPE_MASTER = "master"
+GROUP_TYPE_TRACKER = "tracker"
+VALID_GROUP_TYPES = {GROUP_TYPE_MASTER, GROUP_TYPE_TRACKER}
+
+
+# ─── Nested: KPI Master record (bersarang di dalam KPIGroupResponse) ──────────
+class KPIGroupMasterRecord(BaseModel):
+    """
+    Representasi satu baris kpi_master_records sebagai nested response.
+    Field disesuaikan 1:1 dengan KPIMasterORM — tidak ada field yang
+    tidak ada di ORM agar model_validate(orm_instance) tidak error.
+    """
+    id:                     UUID
+    group_id:               UUID
+    tahun:                  int
+    category:               str
+    kpi_name:               str
+    definisi_operasional:   Optional[str] = None
+    dihitung:               Optional[str] = None
+    tidak_dihitung:         Optional[str] = None
+    rumus:                  Optional[str] = None
+    target:                 Optional[str] = None
+    sumber_data:            Optional[str] = None
+    achieve:                Optional[str] = None
+    partial:                Optional[str] = None
+    fail:                   Optional[str] = None
+    responsibility_persons: Optional[str] = None
+    created_at:             datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Nested: KPI Tracker record (bersarang di dalam KPIGroupResponse) ─────────
+class KPIGroupTrackerRecord(BaseModel):
+    """
+    Representasi satu baris kpi_tracker_records sebagai nested response.
+    Field disesuaikan 1:1 dengan KPITrackerORM:
+      - nama_kpi tidak ada (dihapus dari ORM; dapat via JOIN ke master)
+      - source_sheet_* tidak ada (ada di KPIGroupResponse)
+    """
+    id:            UUID
+    group_id:      UUID
+    # nullable — data belum ter-match ke master
+    kpi_master_id: Optional[UUID] = None
+    tahun:         int
+    realisasi:     Optional[str] = None
+    nama_orang:    Optional[str] = None
+    keterangan:    Optional[str] = None
+    document_text: Optional[str] = None
+    source_row:    Optional[int] = None
+    created_at:    datetime
+    updated_at:    datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Base ─────────────────────────────────────────────────────────────────────
+class KPIGroupBase(BaseModel):
+    nama_grup:  str = Field(..., max_length=255)
+    group_type: str = Field(..., description="'master' atau 'tracker'")
+    sheet_url:  AnyHttpUrl = Field(..., description="URL Google Sheets sumber")
+    sheet_id:   Optional[str] = Field(None, max_length=255)
+    sheet_name: Optional[str] = Field(None, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_group_type(self) -> "KPIGroupBase":
+        if self.group_type not in VALID_GROUP_TYPES:
+            raise ValueError(
+                f"group_type harus salah satu dari: {sorted(VALID_GROUP_TYPES)}"
+            )
+        return self
+
+
+# ─── Create ───────────────────────────────────────────────────────────────────
+class KPIGroupCreate(KPIGroupBase):
+    pass
+
+
+# ─── Update ───────────────────────────────────────────────────────────────────
+class KPIGroupUpdate(BaseModel):
+    """
+    Partial update. Jika sheet_url berubah → service jalankan ulang ingestion.
+    Untuk grup 'master', `tahun` wajib disertakan jika sheet_url diubah.
+    """
+    nama_grup:  Optional[str] = Field(None, max_length=255)
+    sheet_url:  Optional[AnyHttpUrl] = Field(None)
+    sheet_id:   Optional[str] = Field(None, max_length=255)
+    sheet_name: Optional[str] = Field(None, max_length=255)
+    tahun:      Optional[int] = Field(None, ge=2000, le=2100)
+
+
+# ─── Response ─────────────────────────────────────────────────────────────────
+class KPIGroupResponse(BaseModel):
+    """
+    Response lengkap satu KPI Group.
+
+    Hanya satu list yang terisi sesuai group_type:
+      'master'  → master_records  terisi, tracker_records  = []
+      'tracker' → tracker_records terisi, master_records   = []
+    """
+    id:              UUID
+    nama_grup:       str
+    group_type:      str
+    sheet_url:       AnyHttpUrl
+    sheet_id:        Optional[str] = None
+    sheet_name:      Optional[str] = None
+    created_at:      datetime
+    updated_at:      datetime
+    master_records:  list[KPIGroupMasterRecord] = Field(default_factory=list)
+    tracker_records: list[KPIGroupTrackerRecord] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+# ─── List (pagination) ────────────────────────────────────────────────────────
+class KPIGroupListResponse(BaseModel):
+    """List endpoint tidak menyertakan records — hanya metadata grup."""
+    total:       int
+    page:        int
+    page_size:   int
+    total_pages: int
+    data:        list[KPIGroupResponse]
+
+
+# ─── Generic message ──────────────────────────────────────────────────────────
+class MessageResponse(BaseModel):
+    message: str
