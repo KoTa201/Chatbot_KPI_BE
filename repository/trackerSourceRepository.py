@@ -76,6 +76,12 @@ class TrackerSourceRepository:
         source = await self.get_by_id(source_id)
         if not source:
             return False
-        await self.db.delete(source)
-        await self.db.commit()
-        return True
+        try:
+            await self.db.delete(source)
+            await self.db.commit()
+            return True
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500, detail=f"Gagal hapus tracker source: {str(e)}"
+            )
