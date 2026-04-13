@@ -49,6 +49,7 @@ class TrackerSourceRouter:
             "/{source_id}",
             self.delete_source,
             methods=["DELETE"],
+            response_model=dict,
             summary="Delete tracker source",
         )
 

@@ -27,6 +27,7 @@ class TrackerSourceRepository:
             select(TrackerSourceORM)
             .where(TrackerSourceORM.is_active == True)
             .where(TrackerSourceORM.is_scheduled == True)
+            .order_by(TrackerSourceORM.created_at)
         )
         return list(result.scalars().all())
 
@@ -61,9 +62,15 @@ class TrackerSourceRepository:
             return None
         for key, val in updates.items():
             setattr(source, key, val)
-        await self.db.commit()
-        await self.db.refresh(source)
-        return source
+        try:
+            await self.db.commit()
+            await self.db.refresh(source)
+            return source
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500, detail=f"Gagal update tracker source: {str(e)}"
+            )
 
     async def delete(self, source_id: UUID) -> bool:
         source = await self.get_by_id(source_id)
