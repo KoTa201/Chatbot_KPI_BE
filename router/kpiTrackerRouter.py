@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from controller.kpiTrackerController import KPITrackerController
 from databaseConfig import get_db
 from schema.kpiTrackerSchema import (
+    BatchTrackerIngestionRequest,
+    BatchTrackerIngestionResponse,
     BulkIngestionResponse,
     BulkCreateKPIRecordsRequest,
     BulkDeleteKPIRecordsRequest,
@@ -42,6 +44,13 @@ class IngestionRouter:
         """Register all routes."""
 
         # ── Ingestion ──────────────────────────────────────────────── #
+        self.router.add_api_route(
+            "/google-sheets/batch",
+            self.ingest_batch_from_google_sheets,
+            methods=["POST"],
+            response_model=BatchTrackerIngestionResponse,
+            summary="Batch ingest KPI dari beberapa Google Sheets",
+        )
         self.router.add_api_route(
             "/google-sheets",
             self.ingest_from_google_sheets,
@@ -160,6 +169,13 @@ class IngestionRouter:
             skip_on_error=skip_on_error,
         )
         return await self._get_controller(db).ingest_all_sheets_from_google_sheets(request)
+
+    async def ingest_batch_from_google_sheets(
+        self,
+        request: BatchTrackerIngestionRequest,
+        db: AsyncSession = Depends(get_db),
+    ) -> BatchTrackerIngestionResponse:
+        return await self._get_controller(db).ingest_batch_from_google_sheets(request)
 
     async def get_ingestion_logs(
         self,
