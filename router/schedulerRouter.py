@@ -15,7 +15,7 @@ class SchedulerRouter:
     """Router untuk endpoints scheduler configuration."""
 
     def __init__(self):
-        self.router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
+        self.router = APIRouter(tags=["Scheduler"])
         self.scheduler_controller = None
         self.setup_routes()
 

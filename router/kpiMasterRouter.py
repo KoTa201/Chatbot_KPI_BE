@@ -34,14 +34,14 @@ class KPIMasterRouter:
 
         # ── Ingestion ──────────────────────────────────────────────── #
         self.router.add_api_route(
-            "/ingest",
+            "",
             self.ingest_kpi_master,
             methods=["POST"],
             response_model=IngestionResponse,
             summary="Ingest KPI Master dari Google Sheets",
         )
         self.router.add_api_route(
-            "/ingest/preview",
+            "/preview",
             self.preview_kpi_master,
             methods=["GET"],
             summary="Preview KPI Master tanpa simpan",
