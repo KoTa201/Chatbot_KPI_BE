@@ -251,3 +251,50 @@ class BulkIngestionResponse(BaseModel):
     grand_failed:           int
     overall_status:         str
     sheets:                 List[SheetIngestionResult]
+
+
+# ================================================================ #
+#  Batch Ingestion Schemas                                         #
+# ================================================================ #
+
+class BatchTrackerIngestionRequest(BaseModel):
+    """Request untuk batch ingest beberapa spreadsheet sekaligus."""
+    sheet_urls: List[str] = Field(
+        ..., min_length=1, max_length=20,
+        description="List URL Google Sheets (max 20)",
+    )
+    skip_on_error: bool = Field(
+        True,
+        description="Skip tab yang gagal atau batalkan per-spreadsheet",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "sheet_urls": [
+                    "https://docs.google.com/spreadsheets/d/abc/edit",
+                    "https://docs.google.com/spreadsheets/d/xyz/edit",
+                ],
+                "skip_on_error": True,
+            }
+        }
+
+
+class UrlIngestionResult(BaseModel):
+    """Hasil ingestion untuk satu URL dalam batch."""
+    sheet_url: str
+    status: str                           # success | partial | failed | error
+    total_sheets_processed: int = 0
+    grand_total_rows: int = 0
+    grand_ingested: int = 0
+    grand_failed: int = 0
+    sheets: List[SheetIngestionResult] = Field(default_factory=list)
+    error: Optional[str] = None           # diisi jika status = "error"
+
+
+class BatchTrackerIngestionResponse(BaseModel):
+    """Response untuk batch ingestion."""
+    total_urls: int
+    succeeded: int
+    failed: int
+    results: List[UrlIngestionResult]
