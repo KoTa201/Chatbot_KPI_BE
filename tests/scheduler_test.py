@@ -42,7 +42,6 @@ async def test_scheduler_repo_create_stores_config():
     repo = SchedulerRepository(db)
     with patch.object(db, "add") as mock_add:
         result = await repo.create_config(
-            sheet_url="https://docs.google.com/spreadsheets/d/X",
             interval_value=12,
             interval_unit="hours",
             is_enabled=True,
@@ -89,7 +88,6 @@ async def test_scheduler_controller_create_config():
 
     mock_config = MagicMock()
     mock_config.id = "uuid-1"
-    mock_config.sheet_url = "https://docs.google.com/spreadsheets/d/X"
     mock_config.interval_value = 12
     mock_config.interval_unit = "hours"
     mock_config.is_enabled = True
@@ -108,7 +106,6 @@ async def test_scheduler_controller_create_config():
                      new_callable=AsyncMock),
     ):
         result = await controller.create_config(
-            sheet_url="https://docs.google.com/spreadsheets/d/X",
             interval_value=12,
             interval_unit="hours",
             is_enabled=True,
