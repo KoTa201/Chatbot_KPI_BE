@@ -29,25 +29,26 @@ class SchedulerService:
             return IntervalTrigger(days=interval_value * 30)
         return IntervalTrigger(**{interval_unit: interval_value})
 
-    async def _run_ingestion_job(self, sheet_url: str) -> None:
-        """Dieksekusi oleh APScheduler pada setiap interval tick."""
+    async def _run_ingestion_job(self, sheet_urls: list[str]) -> None:
+        """Dieksekusi oleh APScheduler pada setiap interval tick.
+        Mengingest semua sheet_urls secara batch."""
         from databaseConfig import AsyncSessionLocal
         from controller.kpiTrackerController import KPITrackerController
         from repository.schedulerRepository import SchedulerRepository
+        from schema.kpiTrackerSchema import BatchTrackerIngestionRequest
 
         async with AsyncSessionLocal() as db:
             controller = KPITrackerController(db)
-            await controller.ingest_all_sheets_from_google_sheets(
-                sheet_url=sheet_url,
-                nama_orang_override=None,
+            request = BatchTrackerIngestionRequest(
+                sheet_urls=sheet_urls,
                 skip_on_error=True,
             )
+            await controller.ingest_batch_from_google_sheets(request)
 
         # Update run timestamps
         async with AsyncSessionLocal() as db:
             repo = SchedulerRepository(db)
             job = self.scheduler.get_job(self.JOB_ID)
-            # Get next run time from trigger if job exists
             next_run = None
             if job and hasattr(job, 'trigger'):
                 try:
@@ -72,7 +73,7 @@ class SchedulerService:
             self._run_ingestion_job,
             trigger=trigger,
             id=self.JOB_ID,
-            args=[config.sheet_url],
+            args=[config.sheet_urls],
             replace_existing=True,
             misfire_grace_time=self.MISFIRE_GRACE_TIME,
         )
@@ -82,7 +83,6 @@ class SchedulerService:
         job = self.scheduler.get_job(self.JOB_ID)
         if not job:
             return None
-        # Get next run time from trigger
         if hasattr(job, 'trigger'):
             try:
                 return job.trigger.get_next_fire_time(None, datetime.now(timezone.utc))
@@ -101,22 +101,17 @@ class SchedulerService:
             self.scheduler.shutdown()
 
 
-# ─── Global singleton instance untuk backward compatibility ─────────────────── #
+# ─── Global singleton instance ──────────────────────────────────────────── #
 _scheduler_instance = SchedulerService()
-
-# Wrapper functions untuk backward compatibility
 
 
 async def register_job(config) -> None:
-    """Backward compatibility wrapper."""
     await _scheduler_instance.register_job(config)
 
 
 def get_next_run_time() -> Optional[datetime]:
-    """Backward compatibility wrapper."""
     return _scheduler_instance.get_next_run_time()
 
 
 def get_scheduler_service() -> SchedulerService:
-    """Dapatkan scheduler service instance."""
     return _scheduler_instance
