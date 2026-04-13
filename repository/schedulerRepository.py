@@ -25,13 +25,13 @@ class SchedulerRepository:
 
     async def create_config(
         self,
-        sheet_url: str,
+        sheet_urls: list[str],
         interval_value: int,
         interval_unit: str,
         is_enabled: bool,
     ) -> SchedulerConfigORM:
         self.config = SchedulerConfigORM(
-            sheet_url=sheet_url,
+            sheet_urls=sheet_urls,
             interval_value=interval_value,
             interval_unit=interval_unit,
             is_enabled=is_enabled,

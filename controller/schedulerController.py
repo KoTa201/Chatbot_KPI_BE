@@ -24,7 +24,7 @@ class SchedulerController:
 
     async def create_config(
         self,
-        sheet_url: str,
+        sheet_urls: list[str],
         interval_value: int,
         interval_unit: str,
         is_enabled: bool,
@@ -36,7 +36,7 @@ class SchedulerController:
                 detail="Config sudah ada. Gunakan PATCH untuk mengubah.",
             )
         config = await self.repo.create_config(
-            sheet_url=sheet_url,
+            sheet_urls=sheet_urls,
             interval_value=interval_value,
             interval_unit=interval_unit,
             is_enabled=is_enabled,
@@ -64,14 +64,14 @@ class SchedulerController:
         config = await self.repo.get_config()
         if not config:
             raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
-        await self.scheduler_service._run_ingestion_job(config.sheet_url)
+        await self.scheduler_service._run_ingestion_job(config.sheet_urls)
         return {"message": "Ingestion triggered successfully."}
 
     @staticmethod
     def _to_dict(config) -> dict:
         return {
             "id":             str(config.id),
-            "sheet_url":      config.sheet_url,
+            "sheet_urls":     config.sheet_urls,
             "interval_value": config.interval_value,
             "interval_unit":  config.interval_unit,
             "is_enabled":     config.is_enabled,
