@@ -1,12 +1,11 @@
 """
-model/SchedulerConfig.py — tidak ada perubahan struktural besar.
-Minor: CheckConstraint interval_unit, server_default pada updated_at.
+model/SchedulerConfig.py
 """
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -30,7 +29,6 @@ class SchedulerConfigORM(Base):
     id: Mapped[SAUUID] = mapped_column(
         SAUUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    sheet_url: Mapped[str] = mapped_column(Text, nullable=False)
     interval_value: Mapped[int] = mapped_column(Integer, nullable=False)
     interval_unit: Mapped[str] = mapped_column(String(20), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(

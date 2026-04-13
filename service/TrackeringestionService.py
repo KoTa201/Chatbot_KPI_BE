@@ -45,9 +45,11 @@ from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import (
+    BatchTrackerIngestionResponse,
     BulkIngestionResponse,
     SheetIngestionResult,
     SheetMeta,
+    UrlIngestionResult,
 )
 from service.googleSheetService import GoogleSheetService
 from service.kpiTrackerService import KPITrackerService
@@ -191,6 +193,52 @@ class TrackerIngestionService:
                 status_code=500,
                 detail=f"Error saat ingest KPI Tracker: {str(e)}",
             )
+
+    async def ingest_batch(
+        self,
+        sheet_urls: list[str],
+        skip_on_error: bool = True,
+    ) -> BatchTrackerIngestionResponse:
+        """
+        Ingest beberapa spreadsheet sekaligus.
+        Setiap URL diproses independen — gagalnya satu URL tidak menghentikan URL lain.
+        """
+        results: list[UrlIngestionResult] = []
+
+        for url in sheet_urls:
+            try:
+                bulk = await self.ingest_all_sheets(
+                    sheet_url=url,
+                    skip_on_error=skip_on_error,
+                )
+                results.append(UrlIngestionResult(
+                    sheet_url=url,
+                    status=bulk.overall_status,
+                    total_sheets_processed=bulk.total_sheets_processed,
+                    grand_total_rows=bulk.grand_total_rows,
+                    grand_ingested=bulk.grand_ingested,
+                    grand_failed=bulk.grand_failed,
+                    sheets=bulk.sheets,
+                ))
+            except Exception as exc:
+                logger.warning(
+                    f"[TrackerIngestion] Batch: failed for url={url!r}: {exc}"
+                )
+                results.append(UrlIngestionResult(
+                    sheet_url=url,
+                    status="error",
+                    error=str(exc),
+                ))
+
+        succeeded = sum(
+            1 for r in results if r.status in ("success", "partial")
+        )
+        return BatchTrackerIngestionResponse(
+            total_urls=len(sheet_urls),
+            succeeded=succeeded,
+            failed=len(sheet_urls) - succeeded,
+            results=results,
+        )
 
     # ================================================================ #
     #  PRIVATE: Per-sheet pipeline                                     #

@@ -19,6 +19,8 @@ from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import (
+    BatchTrackerIngestionRequest,
+    BatchTrackerIngestionResponse,
     BulkCreateKPIRecordsRequest,
     BulkCreateResponse,
     BulkDeleteKPIRecordsRequest,
@@ -79,6 +81,18 @@ class KPITrackerController:
         return await self.ingestion_service.ingest_all_sheets(
             sheet_url=request.sheet_url,
             nama_orang_override=request.nama_orang_override,
+            skip_on_error=request.skip_on_error,
+        )
+
+    async def ingest_batch_from_google_sheets(
+        self,
+        request: BatchTrackerIngestionRequest,
+    ) -> BatchTrackerIngestionResponse:
+        """
+        Ingest beberapa spreadsheet sekaligus.
+        """
+        return await self.ingestion_service.ingest_batch(
+            sheet_urls=request.sheet_urls,
             skip_on_error=request.skip_on_error,
         )
 

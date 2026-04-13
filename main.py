@@ -15,6 +15,7 @@ from router import (
     kpiMasterRouter as kpi_master,
     schedulerRouter as scheduler_router,
     kpiGroupRouter as kpi_group_router,
+    trackerSourceRouter as tracker_source_router,
 )
 from fastapi.middleware.cors import CORSMiddleware
 from middleware.jwtMiddleware import JWTMiddleware
@@ -68,6 +69,9 @@ app.include_router(
     scheduler_router.router, prefix="/api/v1/scheduler", tags=["Scheduler"])
 app.include_router(
     kpi_group_router.router, prefix="/api/v1/kpi", tags=["KPI Groups"])
+app.include_router(
+    tracker_source_router.router, prefix="/api/v1/tracker-sources", tags=["Tracker Sources"]
+)
 
 
 @app.get("/", tags=["Health"])

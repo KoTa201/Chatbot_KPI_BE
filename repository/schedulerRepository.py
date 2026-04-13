@@ -1,7 +1,6 @@
 """
 repository/schedulerRepository.py
 """
-
 from datetime import datetime
 from typing import Optional
 
@@ -25,13 +24,11 @@ class SchedulerRepository:
 
     async def create_config(
         self,
-        sheet_url: str,
         interval_value: int,
         interval_unit: str,
         is_enabled: bool,
     ) -> SchedulerConfigORM:
         self.config = SchedulerConfigORM(
-            sheet_url=sheet_url,
             interval_value=interval_value,
             interval_unit=interval_unit,
             is_enabled=is_enabled,
@@ -44,7 +41,8 @@ class SchedulerRepository:
         except Exception as e:
             await self.db.rollback()
             raise HTTPException(
-                status_code=500, detail=f"Gagal simpan scheduler config: {str(e)}")
+                status_code=500, detail=f"Gagal simpan scheduler config: {str(e)}"
+            )
 
     async def update_config(self, updates: dict) -> Optional[SchedulerConfigORM]:
         if not self.config:
