@@ -2,7 +2,6 @@
 service/schedulerService.py
 APScheduler AsyncIOScheduler lifecycle + job management.
 """
-
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,7 +12,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 class SchedulerService:
     """
     Service untuk mengelola APScheduler lifecycle dan job scheduling.
-    Mengelola KPI Tracker ingestion job dengan interval yang dapat dikonfigurasi.
+    Saat job fire, query tracker_sources untuk mendapatkan URLs aktif+terjadwal.
     """
 
     JOB_ID = "kpi_tracker_ingestion"
@@ -24,18 +23,26 @@ class SchedulerService:
         self.scheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
 
     def _build_trigger(self, interval_value: int, interval_unit: str) -> IntervalTrigger:
-        """Bangun trigger berdasarkan interval_value dan interval_unit."""
         if interval_unit == "months":
             return IntervalTrigger(days=interval_value * 30)
         return IntervalTrigger(**{interval_unit: interval_value})
 
-    async def _run_ingestion_job(self, sheet_urls: list[str]) -> None:
+    async def _run_ingestion_job(self) -> None:
         """Dieksekusi oleh APScheduler pada setiap interval tick.
-        Mengingest semua sheet_urls secara batch."""
+        Query tracker_sources aktif+terjadwal lalu jalankan batch ingestion."""
         from databaseConfig import AsyncSessionLocal
         from controller.kpiTrackerController import KPITrackerController
         from repository.schedulerRepository import SchedulerRepository
+        from repository.trackerSourceRepository import TrackerSourceRepository
         from schema.kpiTrackerSchema import BatchTrackerIngestionRequest
+
+        async with AsyncSessionLocal() as db:
+            source_repo = TrackerSourceRepository(db)
+            sources = await source_repo.get_active_scheduled()
+            sheet_urls = [s.sheet_url for s in sources]
+
+        if not sheet_urls:
+            return
 
         async with AsyncSessionLocal() as db:
             controller = KPITrackerController(db)
@@ -50,10 +57,11 @@ class SchedulerService:
             repo = SchedulerRepository(db)
             job = self.scheduler.get_job(self.JOB_ID)
             next_run = None
-            if job and hasattr(job, 'trigger'):
+            if job and hasattr(job, "trigger"):
                 try:
                     next_run = job.trigger.get_next_fire_time(
-                        None, datetime.now(timezone.utc))
+                        None, datetime.now(timezone.utc)
+                    )
                 except Exception:
                     next_run = None
             await repo.update_run_times(
@@ -67,23 +75,20 @@ class SchedulerService:
             self.scheduler.remove_job(self.JOB_ID)
         if not config.is_enabled:
             return
-        trigger = self._build_trigger(
-            config.interval_value, config.interval_unit)
+        trigger = self._build_trigger(config.interval_value, config.interval_unit)
         self.scheduler.add_job(
             self._run_ingestion_job,
             trigger=trigger,
             id=self.JOB_ID,
-            args=[config.sheet_urls],
             replace_existing=True,
             misfire_grace_time=self.MISFIRE_GRACE_TIME,
         )
 
     def get_next_run_time(self) -> Optional[datetime]:
-        """Dapatkan waktu eksekusi job berikutnya."""
         job = self.scheduler.get_job(self.JOB_ID)
         if not job:
             return None
-        if hasattr(job, 'trigger'):
+        if hasattr(job, "trigger"):
             try:
                 return job.trigger.get_next_fire_time(None, datetime.now(timezone.utc))
             except Exception:
@@ -91,12 +96,10 @@ class SchedulerService:
         return None
 
     def start_scheduler(self) -> None:
-        """Mulai scheduler."""
         if not self.scheduler.running:
             self.scheduler.start()
 
     def stop_scheduler(self) -> None:
-        """Hentikan scheduler."""
         if self.scheduler.running:
             self.scheduler.shutdown()
 

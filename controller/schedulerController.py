@@ -1,7 +1,6 @@
 """
 controller/schedulerController.py
 """
-
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,7 +23,6 @@ class SchedulerController:
 
     async def create_config(
         self,
-        sheet_urls: list[str],
         interval_value: int,
         interval_unit: str,
         is_enabled: bool,
@@ -36,7 +34,6 @@ class SchedulerController:
                 detail="Config sudah ada. Gunakan PATCH untuk mengubah.",
             )
         config = await self.repo.create_config(
-            sheet_urls=sheet_urls,
             interval_value=interval_value,
             interval_unit=interval_unit,
             is_enabled=is_enabled,
@@ -52,7 +49,9 @@ class SchedulerController:
             {k: v for k, v in updates.items() if v is not None}
         )
         if not config:
-            raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
+            raise HTTPException(
+                status_code=404, detail="Scheduler config belum dibuat."
+            )
         await self.scheduler_service.register_job(config)
         next_run = self.scheduler_service.get_next_run_time()
         await self.repo.update_run_times(next_run_at=next_run)
@@ -63,15 +62,16 @@ class SchedulerController:
         """Manually fire the scheduled job once."""
         config = await self.repo.get_config()
         if not config:
-            raise HTTPException(status_code=404, detail="Scheduler config belum dibuat.")
-        await self.scheduler_service._run_ingestion_job(config.sheet_urls)
+            raise HTTPException(
+                status_code=404, detail="Scheduler config belum dibuat."
+            )
+        await self.scheduler_service._run_ingestion_job()
         return {"message": "Ingestion triggered successfully."}
 
     @staticmethod
     def _to_dict(config) -> dict:
         return {
             "id":             str(config.id),
-            "sheet_urls":     config.sheet_urls,
             "interval_value": config.interval_value,
             "interval_unit":  config.interval_unit,
             "is_enabled":     config.is_enabled,
