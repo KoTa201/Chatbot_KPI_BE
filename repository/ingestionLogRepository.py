@@ -18,7 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.IngestionLog import IngestionLogORM
-from model.Base import IngestionSourceType
 
 
 class IngestionLogRepository:
@@ -30,28 +29,19 @@ class IngestionLogRepository:
 
     async def create(
         self,
-        source_type: str,           # 'scheduler' | 'kpi_master' | 'kpi_tracker'
-        source_id: UUID,            # group_id atau scheduler_id
-        sheet_url: str,
-        sheet_id: Optional[str] = None,
-        sheet_name: Optional[str] = None,
+        kpi_group_id: UUID,
         scheduler_id: Optional[UUID] = None,
     ) -> IngestionLogORM:
         """
         Buat IngestionLog baru dengan status awal 'failed'.
 
-        source_id diisi dengan:
-          - group_id   jika source_type = 'kpi_master' atau 'kpi_tracker'
-          - scheduler_id jika source_type = 'scheduler'
+        kpi_group_id : grup (sheet) yang sedang diproses — wajib diisi.
+        scheduler_id : diisi hanya jika ingestion dipicu oleh scheduler.
         """
         try:
             log = IngestionLogORM(
-                source_type=source_type,
-                source_id=source_id,
+                kpi_group_id=kpi_group_id,
                 scheduler_id=scheduler_id,
-                sheet_url=sheet_url,
-                sheet_id=sheet_id,
-                sheet_name=sheet_name,
                 status="failed",
             )
             self.db.add(log)
@@ -109,19 +99,15 @@ class IngestionLogRepository:
 
     # ── READ ─────────────────────────────────────────────────────────────────
 
-    async def get_by_source(
+    async def get_by_group(
         self,
-        source_type: str,
-        source_id: UUID,
+        kpi_group_id: UUID,
         limit: int = 10,
     ) -> list[IngestionLogORM]:
-        """Audit: ambil semua log ingestion untuk satu entitas."""
+        """Audit: ambil semua log ingestion untuk satu KPIGroup."""
         result = await self.db.execute(
             select(IngestionLogORM)
-            .where(
-                IngestionLogORM.source_type == source_type,
-                IngestionLogORM.source_id == source_id,
-            )
+            .where(IngestionLogORM.kpi_group_id == kpi_group_id)
             .order_by(IngestionLogORM.created_at.desc())
             .limit(limit)
         )

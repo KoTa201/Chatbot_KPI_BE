@@ -28,7 +28,6 @@ from uuid import UUID
 
 from fastapi import HTTPException
 
-from model.Base import IngestionSourceType
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
@@ -100,11 +99,7 @@ class KPIMasterIngestionService:
             # Log dibuat SEBELUM proses dimulai sehingga crash di tengah
             # tetap terekam dengan status 'running' (detectable sebagai hung).
             log = await self.log_repo.create(
-                source_type=IngestionSourceType.KPI_MASTER,
-                source_id=group_id,
-                sheet_url=sheet_url,
-                sheet_id=spreadsheet_id,
-                sheet_name=sheet_name,
+                kpi_group_id=group_id,
             )
             log_id = log.id
             logger.info(

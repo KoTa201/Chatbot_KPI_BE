@@ -184,12 +184,11 @@ class IngestionRouter:
     async def get_ingestion_logs(
         self,
         limit: int = Query(default=20, le=100),
-        source_type: Optional[Literal["kpi_tracker",
-                                      "kpi_master"]] = Query(default=None),
+        group_type: Optional[Literal["tracker", "master"]] = Query(default=None),
         db: AsyncSession = Depends(get_db),
     ):
         return await self._get_controller(db).get_ingestion_logs(
-            limit=limit, source_type=source_type
+            limit=limit, group_type=group_type
         )
 
     # ── CREATE handlers ────────────────────────────────────────────── #

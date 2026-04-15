@@ -107,7 +107,7 @@ class KPITrackerController:
     # ================================================================ #
 
     async def get_ingestion_logs(
-        self, limit: int, source_type: Optional[str] = None
+        self, limit: int, group_type: Optional[str] = None
     ) -> dict:
         """
         Ambil ingestion logs.

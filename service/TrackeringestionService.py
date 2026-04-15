@@ -39,7 +39,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model.Base import IngestionSourceType
 from model.KPIMaster import KPIMasterORM
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
@@ -289,11 +288,7 @@ class TrackerIngestionService:
         try:
             # Create IngestionLog (running) — sebelum proses dimulai
             log = await self.log_repo.create(
-                source_type=IngestionSourceType.KPI_TRACKER,
-                source_id=group.id if group else None,
-                sheet_url=sheet_url,
-                sheet_id=spreadsheet_id,
-                sheet_name=active_sheet_name,
+                kpi_group_id=group.id,
             )
             log_id = log.id
 
@@ -320,7 +315,6 @@ class TrackerIngestionService:
                     sheet_name=active_sheet_name,
                     meta=SheetMeta(
                         nama_orang=nama_orang,
-                        bulan=meta.get("bulan"),
                         bulan_num=meta.get("bulan_num"),
                         tahun=tahun,
                     ),
@@ -365,7 +359,6 @@ class TrackerIngestionService:
                     sheet_name=active_sheet_name,
                     meta=SheetMeta(
                         nama_orang=nama_orang,
-                        bulan=meta.get("bulan"),
                         bulan_num=meta.get("bulan_num"),
                         tahun=tahun,
                     ),
@@ -376,8 +369,7 @@ class TrackerIngestionService:
                     status="failed",
                 )
 
-            # Inject group_id + kpi_master_id + bulan, strip kolom lama
-            bulan = meta.get("bulan") if meta else None
+            # Inject group_id + kpi_master_id + bulan_num, strip kolom lama
             bulan_num = meta.get("bulan_num") if meta else None
             clean_records = []
             for record in records:
@@ -386,7 +378,6 @@ class TrackerIngestionService:
                          if k not in _STRIP_FIELDS}
                 # Tahun wajib non-null di model; fallback ke konteks ingest.
                 clean["tahun"] = clean.get("tahun") or tahun
-                clean["bulan"] = bulan
                 clean["bulan_num"] = bulan_num
                 clean["group_id"] = group.id if group else None
                 clean["kpi_master_id"] = master_id_map.get(
@@ -427,7 +418,6 @@ class TrackerIngestionService:
                 sheet_name=active_sheet_name,
                 meta=SheetMeta(
                     nama_orang=nama_orang,
-                    bulan=meta.get("bulan"),
                     bulan_num=meta.get("bulan_num"),
                     tahun=tahun,
                 ),

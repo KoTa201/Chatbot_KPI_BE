@@ -71,7 +71,6 @@ class KPITrackerORM(Base):
 
     # Data realisasi
     tahun: Mapped[int] = mapped_column(Integer, nullable=False)
-    bulan: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     bulan_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     realisasi: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True)

@@ -212,7 +212,6 @@ class ListResponse(BaseModel):
 
 class SheetMeta(BaseModel):
     nama_orang: Optional[str]
-    bulan: Optional[str]
     bulan_num: Optional[int]
     tahun: Optional[int]
 
