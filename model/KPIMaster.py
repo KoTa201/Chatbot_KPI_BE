@@ -59,13 +59,8 @@ class KPIMasterORM(Base):
 
     definisi_operasional: Mapped[Optional[str]
                                  ] = mapped_column(Text, nullable=True)
-    dihitung: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tidak_dihitung: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    rumus: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     target: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    sumber_data: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True)
     achieve: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     partial: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     fail: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

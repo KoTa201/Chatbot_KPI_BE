@@ -44,24 +44,3 @@ class KPITrackerRepository:
                 status_code=500,
                 detail=f"Gagal simpan KPI Tracker records ke database: {str(e)}",
             )
-
-    async def delete_kpi_records_by_group(self, group_id: UUID) -> int:
-        """
-        Hapus semua tracker records dalam satu grup/sheet.
-        Dipakai saat re-ingest sheet tracker yang sama.
-        """
-        try:
-            result = await self.db.execute(
-                select(KPITrackerORM).where(KPITrackerORM.group_id == group_id)
-            )
-            records = result.scalars().all()
-            for record in records:
-                await self.db.delete(record)
-            await self.db.commit()
-            return len(records)
-        except Exception as e:
-            await self.db.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Gagal hapus KPI records by group: {str(e)}",
-            )

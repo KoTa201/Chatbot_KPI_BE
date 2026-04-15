@@ -36,17 +36,11 @@ class KPIMasterResponse(BaseModel):
     category: str
     kpi_name: str
     definisi_operasional: Optional[str]
-    dihitung: Optional[str]
-    tidak_dihitung: Optional[str]
-    rumus: Optional[str]
     target: Optional[str]
-    sumber_data: Optional[str]
     achieve: Optional[str]
     partial: Optional[str]
     fail: Optional[str]
     responsibility_persons: Optional[str]
-    source_sheet_id: Optional[str]
-    source_sheet_name: Optional[str]
     created_at: datetime
     updated_at: Optional[datetime]
 

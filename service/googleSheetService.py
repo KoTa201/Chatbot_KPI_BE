@@ -121,6 +121,14 @@ class GoogleSheetService:
             try:
                 df, _, _, meta = self._process_worksheet(
                     worksheet, spreadsheet_id)
+                # Fallback: jika bulan tidak terdeteksi dari konten sheet,
+                # coba ekstrak dari nama tab (worksheet.title).
+                if not meta.get("bulan"):
+                    tab_bulan, tab_bulan_num = self._extract_bulan_from_tab_name(
+                        worksheet.title)
+                    if tab_bulan:
+                        meta["bulan"] = tab_bulan
+                        meta["bulan_num"] = tab_bulan_num
                 entry["df"] = df
                 entry["meta"] = meta
             except HTTPException as e:
@@ -139,6 +147,16 @@ class GoogleSheetService:
                 status_code=422, detail="Spreadsheet tidak memiliki sheet.")
 
         return results
+
+    def get_spreadsheet_title(self, sheet_url: str) -> str:
+        """
+        Ambil judul/nama file spreadsheet dari Google Sheets.
+        Returns: judul spreadsheet (nama file di Google Drive).
+        """
+        client = self._get_client()
+        spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
+        spreadsheet = self._open_spreadsheet(client, spreadsheet_id)
+        return spreadsheet.title
 
     def list_sheets(self, sheet_url: str) -> list:
         """Daftar semua sheet/tab dalam satu spreadsheet."""
@@ -314,6 +332,46 @@ class GoogleSheetService:
     # ------------------------------------------------------------------ #
     #  Metadata extraction                                                 #
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _extract_bulan_from_tab_name(tab_name: str) -> tuple:
+        """
+        Ekstrak nama bulan dan nomor bulan dari nama tab (worksheet.title).
+
+        Mendukung nama bulan penuh (Januari–Desember) dan singkatan umum
+        (Jan, Feb, Mar, Apr, Mei/May, Jun, Jul, Agu/Aug, Sep, Okt/Oct,
+        Nov, Des/Dec) yang muncul di mana saja dalam teks tab.
+
+        Returns:
+            (bulan_str, bulan_num) atau (None, None) jika tidak ditemukan.
+        """
+        _TAB_ALIASES: dict[str, tuple[str, int]] = {
+            # Nama penuh
+            "januari": ("Januari", 1),   "februari": ("Februari", 2),
+            "maret": ("Maret", 3),        "april": ("April", 4),
+            "mei": ("Mei", 5),            "juni": ("Juni", 6),
+            "juli": ("Juli", 7),          "agustus": ("Agustus", 8),
+            "september": ("September", 9), "oktober": ("Oktober", 10),
+            "november": ("November", 11), "desember": ("Desember", 12),
+            # Singkatan Inggris
+            "jan": ("Januari", 1),  "feb": ("Februari", 2),
+            "mar": ("Maret", 3),    "apr": ("April", 4),
+            "may": ("Mei", 5),      "jun": ("Juni", 6),
+            "jul": ("Juli", 7),     "aug": ("Agustus", 8),
+            "sep": ("September", 9), "oct": ("Oktober", 10),
+            "nov": ("November", 11), "dec": ("Desember", 12),
+            # Singkatan Indonesia
+            "agu": ("Agustus", 8),  "okt": ("Oktober", 10),
+            "des": ("Desember", 12),
+        }
+        normalized = tab_name.strip().lower()
+        # Coba exact match terlebih dulu, lalu partial match
+        if normalized in _TAB_ALIASES:
+            return _TAB_ALIASES[normalized]
+        for key, val in _TAB_ALIASES.items():
+            if re.search(r'\b' + re.escape(key) + r'\b', normalized):
+                return val
+        return None, None
 
     @staticmethod
     def _extract_meta_from_title(

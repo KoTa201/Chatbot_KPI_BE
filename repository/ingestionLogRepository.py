@@ -1,11 +1,11 @@
 """
 repository/ingestionLogRepository.py
 Operasi DB untuk IngestionLog — append-only, tidak ada update kecuali
-status akhir (running → success / partial / failed).
+status akhir (failed -> success jika proses berhasil).
 
 Pola dua langkah:
-  1. create()        → buat log dengan status='running' sebelum proses mulai
-  2. update_status() → update setelah proses selesai (berhasil atau gagal)
+    1. create()        → buat log dengan status='failed' (default aman)
+    2. update_status() → update setelah proses selesai (success/failed)
 
 Ini memastikan setiap ingestion tercatat bahkan jika prosesnya crash di tengah.
 """
@@ -38,7 +38,7 @@ class IngestionLogRepository:
         scheduler_id: Optional[UUID] = None,
     ) -> IngestionLogORM:
         """
-        Buat IngestionLog baru dengan status awal 'running'.
+        Buat IngestionLog baru dengan status awal 'failed'.
 
         source_id diisi dengan:
           - group_id   jika source_type = 'kpi_master' atau 'kpi_tracker'
@@ -52,7 +52,7 @@ class IngestionLogRepository:
                 sheet_url=sheet_url,
                 sheet_id=sheet_id,
                 sheet_name=sheet_name,
-                status="running",
+                status="failed",
             )
             self.db.add(log)
             await self.db.flush()   # Dapat ID tanpa commit — masih satu transaksi
@@ -70,7 +70,7 @@ class IngestionLogRepository:
     async def update_status(
         self,
         log_id: UUID,
-        status: str,                        # 'success' | 'partial' | 'failed'
+        status: str,                        # 'success' | 'failed'
         total_rows: int = 0,
         ingested_count: int = 0,
         failed_count: int = 0,

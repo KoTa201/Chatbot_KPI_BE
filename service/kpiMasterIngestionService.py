@@ -225,11 +225,9 @@ class KPIMasterIngestionService:
         total_rows:     int,
         errors:         list,
     ) -> str:
-        """Tentukan status akhir berdasarkan jumlah sukses vs gagal."""
-        if ingested_count == 0:
+        """Tentukan status akhir dengan mode biner: success atau failed."""
+        if ingested_count == 0 or ingested_count < total_rows or errors:
             return "failed"
-        if ingested_count < total_rows or errors:
-            return "partial"
         return "success"
 
     def _format_errors(self, errors: list) -> str:
