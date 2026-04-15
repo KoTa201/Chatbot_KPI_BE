@@ -11,7 +11,6 @@ Perubahan dari versi sebelumnya:
 
 import re
 from typing import Optional
-from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -25,22 +24,9 @@ from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import (
     BatchTrackerIngestionRequest,
     BatchTrackerIngestionResponse,
-    BulkCreateKPIRecordsRequest,
-    BulkCreateResponse,
-    BulkDeleteKPIRecordsRequest,
-    BulkDeleteResponse,
     BulkIngestionResponse,
-    CountResponse,
-    CreateKPIRecordRequest,
-    DeleteResponse,
-    DetailRecordsResponse,
-    GroupedKPIResponse,
     IngestAllSheetsRequest,
-    KPIRecordResponse,
-    ListResponse,
-    UpdateKPIRecordRequest,
 )
-from service.kpiTrackerService import KPITrackerService
 from service.TrackeringestionService import TrackerIngestionService
 
 
@@ -54,16 +40,11 @@ class KPITrackerController:
         self.log_repo = IngestionLogRepository(db) if db else None
         self.group_repo = KPIGroupRepository(db) if db else None
 
-        # Services
-        self.service = KPITrackerService(
-            self.tracker_repo) if self.tracker_repo else None
-
         # Ingestion service — kini butuh db session (untuk master matching)
         self.ingestion_service = (
             TrackerIngestionService(
                 db=db,
                 tracker_repo=self.tracker_repo,
-                tracker_svc=self.service,
                 log_repo=self.log_repo,
                 group_repo=self.group_repo,
             )
@@ -128,7 +109,8 @@ class KPITrackerController:
                     )
                 else:
                     latest_query = latest_query.where(
-                        IngestionLogORM.source_type.in_(["kpi_tracker", "kpi_master"])
+                        IngestionLogORM.source_type.in_(
+                            ["kpi_tracker", "kpi_master"])
                     )
 
                 latest_query = (
@@ -144,11 +126,13 @@ class KPITrackerController:
                 latest_result = await self.db.execute(latest_query)
                 latest_logs = latest_result.scalars().all()
 
-                group_ids = [log.source_id for log in latest_logs if log.source_id]
+                group_ids = [
+                    log.source_id for log in latest_logs if log.source_id]
                 groups_map = {}
                 if group_ids:
                     group_result = await self.db.execute(
-                        select(KPIGroupORM).where(KPIGroupORM.id.in_(group_ids))
+                        select(KPIGroupORM).where(
+                            KPIGroupORM.id.in_(group_ids))
                     )
                     groups = group_result.scalars().all()
                     groups_map = {g.id: g for g in groups}
@@ -161,7 +145,8 @@ class KPITrackerController:
                             "id":          log.id,
                             "sheet_name":  (group.nama_grup if group else log.sheet_name),
                             "nama_orang":  (
-                                self._extract_nama_orang_from_group(group.nama_grup)
+                                self._extract_nama_orang_from_group(
+                                    group.nama_grup)
                                 if group and log.source_type == "kpi_tracker"
                                 else None
                             ),
@@ -182,9 +167,11 @@ class KPITrackerController:
 
             query = select(IngestionLogORM)
             if effective_source_type:
-                query = query.where(IngestionLogORM.source_type == effective_source_type)
+                query = query.where(
+                    IngestionLogORM.source_type == effective_source_type)
 
-            query = query.order_by(IngestionLogORM.created_at.desc()).limit(limit)
+            query = query.order_by(
+                IngestionLogORM.created_at.desc()).limit(limit)
             result = await self.db.execute(query)
             logs = result.scalars().all()
 
@@ -223,115 +210,3 @@ class KPITrackerController:
             return match.group(1).replace("_", " ").strip()
 
         return None
-
-    # ================================================================ #
-    #  CREATE                                                          #
-    # ================================================================ #
-
-    async def bulk_create_records(
-        self, request: BulkCreateKPIRecordsRequest
-    ) -> BulkCreateResponse:
-        records_dict = [r.dict() for r in request.records]
-        result = await self.service.bulk_create_records(records_dict)
-        return BulkCreateResponse(**result)
-
-    # ================================================================ #
-    #  READ                                                            #
-    # ================================================================ #
-
-    async def get_record_by_id(self, record_id: UUID) -> KPIRecordResponse:
-        result = await self.service.get_record_by_id(record_id)
-        return KPIRecordResponse.from_orm(result)
-
-    async def get_all_records(
-        self,
-        nama_kpi:   Optional[str] = None,
-        tahun:      Optional[int] = None,
-        nama_orang: Optional[str] = None,
-        skip:       int = 0,
-        limit:      int = 100,
-    ) -> ListResponse:
-        result = await self.service.get_all_records(
-            nama_kpi=nama_kpi,
-            tahun=tahun,
-            nama_orang=nama_orang,
-            skip=skip,
-            limit=limit,
-        )
-        records = [KPIRecordResponse.from_orm(r) for r in result["records"]]
-        return ListResponse(records=records, pagination=result["pagination"])
-
-    async def get_records_by_tahun(
-        self, tahun: int, skip: int = 0, limit: int = 100
-    ) -> ListResponse:
-        result = await self.service.get_records_by_tahun(tahun, skip, limit)
-        records = [KPIRecordResponse.from_orm(r) for r in result["records"]]
-        return ListResponse(records=records, pagination=result["pagination"])
-
-    async def get_records_count(self) -> CountResponse:
-        result = await self.service.get_records_count()
-        return CountResponse(**result)
-
-    # ================================================================ #
-    #  GROUP / AGGREGATE                                               #
-    # ================================================================ #
-
-    async def get_grouped_records(
-        self, skip: int = 0, limit: int = 100
-    ) -> GroupedKPIResponse:
-        result = await self.service.get_grouped_records(skip=skip, limit=limit)
-        return GroupedKPIResponse(**result)
-
-    async def get_grouped_records_with_filters(
-        self,
-        tahun:      Optional[int] = None,
-        nama_orang: Optional[str] = None,
-        skip:       int = 0,
-        limit:      int = 100,
-    ) -> GroupedKPIResponse:
-        result = await self.service.get_grouped_records_with_filters(
-            tahun=tahun,
-            nama_orang=nama_orang,
-            skip=skip,
-            limit=limit,
-        )
-        return GroupedKPIResponse(**result)
-
-    async def get_detail_records_by_nama_kpi(
-        self, nama_kpi: str, skip: int = 0, limit: int = 100
-    ) -> DetailRecordsResponse:
-        result = await self.service.get_detail_records_by_nama_kpi(
-            nama_kpi, skip, limit
-        )
-        records = [KPIRecordResponse.from_orm(r) for r in result["records"]]
-        return DetailRecordsResponse(
-            nama_kpi=result["nama_kpi"],
-            records=records,
-            pagination=result["pagination"],
-        )
-
-    # ================================================================ #
-    #  UPDATE                                                          #
-    # ================================================================ #
-
-    async def update_record(
-        self, record_id: UUID, request: UpdateKPIRecordRequest
-    ) -> KPIRecordResponse:
-        result = await self.service.update_record(
-            record_id, request.dict(exclude_unset=True)
-        )
-        return KPIRecordResponse.from_orm(result)
-
-    # ================================================================ #
-    #  DELETE                                                          #
-    # ================================================================ #
-
-    async def delete_record(self, record_id: UUID) -> DeleteResponse:
-        result = await self.service.delete_record(record_id)
-        return DeleteResponse(**result)
-
-    async def delete_records_by_ids(
-        self, request: BulkDeleteKPIRecordsRequest
-    ) -> BulkDeleteResponse:
-        result = await self.service.delete_records_by_ids(request.record_ids)
-        return BulkDeleteResponse(**result)

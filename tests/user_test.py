@@ -685,6 +685,8 @@ class TestCreateUser:
                   new_callable=AsyncMock, return_value=False),
             patch(f"{_REPO}.create_user",
                   new_callable=AsyncMock, return_value=new_user),
+            patch("service.userService.EmailService.send_credentials_info",
+                  return_value=None),
         ):
             resp = await client.post(
                 "/api/v1/users",

@@ -6,7 +6,7 @@ Pydantic models untuk request/response endpoint KPI Tracker management.
 from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ================================================================ #
@@ -101,7 +101,8 @@ class BulkDeleteKPIRecordsRequest(BaseModel):
 class IngestAllSheetsRequest(BaseModel):
     """Schema untuk ingest semua sheet dari satu spreadsheet."""
     sheet_url: str = Field(..., description="URL Google Sheets")
-    tahun: Optional[int] = Field(None, ge=2000, le=2031, description="Tahun data (opsional, fallback ke metadata sheet)")
+    tahun: Optional[int] = Field(
+        None, ge=2000, le=2031, description="Tahun data (opsional, fallback ke metadata sheet)")
     nama_orang_override: Optional[str] = Field(
         None, max_length=255,
         description="Override nama orang dari metadata sheet")
@@ -260,7 +261,8 @@ class BulkIngestionResponse(BaseModel):
 class TrackerSourceItem(BaseModel):
     """Satu item sumber dalam batch ingestion."""
     sheet_url: str = Field(..., description="URL Google Sheets")
-    tahun: Optional[int] = Field(None, ge=2000, le=2031, description="Tahun data")
+    tahun: Optional[int] = Field(
+        None, ge=2000, le=2031, description="Tahun data")
 
 
 class BatchTrackerIngestionRequest(BaseModel):
@@ -269,10 +271,31 @@ class BatchTrackerIngestionRequest(BaseModel):
         ..., min_length=1, max_length=6,
         description="List sumber (URL + tahun, max 6)",
     )
+    sheet_urls: Optional[List[str]] = Field(
+        default=None,
+        description="Legacy input: list URL spreadsheet tanpa metadata tahun",
+    )
     skip_on_error: bool = Field(
         True,
         description="Skip tab yang gagal atau batalkan per-spreadsheet",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_legacy_sheet_urls(cls, values: Any):
+        if not isinstance(values, dict):
+            return values
+
+        if values.get("sources"):
+            return values
+
+        sheet_urls = values.get("sheet_urls")
+        if sheet_urls:
+            values["sources"] = [
+                {"sheet_url": sheet_url}
+                for sheet_url in sheet_urls
+            ]
+        return values
 
     class Config:
         json_schema_extra = {

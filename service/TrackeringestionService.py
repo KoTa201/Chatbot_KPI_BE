@@ -53,7 +53,6 @@ from schema.kpiTrackerSchema import (
     UrlIngestionResult,
 )
 from service.googleSheetService import GoogleSheetService
-from service.kpiTrackerService import KPITrackerService
 from utils.parser import parse_dataframe
 
 logger = logging.getLogger(__name__)
@@ -72,13 +71,11 @@ class TrackerIngestionService:
         self,
         db:           AsyncSession,
         tracker_repo: KPITrackerRepository,
-        tracker_svc:  KPITrackerService,
         log_repo:     IngestionLogRepository,
         group_repo:   KPIGroupRepository,
     ):
         self.db = db
         self.tracker_repo = tracker_repo
-        self.tracker_svc = tracker_svc
         self.log_repo = log_repo
         self.group_repo = group_repo
         self.google_svc = GoogleSheetService()
@@ -128,7 +125,8 @@ class TrackerIngestionService:
                 )
                 # Nama grup = judul spreadsheet di Google Drive
                 try:
-                    nama_grup = self.google_svc.get_spreadsheet_title(sheet_url)
+                    nama_grup = self.google_svc.get_spreadsheet_title(
+                        sheet_url)
                 except Exception:
                     nama_grup = "KPI Tracker " + (str(tahun) or "")
 
@@ -393,6 +391,8 @@ class TrackerIngestionService:
                     nama_kpi_val)  # None jika unmatched
                 clean_records.append(clean)
 
+            # Bulk insert langsung via repository.
+            ingested_count = await self.tracker_repo.bulk_insert_kpi_records(clean_records)
             # Idempotent ingest: re-ingest periode yang sama replace data lama.
             if group and tahun:
                 deleted_count = await self.tracker_repo.delete_kpi_records_by_group_and_period(
