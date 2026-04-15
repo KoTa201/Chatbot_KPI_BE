@@ -24,7 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -59,8 +59,12 @@ class KPIGroupORM(Base):
     # Metadata sheet sumber — disimpan di sini, TIDAK di setiap baris master/tracker
     sheet_url: Mapped[str] = mapped_column(Text, nullable=False)
     sheet_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    sheet_name: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True)
+    sheet_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Kolom khusus tracker — diabaikan untuk grup bertipe 'master'
+    tahun: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_scheduled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

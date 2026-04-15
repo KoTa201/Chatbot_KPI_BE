@@ -73,7 +73,6 @@ app.include_router(
     tracker_source_router.router, prefix="/api/v1/tracker-sources", tags=["Tracker Sources"]
 )
 
-
 @app.get("/", tags=["Health"])
 async def root():
     return {"status": "ok", "service": "KPI RAG Ingestion API v3"}
