@@ -22,7 +22,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import desc, select
+from sqlalchemy import and_, delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
 
@@ -434,4 +434,47 @@ class KPITrackerRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal hapus KPI records by group: {str(e)}",
+            )
+
+    async def delete_kpi_records_by_group_and_period(
+        self,
+        group_id: UUID,
+        tahun: int,
+        bulan_num: Optional[int] = None,
+    ) -> int:
+        """
+        Hapus tracker records untuk satu grup pada periode tertentu.
+
+        Dipakai sebelum re-ingest agar proses menjadi idempotent:
+        re-ingest periode yang sama akan mengganti data lama,
+        bukan menambah duplikasi baris.
+        """
+        try:
+            conditions = [
+                KPITrackerORM.group_id == group_id,
+                KPITrackerORM.tahun == tahun,
+            ]
+
+            if bulan_num is None:
+                conditions.append(KPITrackerORM.bulan_num.is_(None))
+            else:
+                conditions.append(KPITrackerORM.bulan_num == bulan_num)
+
+            count_result = await self.db.execute(
+                select(func.count(KPITrackerORM.id)).where(and_(*conditions))
+            )
+            deleted_count = count_result.scalar() or 0
+
+            if deleted_count:
+                await self.db.execute(
+                    delete(KPITrackerORM).where(and_(*conditions))
+                )
+                await self.db.commit()
+
+            return deleted_count
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal hapus KPI records by group dan periode: {str(e)}",
             )

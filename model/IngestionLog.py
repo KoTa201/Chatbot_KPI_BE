@@ -66,7 +66,7 @@ class IngestionLogORM(Base):
         ),
         # Validasi status di level DB
         CheckConstraint(
-            "status IN ('running', 'success', 'partial', 'failed')",
+            "status IN ('success', 'failed')",
             name="ck_ingestion_status",
         ),
         # Jika source_type = 'scheduler', scheduler_id wajib diisi
@@ -113,9 +113,9 @@ class IngestionLogORM(Base):
         Integer, default=0, nullable=False)
     errors: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Status awal selalu 'running', diupdate saat selesai
+    # Status disederhanakan: hanya success / failed
     status: Mapped[str] = mapped_column(
-        String(20), default="running", nullable=False
+        String(20), default="failed", nullable=False
     )
 
     created_at: Mapped[datetime] = mapped_column(

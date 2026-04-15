@@ -16,8 +16,8 @@ Perbedaan besar dari IngestionService sebelumnya:
      Records yang tidak bisa di-match tetap disimpan dengan kpi_master_id=None.
 
   4. Kolom yang di-strip dari records sebelum insert:
-     nama_kpi, tahun, source_sheet_name, source_sheet_id
-     (tidak ada di KPITrackerORM baru).
+      nama_kpi, source_sheet_name, source_sheet_id
+      (tidak ada di KPITrackerORM baru).
 
 Alur per-sheet:
   sheet_url
@@ -49,6 +49,7 @@ from schema.kpiTrackerSchema import (
     BulkIngestionResponse,
     SheetIngestionResult,
     SheetMeta,
+    TrackerSourceItem,
     UrlIngestionResult,
 )
 from service.googleSheetService import GoogleSheetService
@@ -58,7 +59,7 @@ from utils.parser import parse_dataframe
 logger = logging.getLogger(__name__)
 
 # Kolom dari parser lama yang tidak ada di model baru — harus di-strip sebelum insert
-_STRIP_FIELDS = {"nama_kpi", "tahun", "source_sheet_name", "source_sheet_id"}
+_STRIP_FIELDS = {"nama_kpi", "source_sheet_name", "source_sheet_id"}
 
 
 class TrackerIngestionService:
@@ -125,13 +126,19 @@ class TrackerIngestionService:
                 logger.info(
                     f"[TrackerIngestion] Upserting KPIGroup for spreadsheet_id={spreadsheet_id}"
                 )
+                # Nama grup = judul spreadsheet di Google Drive
+                try:
+                    nama_grup = self.google_svc.get_spreadsheet_title(sheet_url)
+                except Exception:
+                    nama_grup = "KPI Tracker " + (str(tahun) or "")
+
                 group = await self.group_repo.get_or_create(
                     sheet_id=spreadsheet_id,
                     group_type="tracker",
                     sheet_url=sheet_url,
-                    sheet_name=None,   # tidak ada "satu tab" untuk spreadsheet
-                    nama_grup="KPI Tracker" +
-                    (nama_orang_override or "") + " " + (str(tahun) or ""),
+                    sheet_name=None,
+                    nama_grup=nama_grup,
+                    tahun=tahun,
                 )
                 logger.info(
                     f"[TrackerIngestion] KPIGroup ready: group_id={group.id}"
@@ -196,19 +203,26 @@ class TrackerIngestionService:
 
     async def ingest_batch(
         self,
-        sheet_urls: list[str],
+        sources: list[TrackerSourceItem],
         skip_on_error: bool = True,
     ) -> BatchTrackerIngestionResponse:
         """
         Ingest beberapa spreadsheet sekaligus.
-        Setiap URL diproses independen — gagalnya satu URL tidak menghentikan URL lain.
+        Setiap source membawa sheet_url + tahun masing-masing.
+        Gagalnya satu URL tidak menghentikan URL lain.
         """
         results: list[UrlIngestionResult] = []
+        grand_total_rows = 0
+        grand_ingested = 0
+        grand_failed = 0
 
-        for url in sheet_urls:
+        for source in sources:
+            url = source.sheet_url
+            tahun = source.tahun
             try:
                 bulk = await self.ingest_all_sheets(
                     sheet_url=url,
+                    tahun=tahun,
                     skip_on_error=skip_on_error,
                 )
                 results.append(UrlIngestionResult(
@@ -220,6 +234,9 @@ class TrackerIngestionService:
                     grand_failed=bulk.grand_failed,
                     sheets=bulk.sheets,
                 ))
+                grand_total_rows += bulk.grand_total_rows
+                grand_ingested += bulk.grand_ingested
+                grand_failed += bulk.grand_failed
             except Exception as exc:
                 logger.warning(
                     f"[TrackerIngestion] Batch: failed for url={url!r}: {exc}"
@@ -231,12 +248,16 @@ class TrackerIngestionService:
                 ))
 
         succeeded = sum(
-            1 for r in results if r.status in ("success", "partial")
+            1 for r in results if r.status == "success"
         )
+        total_urls = len(sources)
         return BatchTrackerIngestionResponse(
-            total_urls=len(sheet_urls),
+            total_urls=total_urls,
             succeeded=succeeded,
-            failed=len(sheet_urls) - succeeded,
+            failed=total_urls - succeeded,
+            grand_total_rows=grand_total_rows,
+            grand_ingested=grand_ingested,
+            grand_failed=grand_failed,
             results=results,
         )
 
@@ -327,16 +348,63 @@ class TrackerIngestionService:
                     f"KPI '{n}' tidak ditemukan di kpi_master_records" for n in unmatched_names
                 ])
 
-            # Inject group_id + kpi_master_id, strip kolom lama
+                # Strict mode: jika ada KPI yang tidak match ke master,
+                # seluruh sheet dianggap gagal dan tidak ada data yang diinsert.
+                error_str = self._format_errors(errors)
+                await self.log_repo.update_status(
+                    log_id=log_id,
+                    status="failed",
+                    total_rows=total_rows,
+                    ingested_count=0,
+                    failed_count=total_rows,
+                    errors=error_str,
+                )
+
+                return SheetIngestionResult(
+                    log_id=log_id,
+                    sheet_name=active_sheet_name,
+                    meta=SheetMeta(
+                        nama_orang=nama_orang,
+                        bulan=meta.get("bulan"),
+                        bulan_num=meta.get("bulan_num"),
+                        tahun=tahun,
+                    ),
+                    total_rows=total_rows,
+                    ingested=0,
+                    failed=total_rows,
+                    errors=errors,
+                    status="failed",
+                )
+
+            # Inject group_id + kpi_master_id + bulan, strip kolom lama
+            bulan = meta.get("bulan") if meta else None
+            bulan_num = meta.get("bulan_num") if meta else None
             clean_records = []
             for record in records:
                 nama_kpi_val = record.get("nama_kpi")
                 clean = {k: v for k, v in record.items()
                          if k not in _STRIP_FIELDS}
+                # Tahun wajib non-null di model; fallback ke konteks ingest.
+                clean["tahun"] = clean.get("tahun") or tahun
+                clean["bulan"] = bulan
+                clean["bulan_num"] = bulan_num
                 clean["group_id"] = group.id if group else None
                 clean["kpi_master_id"] = master_id_map.get(
                     nama_kpi_val)  # None jika unmatched
                 clean_records.append(clean)
+
+            # Idempotent ingest: re-ingest periode yang sama replace data lama.
+            if group and tahun:
+                deleted_count = await self.tracker_repo.delete_kpi_records_by_group_and_period(
+                    group_id=group.id,
+                    tahun=tahun,
+                    bulan_num=bulan_num,
+                )
+                if deleted_count:
+                    logger.info(
+                        f"[TrackerIngestion] Re-ingest cleanup: deleted {deleted_count} "
+                        f"records for group={group.id}, tahun={tahun}, bulan_num={bulan_num}"
+                    )
 
             # Bulk insert via service (validasi group_id ada)
             ingested_result = await self.tracker_svc.bulk_create_records(clean_records)
@@ -365,7 +433,7 @@ class TrackerIngestionService:
                 ),
                 total_rows=total_rows,
                 ingested=ingested_count,
-                failed=len(errors),
+                failed=total_rows - ingested_count,
                 errors=errors,
                 status=status,
             )
@@ -488,11 +556,9 @@ class TrackerIngestionService:
 
     @staticmethod
     def _resolve_status(ingested_count: int, errors: list) -> str:
-        if not errors:
-            return "success"
-        if ingested_count > 0:
-            return "partial"
-        return "failed"
+        if errors or ingested_count == 0:
+            return "failed"
+        return "success"
 
     @staticmethod
     def _format_errors(errors: list, max_errors: int = 20) -> str:

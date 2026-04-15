@@ -99,21 +99,21 @@ class BulkDeleteKPIRecordsRequest(BaseModel):
 
 
 class IngestAllSheetsRequest(BaseModel):
-    """Schema untuk ingest semua sheet dari Google Sheets."""
+    """Schema untuk ingest semua sheet dari satu spreadsheet."""
     sheet_url: str = Field(..., description="URL Google Sheets")
-    nama_orang_override: str = Field(
-        ..., max_length=255,
+    tahun: Optional[int] = Field(None, ge=2000, le=2031, description="Tahun data (opsional, fallback ke metadata sheet)")
+    nama_orang_override: Optional[str] = Field(
+        None, max_length=255,
         description="Override nama orang dari metadata sheet")
     skip_on_error: bool = Field(
         True, description="Skip sheet dengan error atau stop")
-    tahun: int = Field(..., ge=2000, le=2031, description="Tahun (2000-2031)")
 
     class Config:
         example = {
             "sheet_url": "https://docs.google.com/spreadsheets/d/abc123/edit",
-            "nama_orang_override": "John Doe",
+            "tahun": 2026,
+            "nama_orang_override": None,
             "skip_on_error": True,
-            "tahun": 2026
         }
 
 
@@ -257,11 +257,17 @@ class BulkIngestionResponse(BaseModel):
 #  Batch Ingestion Schemas                                         #
 # ================================================================ #
 
+class TrackerSourceItem(BaseModel):
+    """Satu item sumber dalam batch ingestion."""
+    sheet_url: str = Field(..., description="URL Google Sheets")
+    tahun: Optional[int] = Field(None, ge=2000, le=2031, description="Tahun data")
+
+
 class BatchTrackerIngestionRequest(BaseModel):
     """Request untuk batch ingest beberapa spreadsheet sekaligus."""
-    sheet_urls: List[str] = Field(
-        ..., min_length=1, max_length=20,
-        description="List URL Google Sheets (max 20)",
+    sources: List[TrackerSourceItem] = Field(
+        ..., min_length=1, max_length=6,
+        description="List sumber (URL + tahun, max 6)",
     )
     skip_on_error: bool = Field(
         True,
@@ -271,9 +277,9 @@ class BatchTrackerIngestionRequest(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "sheet_urls": [
-                    "https://docs.google.com/spreadsheets/d/abc/edit",
-                    "https://docs.google.com/spreadsheets/d/xyz/edit",
+                "sources": [
+                    {"sheet_url": "https://docs.google.com/spreadsheets/d/abc/edit", "tahun": 2025},
+                    {"sheet_url": "https://docs.google.com/spreadsheets/d/xyz/edit", "tahun": 2026},
                 ],
                 "skip_on_error": True,
             }
@@ -297,4 +303,7 @@ class BatchTrackerIngestionResponse(BaseModel):
     total_urls: int
     succeeded: int
     failed: int
+    grand_total_rows: int = 0
+    grand_ingested: int = 0
+    grand_failed: int = 0
     results: List[UrlIngestionResult]

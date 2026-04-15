@@ -52,11 +52,7 @@ class KPIGroupMasterRecord(BaseModel):
     category:               str
     kpi_name:               str
     definisi_operasional:   Optional[str] = None
-    dihitung:               Optional[str] = None
-    tidak_dihitung:         Optional[str] = None
-    rumus:                  Optional[str] = None
     target:                 Optional[str] = None
-    sumber_data:            Optional[str] = None
     achieve:                Optional[str] = None
     partial:                Optional[str] = None
     fail:                   Optional[str] = None
@@ -92,9 +88,10 @@ class KPIGroupTrackerRecord(BaseModel):
 
 # ─── Base ─────────────────────────────────────────────────────────────────────
 class KPIGroupBase(BaseModel):
-    nama_grup:  str = Field(..., max_length=255)
     group_type: str = Field(..., description="'master' atau 'tracker'")
     sheet_url:  AnyHttpUrl = Field(..., description="URL Google Sheets sumber")
+    # nama_grup opsional — di-fetch otomatis dari Google Sheets jika tidak disertakan
+    nama_grup:  Optional[str] = Field(None, max_length=255)
     sheet_id:   Optional[str] = Field(None, max_length=255)
     sheet_name: Optional[str] = Field(None, max_length=255)
 
@@ -109,7 +106,10 @@ class KPIGroupBase(BaseModel):
 
 # ─── Create ───────────────────────────────────────────────────────────────────
 class KPIGroupCreate(KPIGroupBase):
-    pass
+    # Kolom khusus tracker
+    tahun:        Optional[int]  = Field(None, ge=2000, le=2100)
+    is_scheduled: bool           = Field(True)
+    is_active:    bool           = Field(True)
 
 
 # ─── Update ───────────────────────────────────────────────────────────────────
@@ -118,11 +118,13 @@ class KPIGroupUpdate(BaseModel):
     Partial update. Jika sheet_url berubah → service jalankan ulang ingestion.
     Untuk grup 'master', `tahun` wajib disertakan jika sheet_url diubah.
     """
-    nama_grup:  Optional[str] = Field(None, max_length=255)
-    sheet_url:  Optional[AnyHttpUrl] = Field(None)
-    sheet_id:   Optional[str] = Field(None, max_length=255)
-    sheet_name: Optional[str] = Field(None, max_length=255)
-    tahun:      Optional[int] = Field(None, ge=2000, le=2100)
+    nama_grup:    Optional[str]      = Field(None, max_length=255)
+    sheet_url:    Optional[AnyHttpUrl] = Field(None)
+    sheet_id:     Optional[str]      = Field(None, max_length=255)
+    sheet_name:   Optional[str]      = Field(None, max_length=255)
+    tahun:        Optional[int]      = Field(None, ge=2000, le=2100)
+    is_scheduled: Optional[bool]     = None
+    is_active:    Optional[bool]     = None
 
 
 # ─── Response ─────────────────────────────────────────────────────────────────
@@ -140,6 +142,9 @@ class KPIGroupResponse(BaseModel):
     sheet_url:       AnyHttpUrl
     sheet_id:        Optional[str] = None
     sheet_name:      Optional[str] = None
+    tahun:           Optional[int] = None
+    is_scheduled:    bool = True
+    is_active:       bool = True
     created_at:      datetime
     updated_at:      datetime
     master_records:  list[KPIGroupMasterRecord] = Field(default_factory=list)

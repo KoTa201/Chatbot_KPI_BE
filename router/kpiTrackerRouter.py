@@ -155,6 +155,9 @@ class IngestionRouter:
     async def ingest_from_google_sheets(
         self,
         sheet_url: str = Query(..., description="URL Google Sheets"),
+        tahun: Optional[int] = Query(
+            default=None, description="Tahun data (opsional, fallback ke metadata sheet)"
+        ),
         nama_orang_override: Optional[str] = Query(
             default=None, description="Override nama orang jika tidak bisa diekstrak"
         ),
@@ -165,6 +168,7 @@ class IngestionRouter:
     ):
         request = IngestAllSheetsRequest(
             sheet_url=sheet_url,
+            tahun=tahun,
             nama_orang_override=nama_orang_override,
             skip_on_error=skip_on_error,
         )

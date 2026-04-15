@@ -33,21 +33,24 @@ class SchedulerService:
         from databaseConfig import AsyncSessionLocal
         from controller.kpiTrackerController import KPITrackerController
         from repository.schedulerRepository import SchedulerRepository
-        from repository.trackerSourceRepository import TrackerSourceRepository
+        from repository.kpiGroupRepository import KPIGroupRepository
         from schema.kpiTrackerSchema import BatchTrackerIngestionRequest
 
         async with AsyncSessionLocal() as db:
-            source_repo = TrackerSourceRepository(db)
-            sources = await source_repo.get_active_scheduled()
-            sheet_urls = [s.sheet_url for s in sources]
+            group_repo = KPIGroupRepository(db)
+            groups = await group_repo.get_active_scheduled_tracker()
+            source_items = [
+                {"sheet_url": g.sheet_url, "tahun": g.tahun}
+                for g in groups
+            ]
 
-        if not sheet_urls:
+        if not source_items:
             return
 
         async with AsyncSessionLocal() as db:
             controller = KPITrackerController(db)
             request = BatchTrackerIngestionRequest(
-                sheet_urls=sheet_urls,
+                sources=source_items,
                 skip_on_error=True,
             )
             await controller.ingest_batch_from_google_sheets(request)

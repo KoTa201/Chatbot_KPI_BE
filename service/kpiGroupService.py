@@ -18,6 +18,7 @@ from schema.kpiGroupSchema import (
     KPIGroupMasterRecord,   # nama baru — tidak bentrok dengan kpiMasterSchema
     KPIGroupTrackerRecord,  # nama baru — tidak bentrok dengan kpiTrackerSchema
 )
+from service.googleSheetService import GoogleSheetService
 from service.kpiMasterIngestionService import KPIMasterIngestionService
 from service.TrackeringestionService import TrackerIngestionService
 
@@ -73,6 +74,9 @@ class KPIGroupService:
             sheet_url=group.sheet_url,          # type: ignore[arg-type]
             sheet_id=group.sheet_id,
             sheet_name=group.sheet_name,
+            tahun=group.tahun,
+            is_scheduled=group.is_scheduled,
+            is_active=group.is_active,
             created_at=group.created_at,
             updated_at=group.updated_at,
             master_records=master_records,
@@ -121,12 +125,35 @@ class KPIGroupService:
     # ─── Create ───────────────────────────────────────────────────────────────
 
     async def create_group(self, payload: KPIGroupCreate) -> KPIGroupResponse:
+        sheet_url_str = str(payload.sheet_url)
+
+        # Auto-fetch nama dan sheet_id dari Google Sheets jika tidak disertakan
+        google_svc = GoogleSheetService()
+        nama_grup = payload.nama_grup
+        sheet_id = payload.sheet_id
+
+        if not nama_grup or not sheet_id:
+            try:
+                if not nama_grup:
+                    nama_grup = google_svc.get_spreadsheet_title(sheet_url_str)
+                if not sheet_id:
+                    # Ekstrak sheet_id dari URL
+                    import re
+                    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", sheet_url_str)
+                    sheet_id = match.group(1) if match else ""
+            except Exception:
+                nama_grup = nama_grup or sheet_url_str
+                sheet_id = sheet_id or ""
+
         group = await self.repo.get_or_create(
-            sheet_id=payload.sheet_id or "",
+            sheet_id=sheet_id,
             group_type=payload.group_type,
-            sheet_url=str(payload.sheet_url),
+            sheet_url=sheet_url_str,
             sheet_name=payload.sheet_name,
-            nama_grup=payload.nama_grup,
+            nama_grup=nama_grup,
+            tahun=payload.tahun,
+            is_scheduled=payload.is_scheduled,
+            is_active=payload.is_active,
         )
         await self.db.commit()
         await self.db.refresh(group)
@@ -151,8 +178,7 @@ class KPIGroupService:
                 detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
             )
 
-        update_fields = payload.model_dump(
-            exclude_none=True, exclude={"tahun"})
+        update_fields = payload.model_dump(exclude_none=True)
 
         if "sheet_url" in update_fields:
             update_fields["sheet_url"] = str(update_fields["sheet_url"])
