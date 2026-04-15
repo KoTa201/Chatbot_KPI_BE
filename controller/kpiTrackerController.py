@@ -96,7 +96,7 @@ class KPITrackerController:
         Sekarang: langsung dari IngestionLogRepository.
         """
         # source_type None = ambil semua jenis log (tracker + master)
-        effective_source_type = source_type
+        effective_source_type = group_type
 
         try:
             if effective_source_type in (None, "kpi_tracker", "kpi_master"):
