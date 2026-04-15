@@ -356,7 +356,7 @@ class AuthService:
         )
         await repo.create_reset_pin(record)
 
-        EmailService().send_reset_pin(
+        EmailService().send_reset_pin_background(
             to_email=user.email,
             full_name=user.full_name or user.username,
             pin=pin,

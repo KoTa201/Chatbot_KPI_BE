@@ -52,7 +52,6 @@ from schema.kpiTrackerSchema import (
     UrlIngestionResult,
 )
 from service.googleSheetService import GoogleSheetService
-from service.kpiTrackerService import KPITrackerService
 from utils.parser import parse_dataframe
 
 logger = logging.getLogger(__name__)
@@ -71,13 +70,11 @@ class TrackerIngestionService:
         self,
         db:           AsyncSession,
         tracker_repo: KPITrackerRepository,
-        tracker_svc:  KPITrackerService,
         log_repo:     IngestionLogRepository,
         group_repo:   KPIGroupRepository,
     ):
         self.db = db
         self.tracker_repo = tracker_repo
-        self.tracker_svc = tracker_svc
         self.log_repo = log_repo
         self.group_repo = group_repo
         self.google_svc = GoogleSheetService()
@@ -338,9 +335,8 @@ class TrackerIngestionService:
                     nama_kpi_val)  # None jika unmatched
                 clean_records.append(clean)
 
-            # Bulk insert via service (validasi group_id ada)
-            ingested_result = await self.tracker_svc.bulk_create_records(clean_records)
-            ingested_count = ingested_result.get("count", 0)
+            # Bulk insert langsung via repository.
+            ingested_count = await self.tracker_repo.bulk_insert_kpi_records(clean_records)
 
             status = self._resolve_status(ingested_count, errors)
             error_str = self._format_errors(errors) if errors else None

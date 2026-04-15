@@ -1,4 +1,5 @@
 
+import logging
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -12,13 +13,18 @@ from schema.authSchema import (
 )
 from repository.userRepository import AuthRepository
 from model.User import UserORM
+from service.emailService import EmailService
 from service.authService import AuthService, require_admin
+
+
+logger = logging.getLogger(__name__)
 
 
 class UserService:
     def __init__(self, db: AsyncSession):
         self.repo = AuthRepository(db)
         self.auth_service = AuthService()
+        self.email_service = EmailService()
         # Akan di-set di Depends(require_admin) pada router
         self.user: UserORM = None
 
@@ -47,6 +53,22 @@ class UserService:
             is_active=True,
         )
         self.user = await self.repo.create_user(self.user)
+
+        try:
+            self.email_service.send_credentials_info_background(
+                to_email=self.user.email,
+                full_name=self.user.full_name or self.user.username,
+                username=self.user.username,
+                password=payload.password,
+                role=self.user.role,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Gagal menjadwalkan email kredensial untuk user '%s': %s",
+                self.user.username,
+                exc,
+            )
+
         return UserResponse.model_validate(self.user)
 
     async def get_all_users(self, limit: int, offset: int) -> dict:
