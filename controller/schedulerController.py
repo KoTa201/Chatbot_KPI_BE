@@ -11,9 +11,9 @@ from service.schedulerService import get_scheduler_service
 class SchedulerController:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.repo = SchedulerRepository(db)
-        self.scheduler_service = get_scheduler_service()
+        self.db: AsyncSession = db
+        self.repo: SchedulerRepository = SchedulerRepository(db)
+        self.scheduler_service: callable = get_scheduler_service()
 
     async def get_config(self) -> dict:
         config = await self.repo.get_config()

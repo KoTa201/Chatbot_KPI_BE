@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from controller.kpiTrackerController import KPITrackerController
+from controller.ingestionLogController import IngestionLogController
 from databaseConfig import get_db
 from schema.kpiTrackerSchema import (
     BatchTrackerIngestionRequest,
@@ -25,8 +26,11 @@ class IngestionRouter:
         self.router = APIRouter()
         self.setup_routes()
 
-    def _get_controller(self, db: AsyncSession) -> KPITrackerController:
+    def _get_tracker_controller(self, db: AsyncSession) -> KPITrackerController:
         return KPITrackerController(db)
+
+    def _get_log_controller(self, db: AsyncSession) -> IngestionLogController:
+        return IngestionLogController(db)
 
     def setup_routes(self):
         """Register all routes."""
@@ -75,22 +79,23 @@ class IngestionRouter:
             nama_orang_override=nama_orang_override,
             skip_on_error=skip_on_error,
         )
-        return await self._get_controller(db).ingest_all_sheets_from_google_sheets(request)
+        return await self._get_tracker_controller(db).ingest_all_sheets_from_google_sheets(request)
 
     async def ingest_batch_from_google_sheets(
         self,
         request: BatchTrackerIngestionRequest,
         db: AsyncSession = Depends(get_db),
     ) -> BatchTrackerIngestionResponse:
-        return await self._get_controller(db).ingest_batch_from_google_sheets(request)
+        return await self._get_tracker_controller(db).ingest_batch_from_google_sheets(request)
 
     async def get_ingestion_logs(
         self,
         limit: int = Query(default=20, le=100),
-        group_type: Optional[Literal["tracker", "master"]] = Query(default=None),
+        group_type: Optional[Literal["tracker", "master"]
+                             ] = Query(default=None),
         db: AsyncSession = Depends(get_db),
     ):
-        return await self._get_controller(db).get_ingestion_logs(
+        return await self._get_log_controller(db).get_ingestion_logs(
             limit=limit, group_type=group_type
         )
 

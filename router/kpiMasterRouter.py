@@ -15,7 +15,6 @@ from schema.kpiMasterSchema import (
     GroupedKPIMasterResponse,
     IngestionResponse,
     IngestKPIMasterRequest,
-    DeleteMastersResponse
 )
 
 
@@ -70,15 +69,6 @@ class KPIMasterRouter:
             summary="Detail records untuk satu source_sheet_name (expand group)",
         )
 
-        # ── DELETE ─────────────────────────────────────────────────── #
-        self.router.add_api_route(
-            "/grouped/{source_sheet_name}",
-            self.delete_records_by_source_sheet_name,
-            methods=["DELETE"],
-            response_model=DeleteMastersResponse,
-            summary="Hapus semua records untuk satu source_sheet_name",
-        )
-
     # ── Ingestion handlers ─────────────────────────────────────────── #
 
     async def ingest_kpi_master(
@@ -131,15 +121,6 @@ class KPIMasterRouter:
     ):
         return await self._get_controller(db).get_detail_records_by_source_sheet_name(
             source_sheet_name, skip, limit
-        )
-
-    async def delete_records_by_source_sheet_name(
-        self,
-        source_sheet_name: str,
-        db: AsyncSession = Depends(get_db),
-    ):
-        return await self._get_controller(db).delete_records_by_source_sheet_name(
-            source_sheet_name
         )
 
 

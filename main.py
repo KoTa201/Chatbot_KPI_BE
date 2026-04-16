@@ -69,6 +69,7 @@ app.include_router(
 app.include_router(
     kpi_group_router.router, prefix="/api/v1/kpi", tags=["KPI Groups"])
 
+
 @app.get("/", tags=["Health"])
 async def root():
     return {"status": "ok", "service": "KPI RAG Ingestion API v3"}

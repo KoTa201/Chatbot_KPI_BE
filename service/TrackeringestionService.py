@@ -74,11 +74,11 @@ class TrackerIngestionService:
         log_repo:     IngestionLogRepository,
         group_repo:   KPIGroupRepository,
     ):
-        self.db = db
-        self.tracker_repo = tracker_repo
-        self.log_repo = log_repo
-        self.group_repo = group_repo
-        self.google_svc = GoogleSheetService()
+        self.db: AsyncSession = db
+        self.tracker_repo: KPITrackerRepository = tracker_repo
+        self.log_repo: IngestionLogRepository = log_repo
+        self.group_repo: KPIGroupRepository = group_repo
+        self.google_svc: GoogleSheetService = GoogleSheetService()
 
     # ================================================================ #
     #  PUBLIC: Entry point                                              #
