@@ -42,7 +42,7 @@ _KPI_REPO = "service.kpiMasterIngestionService.KPIMasterRepository"
 _KPI_SVC = "service.kpiMasterIngestionService.KPIMasterService"
 _LOG_REPO = "service.kpiMasterIngestionService.IngestionLogRepository"
 _GROUP_REPO = "service.kpiMasterIngestionService.KPIGroupRepository"
-_GOOGLE_SVC = "service.kpiMasterIngestionService.GoogleSheetService"
+_GOOGLE_SVC = "service.GoogleSheetService"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +156,6 @@ async def test_ingest_kpi_master_success():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, [])),
@@ -213,7 +212,6 @@ async def test_ingest_kpi_master_partial_success():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, errors)),
@@ -356,7 +354,6 @@ async def test_ingest_creates_kpi_group_if_not_exists():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, [])),
@@ -401,7 +398,6 @@ async def test_ingest_upserts_existing_kpi_group():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, [])),
@@ -442,7 +438,6 @@ async def test_ingestion_log_created_before_processing():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, [])),
@@ -479,7 +474,6 @@ async def test_ingestion_log_updated_on_completion():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, [])),
@@ -525,7 +519,6 @@ async def test_ingest_injects_group_id_into_records():
     log_repo.update_status = AsyncMock()
 
     with (
-        patch("service.kpiMasterIngestionService.GoogleSheetService"),
         patch.object(service, "_fetch_sheet", return_value=(
             mock_df, SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=(sample_records, [])),
