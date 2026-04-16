@@ -26,8 +26,8 @@ class UserController:
     """
 
     def __init__(self, db: AsyncSession):
-        self.repo = None  # Can be set if needed for direct repo access
-        self.user_svc = UserService(db)  # User service for user management
+        self.user_svc: UserService = UserService(
+            db)  # User service for user management
 
     # ─── Admin user management endpoints ──────────────────────────────
 

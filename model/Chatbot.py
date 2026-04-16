@@ -2,13 +2,8 @@ from uuid import uuid4
 from sqlalchemy import UUID, String, Text, Enum, DateTime, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
-import enum
 from databaseConfig import Base
-
-
-class AuthorityEnum(str, enum.Enum):
-    HRD = "HRD"
-    KARYAWAN = "Karyawan"
+from model.Base import AuthorityEnum  # noqa: F401 — re-exported for backward compat
 
 
 class Chatbot(Base):

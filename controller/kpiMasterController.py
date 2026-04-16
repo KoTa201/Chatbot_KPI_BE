@@ -9,8 +9,6 @@ Perubahan dari versi sebelumnya:
 """
 
 from typing import Optional
-
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
@@ -31,18 +29,15 @@ from service.kpiMasterService import KPIMasterService
 class KPIMasterController:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
         # Repositories
-        self.kpi_repo = KPIMasterRepository(db)
-        self.log_repo = IngestionLogRepository(db)
-        self.group_repo = KPIGroupRepository(db)      # ← baru
-
-        # Services
-        self.service = KPIMasterService(self.kpi_repo)
-
-        # Ingestion service sekarang menerima group_repo
-        self.ingestion_service = KPIMasterIngestionService(
+        self.kpi_repo: KPIMasterRepository = KPIMasterRepository(db)
+        self.log_repo: IngestionLogRepository = IngestionLogRepository(db)
+        self.group_repo: KPIGroupRepository = KPIGroupRepository(
+            db)      # ← baru
+        self.service: KPIMasterService = KPIMasterService(self.kpi_repo)
+        self.ingestion_service: KPIMasterIngestionService = KPIMasterIngestionService(
             kpi_repo=self.kpi_repo,
             kpi_service=self.service,
             log_repo=self.log_repo,
@@ -124,30 +119,4 @@ class KPIMasterController:
             source_sheet_name=result["source_sheet_name"],
             records=records,
             pagination=result["pagination"],
-        )
-
-    async def delete_records_by_source_sheet_name(
-        self, source_sheet_name: str
-    ) -> DeleteMastersResponse:
-        # Fix dari versi sebelumnya: service mengembalikan Dict, bukan int
-        result = await self.service.delete_by_source_sheet_name(source_sheet_name)
-        deleted_count = result["deleted_count"]
-
-        if deleted_count > 0:
-            status = "success"
-            message = (
-                f"Berhasil hapus {deleted_count} records "
-                f"dengan source_sheet_name '{source_sheet_name}'."
-            )
-        else:
-            status = "failed"
-            message = (
-                f"Tidak ditemukan records dengan source_sheet_name "
-                f"'{source_sheet_name}' untuk dihapus."
-            )
-
-        return DeleteMastersResponse(
-            status=status,
-            count=deleted_count,
-            message=message,
         )

@@ -20,7 +20,8 @@ class SchedulerService:
     MISFIRE_GRACE_TIME = 300
 
     def __init__(self):
-        self.scheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
+        self.scheduler: AsyncIOScheduler = AsyncIOScheduler(
+            timezone=self.TIMEZONE)
 
     def _build_trigger(self, interval_value: int, interval_unit: str) -> IntervalTrigger:
         if interval_unit == "months":
@@ -78,7 +79,8 @@ class SchedulerService:
             self.scheduler.remove_job(self.JOB_ID)
         if not config.is_enabled:
             return
-        trigger = self._build_trigger(config.interval_value, config.interval_unit)
+        trigger = self._build_trigger(
+            config.interval_value, config.interval_unit)
         self.scheduler.add_job(
             self._run_ingestion_job,
             trigger=trigger,

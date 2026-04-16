@@ -28,7 +28,7 @@ class ChatbotController:
     """
 
     def __init__(self, db: AsyncSession):
-        self.service = ChatbotService(db)
+        self.service: ChatbotService = ChatbotService(db)
 
     async def list_chatbots(
         self,

@@ -26,8 +26,8 @@ from service.TrackeringestionService import TrackerIngestionService
 class KPIGroupService:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.repo = KPIGroupRepository(db)
+        self.db: AsyncSession = db
+        self.repo: KPIGroupRepository = KPIGroupRepository(db)
 
     # ─── Helper: ORM → KPIGroupResponse ──────────────────────────────────────
 
@@ -139,7 +139,8 @@ class KPIGroupService:
                 if not sheet_id:
                     # Ekstrak sheet_id dari URL
                     import re
-                    match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", sheet_url_str)
+                    match = re.search(
+                        r"/spreadsheets/d/([a-zA-Z0-9_-]+)", sheet_url_str)
                     sheet_id = match.group(1) if match else ""
             except Exception:
                 nama_grup = nama_grup or sheet_url_str

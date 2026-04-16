@@ -24,12 +24,13 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text, UniqueConstraint
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from databaseConfig import Base
+from model.Base import GroupTypeEnum
 
 if TYPE_CHECKING:
     from model.KPIMaster import KPIMasterORM
@@ -54,7 +55,8 @@ class KPIGroupORM(Base):
 
     # group_type: 'master' atau 'tracker' — satu sheet hanya boleh satu tipe
     # Ini penting karena master sheet dan tracker sheet adalah entitas berbeda
-    group_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    group_type: Mapped[GroupTypeEnum] = mapped_column(
+        Enum(GroupTypeEnum, native_enum=False), nullable=False)
 
     # Metadata sheet sumber — disimpan di sini, TIDAK di setiap baris master/tracker
     sheet_url: Mapped[str] = mapped_column(Text, nullable=False)

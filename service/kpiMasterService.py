@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 class KPIMasterService:
 
     def __init__(self, repository: KPIMasterRepository):
-        self.repo = repository
+        self.repo: KPIMasterRepository = repository
 
     # ================================================================ #
     #  UPSERT                                                           #
@@ -212,32 +212,6 @@ class KPIMasterService:
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal ambil detail masters: {str(e)}",
-            )
-
-    async def delete_by_source_sheet_name(self, source_sheet_name: str) -> Dict[str, Any]:
-        if not source_sheet_name or not source_sheet_name.strip():
-            raise HTTPException(
-                status_code=400, detail="Source sheet name tidak boleh kosong"
-            )
-
-        logger.info(f"Deleting KPI Masters for sheet: {source_sheet_name}")
-
-        try:
-            deleted_count = await self.repo.delete_by_source_sheet_name(source_sheet_name)
-            return {
-                "deleted_count": deleted_count,
-                "message": (
-                    f"Berhasil hapus {deleted_count} records "
-                    f"untuk sheet '{source_sheet_name}'"
-                ),
-            }
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Error deleting KPI Masters: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Gagal hapus KPI Masters: {str(e)}",
             )
 
     # ================================================================ #

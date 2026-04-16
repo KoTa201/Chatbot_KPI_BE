@@ -15,7 +15,7 @@ from schema.chatbotSchema import (
 
 class ChatbotService:
     def __init__(self, db: AsyncSession) -> None:  # ← AsyncSession
-        self.repo = ChatbotRepository(db)
+        self.repo: ChatbotRepository = ChatbotRepository(db)
 
     # ─── Helper ───────────────────────────────────────────────────────────────
 

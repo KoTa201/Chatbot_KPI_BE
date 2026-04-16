@@ -36,12 +36,13 @@ class KPITrackerController:
         self.db = db
 
         # Repositories
-        self.tracker_repo = KPITrackerRepository(db) if db else None
-        self.log_repo = IngestionLogRepository(db) if db else None
-        self.group_repo = KPIGroupRepository(db) if db else None
-
-        # Ingestion service — kini butuh db session (untuk master matching)
-        self.ingestion_service = (
+        self.tracker_repo: KPITrackerRepository = KPITrackerRepository(
+            db) if db else None
+        self.log_repo: IngestionLogRepository = IngestionLogRepository(
+            db) if db else None
+        self.group_repo: KPIGroupRepository = KPIGroupRepository(
+            db) if db else None
+        self.ingestion_service: TrackerIngestionService = (
             TrackerIngestionService(
                 db=db,
                 tracker_repo=self.tracker_repo,
@@ -88,7 +89,7 @@ class KPITrackerController:
     # ================================================================ #
 
     async def get_ingestion_logs(
-        self, limit: int, source_type: Optional[str] = None
+        self, limit: int, group_type: Optional[str] = None
     ) -> dict:
         """
         Ambil ingestion logs.

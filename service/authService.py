@@ -56,12 +56,12 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 class AuthService:
 
     def __init__(self):
-        self.repo = AuthRepository(Depends(get_db))
-        self.secret_key = settings.SECRET_KEY
-        self.refresh_secret_key = settings.REFRESH_SECRET_KEY
-        self.reset_secret_key = settings.RESET_SECRET_KEY
-        self.access_token_expire_minutes = settings.ACCESS_TOKEN_EXPIRE_MINUTES
-        self.refresh_token_expire_days = settings.REFRESH_TOKEN_EXPIRE_DAYS
+        self.repo: AuthRepository = AuthRepository(Depends(get_db))
+        self.secret_key: str = settings.SECRET_KEY
+        self.refresh_secret_key: str = settings.REFRESH_SECRET_KEY
+        self.reset_secret_key: str = settings.RESET_SECRET_KEY
+        self.access_token_expire_minutes: int = settings.ACCESS_TOKEN_EXPIRE_MINUTES
+        self.refresh_token_expire_days: int = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
     async def _get_user_or_404(self, user_id: UUID) -> UserORM:
         user = await self.repo.get_by_id(user_id)

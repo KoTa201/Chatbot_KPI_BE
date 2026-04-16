@@ -29,8 +29,8 @@ from service.kpiGroupService import KPIGroupService
 class KPIGroupController:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.service = KPIGroupService(db)
+        self.db: AsyncSession = db
+        self.service: KPIGroupService = KPIGroupService(db)
 
     # ─── List ─────────────────────────────────────────────────────────────────
 

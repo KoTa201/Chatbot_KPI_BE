@@ -43,10 +43,10 @@ from schema.authSchema import (
 class AuthController:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.repo = AuthRepository(db)
-        self.svc = AuthService()
-        self.user_svc = UserService(db)
+        self.db: AsyncSession = db
+        self.repo: AuthRepository = AuthRepository(db)
+        self.svc: AuthService = AuthService()
+        self.user_svc: UserService = UserService(db)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/login                                                    #
