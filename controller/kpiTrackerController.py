@@ -81,6 +81,7 @@ class KPITrackerController:
         return await self.ingestion_service.ingest_batch(
             sources=request.sources,
             skip_on_error=request.skip_on_error,
+            delay_between_sources=request.delay_between_sources,
         )
 
     # ================================================================ #

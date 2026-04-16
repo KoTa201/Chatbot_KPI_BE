@@ -18,6 +18,11 @@ class SchedulerService:
     JOB_ID = "kpi_tracker_ingestion"
     TIMEZONE = "UTC"
     MISFIRE_GRACE_TIME = 300
+    # Jeda antar spreadsheet saat scheduler auto-run.
+    # Google Sheets API limit: 6 request per menit per user.
+    # Setiap spreadsheet bisa memicu beberapa request (1 per tab).
+    # Set ke 10.0 detik sebagai safe default.
+    RATE_LIMIT_DELAY_SECONDS: float = 30.0
 
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
@@ -52,6 +57,7 @@ class SchedulerService:
             request = BatchTrackerIngestionRequest(
                 sources=source_items,
                 skip_on_error=True,
+                delay_between_sources=self.RATE_LIMIT_DELAY_SECONDS,
             )
             await controller.ingest_batch_from_google_sheets(request)
 

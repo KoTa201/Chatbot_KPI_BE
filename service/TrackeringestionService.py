@@ -30,6 +30,7 @@ Alur per-sheet:
     → update_status IngestionLog
 """
 
+import asyncio
 import logging
 import traceback
 from typing import Any, Dict, List, Optional, Tuple
@@ -202,18 +203,30 @@ class TrackerIngestionService:
         self,
         sources: list[TrackerSourceItem],
         skip_on_error: bool = True,
+        delay_between_sources: float = 0.0,
     ) -> BatchTrackerIngestionResponse:
         """
         Ingest beberapa spreadsheet sekaligus.
         Setiap source membawa sheet_url + tahun masing-masing.
         Gagalnya satu URL tidak menghentikan URL lain.
+
+        Args:
+            delay_between_sources: Jeda (detik) antar ingest spreadsheet.
+                Berguna untuk menghindari rate limit Google Sheets API (maks 6 req/menit).
+                Contoh: delay_between_sources=10.0 → jeda 10 detik antar spreadsheet.
         """
         results: list[UrlIngestionResult] = []
         grand_total_rows = 0
         grand_ingested = 0
         grand_failed = 0
 
-        for source in sources:
+        for i, source in enumerate(sources):
+            if i > 0 and delay_between_sources > 0:
+                logger.info(
+                    f"[TrackerIngestion] Menunggu {delay_between_sources}s sebelum ingest source ke-{i + 1}..."
+                )
+                await asyncio.sleep(delay_between_sources)
+
             url = source.sheet_url
             tahun = source.tahun
             try:
