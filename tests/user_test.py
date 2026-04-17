@@ -199,6 +199,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_sukses(self, client: AsyncClient):
+        """Login valid mengembalikan access token, refresh token, dan data user."""
         mock_user = _make_user(hashed_password="REAL_HASH")
 
         with (
@@ -221,6 +222,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_password_salah(self, client: AsyncClient):
+        """Login dengan password salah harus ditolak 401."""
         mock_user = _make_user()
 
         with (
@@ -238,6 +240,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_user_tidak_ditemukan(self, client: AsyncClient):
+        """Login dengan identifier yang tidak terdaftar harus return 401."""
         with patch(f"{_REPO}.get_by_username_or_email",
                    new_callable=AsyncMock, return_value=None):
             resp = await client.post("/api/v1/users/login", json={
@@ -249,6 +252,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_akun_nonaktif(self, client: AsyncClient):
+        """User nonaktif tidak boleh login dan harus mendapat 403."""
         mock_user = _make_user(is_active=False)
 
         with (
@@ -266,6 +270,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_via_email(self, client: AsyncClient):
+        """Login via email (bukan username) tetap valid dan mengembalikan 200."""
         mock_user = _make_user()
 
         with (
@@ -282,6 +287,7 @@ class TestLogin:
 
     @pytest.mark.asyncio
     async def test_login_payload_kosong(self, client: AsyncClient):
+        """Payload login kosong harus gagal validasi request (422)."""
         resp = await client.post("/api/v1/users/login", json={})
         assert resp.status_code == 422
 
@@ -294,6 +300,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_sukses_rotation(self, client: AsyncClient):
+        """Refresh token valid harus merotasi token dan menghasilkan token baru."""
         access, refresh = _make_tokens()
         mock_user = _make_user()
 
@@ -319,6 +326,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_token_sudah_direvoke(self, client: AsyncClient):
+        """Refresh token yang sudah direvoke harus ditolak 401."""
         access, _ = _make_tokens()
         _, refresh = _make_tokens()
 
@@ -336,6 +344,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_token_kadaluarsa(self, client: AsyncClient):
+        """Refresh token kedaluwarsa harus ditolak 401."""
         expired = _expired_refresh_token()
         access, _ = _make_tokens()
         resp = await client.post(
@@ -347,6 +356,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_token_palsu(self, client: AsyncClient):
+        """Refresh token palsu dengan format JWT tidak valid harus ditolak 401."""
         access, _ = _make_tokens()
         resp = await client.post(
             "/api/v1/users/refresh",
@@ -369,6 +379,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_user_nonaktif(self, client: AsyncClient):
+        """Refresh token milik user nonaktif harus ditolak 403."""
         access, refresh = _make_tokens()
         mock_user = _make_user(is_active=False)
 
@@ -389,6 +400,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_user_dihapus(self, client: AsyncClient):
+        """Refresh token untuk user yang sudah tidak ada harus ditolak 401."""
         access, refresh = _make_tokens()
 
         with (
@@ -408,6 +420,7 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_revoke_dipanggil_sekali(self, client: AsyncClient):
+        """Pada refresh sukses, revoke_token harus dipanggil tepat satu kali."""
         access, refresh = _make_tokens()
         mock_user = _make_user()
         mock_revoke = AsyncMock()
@@ -436,6 +449,7 @@ class TestLogout:
 
     @pytest.mark.asyncio
     async def test_logout_sukses(self, client: AsyncClient):
+        """Logout valid harus revoke refresh token dan mengembalikan 200."""
         access, refresh = _make_tokens()
         mock_revoke = AsyncMock()
 
@@ -452,6 +466,7 @@ class TestLogout:
 
     @pytest.mark.asyncio
     async def test_logout_token_palsu(self, client: AsyncClient):
+        """Logout dengan refresh token palsu harus ditolak 401."""
         access, _ = _make_tokens()
         resp = await client.post(
             "/api/v1/users/logout",
@@ -462,6 +477,7 @@ class TestLogout:
 
     @pytest.mark.asyncio
     async def test_logout_token_kadaluarsa(self, client: AsyncClient):
+        """Logout dengan refresh token kedaluwarsa harus ditolak 401."""
         expired = _expired_refresh_token()
         access, _ = _make_tokens()
         resp = await client.post(
@@ -548,11 +564,13 @@ class TestGetMe:
 
     @pytest.mark.asyncio
     async def test_get_me_tanpa_token(self, client: AsyncClient):
+        """Endpoint /users/me tanpa Authorization header harus return 401."""
         resp = await client.get("/api/v1/users/me")
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_get_me_token_kadaluarsa(self, client: AsyncClient):
+        """Endpoint /users/me dengan access token kedaluwarsa harus return 401."""
         expired = _expired_access_token()
         resp = await client.get(
             "/api/v1/users/me",
@@ -579,6 +597,7 @@ class TestChangePassword:
 
     @pytest.mark.asyncio
     async def test_change_password_sukses(self, client: AsyncClient):
+        """User terautentikasi dapat mengganti password jika old password benar."""
         access, _ = _make_tokens()
         mock_user = _make_user()
 
@@ -600,6 +619,7 @@ class TestChangePassword:
 
     @pytest.mark.asyncio
     async def test_change_password_lama_salah(self, client: AsyncClient):
+        """Pergantian password harus gagal jika old password tidak cocok."""
         access, _ = _make_tokens()
         mock_user = _make_user()
 
@@ -619,6 +639,7 @@ class TestChangePassword:
 
     @pytest.mark.asyncio
     async def test_change_password_sama(self, client: AsyncClient):
+        """Password baru tidak boleh sama dengan password lama."""
         access, _ = _make_tokens()
         mock_user = _make_user()
 
@@ -656,6 +677,7 @@ class TestChangePassword:
 
     @pytest.mark.asyncio
     async def test_change_password_tanpa_auth(self, client: AsyncClient):
+        """Endpoint change-password tanpa token harus ditolak 401."""
         resp = await client.post(
             "/api/v1/users/me/change-password",
             json={"old_password": "OldPass1", "new_password": "NewPass1"},
@@ -671,6 +693,7 @@ class TestCreateUser:
 
     @pytest.mark.asyncio
     async def test_create_user_sukses(self, client: AsyncClient):
+        """Admin dapat membuat user baru ketika username/email belum terpakai."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
         new_user = _make_user(
@@ -705,6 +728,7 @@ class TestCreateUser:
 
     @pytest.mark.asyncio
     async def test_create_user_duplikat_username(self, client: AsyncClient):
+        """Pembuatan user harus gagal 409 jika username sudah terdaftar."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -730,6 +754,7 @@ class TestCreateUser:
 
     @pytest.mark.asyncio
     async def test_create_user_duplikat_email(self, client: AsyncClient):
+        """Pembuatan user harus gagal 409 jika email sudah terdaftar."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -840,6 +865,7 @@ class TestGetAllUsers:
 
     @pytest.mark.asyncio
     async def test_get_all_users_sukses(self, client: AsyncClient):
+        """Admin dapat melihat daftar user dengan metadata total yang benar."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
         users = [_make_user(
@@ -865,6 +891,7 @@ class TestGetAllUsers:
 
     @pytest.mark.asyncio
     async def test_get_all_users_pagination(self, client: AsyncClient):
+        """Parameter limit dan offset harus diteruskan ke repository dengan benar."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -925,6 +952,7 @@ class TestGetUserById:
 
     @pytest.mark.asyncio
     async def test_get_user_by_id_sukses(self, client: AsyncClient):
+        """Admin dapat mengambil detail user berdasarkan user_id yang valid."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
         target_user = _make_user(id=USER_ID)
@@ -941,6 +969,7 @@ class TestGetUserById:
 
     @pytest.mark.asyncio
     async def test_get_user_by_id_not_found(self, client: AsyncClient):
+        """Pengambilan detail user harus return 404 jika user_id tidak ditemukan."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -997,6 +1026,7 @@ class TestUpdateUser:
 
     @pytest.mark.asyncio
     async def test_update_user_sukses(self, client: AsyncClient):
+        """Admin dapat memperbarui data user jika target ada dan email tidak konflik."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
         target = _make_user(id=USER_ID)
@@ -1021,6 +1051,7 @@ class TestUpdateUser:
 
     @pytest.mark.asyncio
     async def test_update_user_email_duplikat(self, client: AsyncClient):
+        """Update email harus ditolak 409 jika email baru sudah dipakai user lain."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
         target = _make_user(id=USER_ID, email="old@example.com")
@@ -1041,6 +1072,7 @@ class TestUpdateUser:
 
     @pytest.mark.asyncio
     async def test_update_user_not_found(self, client: AsyncClient):
+        """Update user harus return 404 ketika user target tidak ditemukan."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -1082,6 +1114,7 @@ class TestDeleteUser:
 
     @pytest.mark.asyncio
     async def test_delete_user_sukses(self, client: AsyncClient):
+        """Admin dapat menghapus user lain dan menerima pesan sukses."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
         target = _make_user(id=USER_ID, username="tobedeleted")
@@ -1117,6 +1150,7 @@ class TestDeleteUser:
 
     @pytest.mark.asyncio
     async def test_delete_user_not_found(self, client: AsyncClient):
+        """Delete user harus return 404 jika user target tidak ditemukan."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -1182,6 +1216,7 @@ class TestDeleteUser:
 class TestAuthServiceUnit:
 
     def test_hash_dan_verify_password(self):
+        """hash_password menghasilkan hash bcrypt yang lolos verify_password untuk nilai benar."""
         from service.authService import AuthService
         svc = AuthService()
         hashed = svc.hash_password("MySecret1")
@@ -1189,6 +1224,7 @@ class TestAuthServiceUnit:
         assert svc.verify_password("WrongPass", hashed) is False
 
     def test_create_access_token_berisi_field_wajib(self):
+        """Access token harus memuat sub, username, role, type bearer, dan expiry positif."""
         from model.User import RoleEnum
         from service.authService import AuthService, ALGORITHM
         from jose import jwt
@@ -1209,6 +1245,7 @@ class TestAuthServiceUnit:
         assert exp > 0
 
     def test_create_refresh_token_berisi_field_minimal(self):
+        """Refresh token hanya memuat field minimal tanpa role/username."""
         from service.authService import AuthService, ALGORITHM
         from jose import jwt
         from config import settings
@@ -1225,6 +1262,7 @@ class TestAuthServiceUnit:
         assert exp > 0
 
     def test_decode_access_token_tolak_refresh_token(self):
+        """decode_access_token harus menolak token bertipe refresh."""
         from fastapi import HTTPException
         from service.authService import AuthService
 
@@ -1236,6 +1274,7 @@ class TestAuthServiceUnit:
         assert exc.value.status_code == 401
 
     def test_decode_refresh_token_tolak_access_token(self):
+        """decode_refresh_token harus menolak token bertipe access."""
         from fastapi import HTTPException
         from service.authService import AuthService
 
@@ -1247,6 +1286,7 @@ class TestAuthServiceUnit:
         assert exc.value.status_code == 401
 
     def test_decode_token_kadaluarsa(self):
+        """decode_access_token harus melempar 401 untuk token yang sudah kedaluwarsa."""
         from fastapi import HTTPException
         from service.authService import AuthService
 
@@ -1259,6 +1299,7 @@ class TestAuthServiceUnit:
 
     @pytest.mark.asyncio
     async def test_authenticate_user_sukses(self):
+        """authenticate_user mengembalikan user saat identifier dan password valid."""
         from service.authService import AuthService
 
         svc = AuthService()
@@ -1273,6 +1314,7 @@ class TestAuthServiceUnit:
 
     @pytest.mark.asyncio
     async def test_rotate_tokens_revoke_lama_terbit_baru(self):
+        """rotate_tokens harus revoke token lama dan menerbitkan pasangan token baru."""
         from service.authService import AuthService
 
         svc = AuthService()
@@ -1291,6 +1333,7 @@ class TestAuthServiceUnit:
 
     @pytest.mark.asyncio
     async def test_rotate_tokens_reuse_ditolak(self):
+        """rotate_tokens harus menolak refresh token yang terdeteksi reuse/revoked."""
         from fastapi import HTTPException
         from service.authService import AuthService
 

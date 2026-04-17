@@ -6,7 +6,7 @@ Pydantic models untuk request/response endpoint KPI Tracker management.
 from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
 # ================================================================ #
@@ -33,8 +33,8 @@ class CreateKPIRecordRequest(BaseModel):
     source_row: Optional[int] = Field(
         None, ge=1, description="Nomor baris sumber")
 
-    class Config:
-        example = {
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
             "nama_kpi": "KPI Penjualan",
             "tahun": 2026,
             "realisasi": "95%",
@@ -42,6 +42,7 @@ class CreateKPIRecordRequest(BaseModel):
             "keterangan": "Achieved target",
             "source_sheet_name": "Q1 Report"
         }
+    })
 
 
 class UpdateKPIRecordRequest(BaseModel):
@@ -56,20 +57,21 @@ class UpdateKPIRecordRequest(BaseModel):
     source_sheet_name: Optional[str] = Field(None, max_length=255)
     source_row: Optional[int] = Field(None, ge=1)
 
-    class Config:
-        example = {
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
             "realisasi": "98%",
             "keterangan": "Updated achievement"
         }
+    })
 
 
 class BulkCreateKPIRecordsRequest(BaseModel):
     """Schema untuk bulk create multiple KPI records."""
     records: List[CreateKPIRecordRequest] = Field(
-        ..., min_items=1, max_items=10000)
+        ..., min_length=1, max_length=10000)
 
-    class Config:
-        example = {
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
             "records": [
                 {
                     "nama_kpi": "KPI A",
@@ -83,19 +85,21 @@ class BulkCreateKPIRecordsRequest(BaseModel):
                 }
             ]
         }
+    })
 
 
 class BulkDeleteKPIRecordsRequest(BaseModel):
     """Schema untuk bulk delete multiple KPI records."""
-    record_ids: List[UUID] = Field(..., min_items=1, max_items=1000)
+    record_ids: List[UUID] = Field(..., min_length=1, max_length=1000)
 
-    class Config:
-        example = {
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
             "record_ids": [
                 "550e8400-e29b-41d4-a716-446655440000",
                 "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
             ]
         }
+    })
 
 
 class IngestAllSheetsRequest(BaseModel):
@@ -109,13 +113,14 @@ class IngestAllSheetsRequest(BaseModel):
     skip_on_error: bool = Field(
         True, description="Skip sheet dengan error atau stop")
 
-    class Config:
-        example = {
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
             "sheet_url": "https://docs.google.com/spreadsheets/d/abc123/edit",
             "tahun": 2026,
             "nama_orang_override": None,
             "skip_on_error": True,
         }
+    })
 
 
 # ================================================================ #
@@ -137,8 +142,7 @@ class KPIRecordResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaginationInfo(BaseModel):
@@ -301,16 +305,15 @@ class BatchTrackerIngestionRequest(BaseModel):
             ]
         return values
 
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "sources": [
-                    {"sheet_url": "https://docs.google.com/spreadsheets/d/abc/edit", "tahun": 2025},
-                    {"sheet_url": "https://docs.google.com/spreadsheets/d/xyz/edit", "tahun": 2026},
-                ],
-                "skip_on_error": True,
-            }
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "sources": [
+                {"sheet_url": "https://docs.google.com/spreadsheets/d/abc/edit", "tahun": 2025},
+                {"sheet_url": "https://docs.google.com/spreadsheets/d/xyz/edit", "tahun": 2026},
+            ],
+            "skip_on_error": True,
         }
+    })
 
 
 class UrlIngestionResult(BaseModel):
