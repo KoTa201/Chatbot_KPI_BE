@@ -6,7 +6,7 @@ Pydantic models untuk request/response endpoint KPI Master management.
 from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # ================================================================ #
@@ -18,16 +18,17 @@ class IngestKPIMasterRequest(BaseModel):
     sheet_url: str = Field(..., description="URL Google Sheets")
     tahun: int = Field(..., ge=2000, le=2031, description="Tahun (2000-2031)")
 
-    class Config:
-        example = {
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
             "sheet_url": "https://docs.google.com/spreadsheets/d/abc123/edit",
             "tahun": 2026
         }
-
+    })
 
 # ================================================================ #
 #  RESPONSE Schemas (Output Format)                                #
 # ================================================================ #
+
 
 class KPIMasterResponse(BaseModel):
     """Schema untuk single KPI Master response."""
@@ -44,8 +45,7 @@ class KPIMasterResponse(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaginationInfo(BaseModel):

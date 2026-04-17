@@ -13,33 +13,16 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.future import select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy import text
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
+from uuid import uuid4
 
 from databaseConfig import Base
 from databaseConfig import get_db
 from model.Chatbot import Chatbot, AuthorityEnum  # noqa: F401
-from middleware.jwtMiddleware import JWTMiddleware
+from model.User import UserORM, RoleEnum
+from service.authService import AuthService
 from main import app
 
 pytestmark = pytest.mark.asyncio
-
-# ─── Bypass JWTMiddleware ─────────────────────────────────────────────────────
-
-
-class BypassJWTMiddleware(BaseHTTPMiddleware):
-    """Ganti JWT middleware dengan versi no-op saat testing."""
-
-    async def dispatch(self, request: Request, call_next):
-        return await call_next(request)
-
-
-# Hapus JWTMiddleware dari stack, ganti dengan BypassJWTMiddleware
-app.user_middleware = [
-    m for m in app.user_middleware if m.cls is not JWTMiddleware
-]
-app.add_middleware(BypassJWTMiddleware)
-app.middleware_stack = app.build_middleware_stack()
 
 # ─── DB in-memory (SQLite async) ─────────────────────────────────────────────
 
@@ -84,16 +67,77 @@ async def clean_db():
     yield
     async with AsyncSessionTest() as session:
         await session.execute(text("DELETE FROM chatbots"))
+        await session.execute(text("DELETE FROM users"))
         await session.commit()
 
 
 @pytest_asyncio.fixture
 async def client() -> AsyncClient:
+    auth_service = AuthService()
+    admin = UserORM(
+        username=f"admin_{uuid4().hex[:8]}",
+        email=f"admin_{uuid4().hex[:8]}@example.com",
+        full_name="Admin Test",
+        hashed_password=auth_service.hash_password("Password1!"),
+        role=RoleEnum.admin,
+        is_active=True,
+    )
+    async with AsyncSessionTest() as session:
+        session.add(admin)
+        await session.commit()
+        await session.refresh(admin)
+
+    access_token, _ = auth_service.create_access_token(
+        user_id=admin.id,
+        username=admin.username,
+        role=admin.role,
+    )
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"Authorization": f"Bearer {access_token}"},
+    ) as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def raw_client() -> AsyncClient:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
     ) as ac:
         yield ac
+
+
+@pytest_asyncio.fixture
+async def role_tokens(db_session: AsyncSession) -> dict[str, str]:
+    """Buat user aktif untuk setiap role lalu generate access token-nya."""
+    auth_service = AuthService()
+    tokens: dict[str, str] = {}
+
+    for role in (RoleEnum.admin, RoleEnum.hrd, RoleEnum.kepala_divisi, RoleEnum.karyawan):
+        suffix = uuid4().hex[:8]
+        user = UserORM(
+            username=f"{role.value}_{suffix}",
+            email=f"{role.value}_{suffix}@example.com",
+            full_name=f"{role.value.title()} Test",
+            hashed_password=auth_service.hash_password("Password1!"),
+            role=role,
+            is_active=True,
+        )
+        db_session.add(user)
+        await db_session.flush()
+
+        token, _ = auth_service.create_access_token(
+            user_id=user.id,
+            username=user.username,
+            role=user.role,
+        )
+        tokens[role.value] = token
+
+    await db_session.commit()
+    return tokens
 
 
 @pytest_asyncio.fixture
@@ -125,6 +169,44 @@ async def seed_chatbot(session: AsyncSession, **kwargs) -> Chatbot:
     await session.commit()
     await session.refresh(chatbot)
     return chatbot
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RBAC /api/v1/chatbots/
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestChatbotRBAC:
+
+    async def test_admin_can_access_chatbot_module(self, raw_client: AsyncClient, role_tokens: dict[str, str]):
+        """Role admin boleh akses module chatbot."""
+        res = await raw_client.get(
+            "/api/v1/chatbots/",
+            headers={"Authorization": f"Bearer {role_tokens['admin']}"},
+        )
+
+        assert res.status_code == 200
+
+    @pytest.mark.parametrize("role", ["hrd", "kepala_divisi", "karyawan"])
+    async def test_non_admin_cannot_access_chatbot_module(
+        self,
+        role: str,
+        raw_client: AsyncClient,
+        role_tokens: dict[str, str],
+    ):
+        """Role non-admin harus ditolak ketika akses module chatbot."""
+        res = await raw_client.get(
+            "/api/v1/chatbots/",
+            headers={"Authorization": f"Bearer {role_tokens[role]}"},
+        )
+
+        assert res.status_code == 403
+        assert "Akses ditolak" in res.json()["detail"]
+
+    async def test_chatbot_module_requires_token(self, raw_client: AsyncClient):
+        """Tanpa token, endpoint chatbot harus return 401."""
+        res = await raw_client.get("/api/v1/chatbots/")
+
+        assert res.status_code == 401
 
 
 # ══════════════════════════════════════════════════════════════════════════════
