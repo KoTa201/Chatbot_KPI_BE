@@ -1,9 +1,10 @@
 """Repository operasi database untuk ingestion KPI Tracker."""
 
 from uuid import UUID
+from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.KPITracker import KPITrackerORM
 
@@ -43,4 +44,39 @@ class KPITrackerRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal simpan KPI Tracker records ke database: {str(e)}",
+            )
+
+    # ================================================================ #
+    #  DELETE                                                           #
+    # ================================================================ #
+
+    async def delete_kpi_records_by_group_and_period(
+        self,
+        group_id: UUID,
+        tahun: int,
+        bulan_num: Optional[int] = None,
+    ) -> int:
+        """
+        Hapus data tracker existing untuk satu group + periode.
+
+        Jika bulan_num None, hapus semua bulan pada tahun tersebut.
+        Returns jumlah baris terhapus.
+        """
+        try:
+            stmt = delete(KPITrackerORM).where(
+                KPITrackerORM.group_id == group_id,
+                KPITrackerORM.tahun == tahun,
+            )
+
+            if bulan_num is not None:
+                stmt = stmt.where(KPITrackerORM.bulan_num == bulan_num)
+
+            result = await self.db.execute(stmt)
+            await self.db.commit()
+            return int(result.rowcount or 0)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal hapus KPI Tracker records untuk periode: {str(e)}",
             )

@@ -14,6 +14,7 @@ from sqlalchemy.future import select
 from sqlalchemy.pool import StaticPool
 from sqlalchemy import text
 from uuid import uuid4
+from typing import AsyncGenerator
 
 from databaseConfig import Base
 from databaseConfig import get_db
@@ -72,7 +73,7 @@ async def clean_db():
 
 
 @pytest_asyncio.fixture
-async def client() -> AsyncClient:
+async def client() -> AsyncGenerator[AsyncClient, None]:
     auth_service = AuthService()
     admin = UserORM(
         username=f"admin_{uuid4().hex[:8]}",
@@ -102,7 +103,7 @@ async def client() -> AsyncClient:
 
 
 @pytest_asyncio.fixture
-async def raw_client() -> AsyncClient:
+async def raw_client() -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",
@@ -141,7 +142,7 @@ async def role_tokens(db_session: AsyncSession) -> dict[str, str]:
 
 
 @pytest_asyncio.fixture
-async def db_session() -> AsyncSession:
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionTest() as session:
         yield session
 

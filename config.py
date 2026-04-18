@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os
+from functools import lru_cache
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,6 +22,33 @@ class Settings:
     SMTP_PORT: int = int(os.getenv("SMTP_PORT") or 587)
     SMTP_USER: str = os.getenv("SMTP_USER")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD")
+    # GitHub Models (primary LLM provider)
+    GITHUB_MODELS_API_KEY: str = (
+        os.getenv("GITHUB_MODELS_API_KEY")
+        or os.getenv("GITHUB_TOKEN")
+        or os.getenv("GH_TOKEN")
+    )
+    GITHUB_MODELS_BASE_URL: str = (
+        os.getenv("GITHUB_MODELS_BASE_URL")
+        or "https://models.github.ai/inference"
+    )
+    GITHUB_MODELS_MODEL_NL_TO_SQL: str = (
+        os.getenv("GITHUB_MODELS_MODEL_NL_TO_SQL")
+        or "openai/gpt-4o"
+    )
+    GITHUB_MODELS_MODEL_ANALYSIS: str = (
+        os.getenv("GITHUB_MODELS_MODEL_ANALYSIS")
+        or "openai/gpt-4o"
+    )
+    RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE") or 30)
+    SQL_MAX_LIMIT: int = int(os.getenv("SQL_MAX_LIMIT") or 5000)
+    SQL_MAX_SUBQUERY_DEPTH: int = int(os.getenv("SQL_MAX_SUBQUERY_DEPTH") or 3)
+    SQL_EXECUTION_TIMEOUT: int = int(os.getenv("SQL_EXECUTION_TIMEOUT") or 30)
 
 
 settings = Settings()
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()

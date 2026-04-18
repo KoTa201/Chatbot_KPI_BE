@@ -4,6 +4,7 @@ database.py - Koneksi PostgreSQL dengan SQLAlchemy async
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from typing import AsyncGenerator
 
 
 from config import settings
@@ -39,7 +40,7 @@ class Base(DeclarativeBase):
 #  Dependency                                                          #
 # ------------------------------------------------------------------ #
 
-async def get_db() -> AsyncSession:  # type: ignore
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSessionLocal() as session:
         yield session
 

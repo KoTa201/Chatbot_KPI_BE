@@ -52,16 +52,12 @@ class KPIGroupService:
 
         if include_records:
             if group.group_type == "master":
-                # Hanya akses master_records — sudah di-refresh oleh repo.get_by_id()
-                # tracker_records TIDAK diakses karena masih lazy
                 master_records = [
                     KPIGroupMasterRecord.model_validate(r)
                     for r in group.master_records
                 ]
 
             elif group.group_type == "tracker":
-                # Hanya akses tracker_records — sudah di-refresh oleh repo.get_by_id()
-                # master_records TIDAK diakses karena masih lazy
                 tracker_records = [
                     KPIGroupTrackerRecord.model_validate(r)
                     for r in group.tracker_records
