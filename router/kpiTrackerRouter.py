@@ -93,10 +93,15 @@ class IngestionRouter:
         limit: int = Query(default=20, le=100),
         group_type: Optional[Literal["tracker", "master"]
                              ] = Query(default=None),
+        source_type: Optional[Literal["kpi_tracker", "kpi_master"]] = Query(default=None),
         db: AsyncSession = Depends(get_db),
     ):
+        effective_group_type = group_type
+        if effective_group_type is None and source_type is not None:
+            effective_group_type = "tracker" if source_type == "kpi_tracker" else "master"
+
         return await self._get_log_controller(db).get_ingestion_logs(
-            limit=limit, group_type=group_type
+            limit=limit, group_type=effective_group_type
         )
 
 

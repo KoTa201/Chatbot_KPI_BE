@@ -18,7 +18,7 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import func
@@ -90,6 +90,31 @@ class KPIMasterRepository:
     # Alias untuk backward-compat internal calls (ingestion service lama)
     async def upsert_by_tahun(self, records: list[dict]) -> int:
         return await self.upsert_by_group(records)
+
+    # ================================================================ #
+    #  DELETE                                                          #
+    # ================================================================ #
+
+    async def delete_by_group_id(self, group_id: UUID) -> int:
+        """
+        Hapus semua KPI Master records untuk satu group_id.
+
+        Returns:
+            Jumlah records yang berhasil dihapus.
+        """
+        try:
+            result = await self.db.execute(
+                delete(KPIMasterORM).where(KPIMasterORM.group_id == group_id)
+            )
+            await self.db.flush()
+            return result.rowcount or 0
+
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal hapus KPI Master records untuk group {group_id}: {str(e)}",
+            )
 
     # ================================================================ #
     #  GROUP/AGGREGATE — grouped by source sheet (via kpi_groups JOIN)  #

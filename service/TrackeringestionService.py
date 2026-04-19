@@ -395,8 +395,6 @@ class TrackerIngestionService:
                     nama_kpi_val)  # None jika unmatched
                 clean_records.append(clean)
 
-            # Bulk insert langsung via repository.
-            ingested_count = await self.tracker_repo.bulk_insert_kpi_records(clean_records)
             # Idempotent ingest: re-ingest periode yang sama replace data lama.
             if group and tahun:
                 deleted_count = await self.tracker_repo.delete_kpi_records_by_group_and_period(
@@ -410,9 +408,8 @@ class TrackerIngestionService:
                         f"records for group={group.id}, tahun={tahun}, bulan_num={bulan_num}"
                     )
 
-            # Bulk insert via service (validasi group_id ada)
-            ingested_result = await self.tracker_svc.bulk_create_records(clean_records)
-            ingested_count = ingested_result.get("count", 0)
+            # Bulk insert records baru setelah cleanup periode lama.
+            ingested_count = await self.tracker_repo.bulk_insert_kpi_records(clean_records)
 
             status = self._resolve_status(ingested_count, errors)
             error_str = self._format_errors(errors) if errors else None

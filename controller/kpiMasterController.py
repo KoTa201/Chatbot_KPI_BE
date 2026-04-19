@@ -9,11 +9,14 @@ Perubahan dari versi sebelumnya:
 """
 
 from typing import Optional
+from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
+from schema.kpiGroupSchema import KPIGroupListResponse, KPIGroupUpdate
 from schema.kpiMasterSchema import (
     DeleteMastersResponse,
     DetailMastersResponse,
@@ -65,18 +68,35 @@ class KPIMasterController:
             message=result["message"],
         )
 
-    async def preview_kpi_master(self, sheet_url: str, tahun: int) -> dict:
-        """Preview sheet data tanpa menyimpan ke DB."""
-        df, spreadsheet_id, sheet_name = self._fetch_sheet(sheet_url)
-        records, errors = self._parse(df, spreadsheet_id, sheet_name, tahun)
-        return {
-            "spreadsheet_id": spreadsheet_id,
-            "sheet_name":     sheet_name,
-            "tahun":          tahun,
-            "total_records":  len(records),
-            "errors":         errors,
-            "preview":        records[:5],
-        }
+    async def list_master_groups(
+        self,
+        page: int = 1,
+        page_size: int = 10,
+    ) -> KPIGroupListResponse:
+        from service.kpiGroupService import KPIGroupService
+
+        return await KPIGroupService(self.db).list_groups(
+            page=page,
+            page_size=page_size,
+            group_type="master",
+            search=None,
+        )
+
+    async def update_and_reingest(
+        self,
+        group_id: UUID,
+        payload: KPIGroupUpdate,
+    ) -> IngestionResponse:
+        result = await self.ingestion_service.update_and_reingest(
+            group_id=group_id,
+            sheet_url=str(payload.sheet_url) if payload.sheet_url else None,
+            tahun=payload.tahun,
+        )
+        return IngestionResponse(
+            status=result["status"],
+            count=result["count"],
+            message=result["message"],
+        )
 
     # ================================================================ #
     #  GROUP/AGGREGATE                                                 #
