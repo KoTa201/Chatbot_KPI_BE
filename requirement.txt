@@ -38,3 +38,4 @@ python-dotenv>=1.0.0
 
 #convert-pdf
 playwright>=1.40
+pytest-html>=3.2.0
