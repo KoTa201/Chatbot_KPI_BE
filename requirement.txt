@@ -35,3 +35,6 @@ pydantic[email]>=2.0.0
 
 #env
 python-dotenv>=1.0.0
+
+#convert-pdf
+playwright>=1.40
