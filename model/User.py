@@ -15,6 +15,7 @@ from model.PasswordReset import PasswordResetORM
 if TYPE_CHECKING:
     from model.ChatbotAuditLog import ChatbotAuditLog
     from model.PasswordReset import PasswordResetORM
+    from model.ChatSession import ChatSession
 
 
 class RoleEnum(str, enum.Enum):
@@ -57,6 +58,10 @@ class UserORM(Base):
 
     audit_logs: Mapped[list["ChatbotAuditLog"]] = relationship(
         "ChatbotAuditLog", back_populates="user"
+    )
+
+    sessions: Mapped[list["ChatSession"]] = relationship(
+        "ChatSession", back_populates="user", lazy="noload"
     )
 
     def __repr__(self) -> str:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, status
 from service.authService import get_current_user
 from controller.chatController import ChatController
 from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
+from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
 from model.User import UserORM
 
 
@@ -62,6 +63,33 @@ class ChatRouter:
             response_model=list[AuditLogResponse],
             status_code=status.HTTP_200_OK,
             summary="[Admin/HRD] Daftar query yang ditolak SQLWireguard",
+        )
+
+        # ── Sessions ────────────────────────────────────────────────── #
+        self.router.add_api_route(
+            "/sessions",
+            self.get_sessions,
+            methods=["GET"],
+            response_model=list[SessionResponse],
+            status_code=status.HTTP_200_OK,
+            summary="Daftar semua session milik user yang sedang login",
+        )
+
+        self.router.add_api_route(
+            "/sessions/{session_id}",
+            self.delete_session,
+            methods=["DELETE"],
+            status_code=status.HTTP_204_NO_CONTENT,
+            summary="Hapus session beserta semua pesannya",
+        )
+
+        self.router.add_api_route(
+            "/sessions/{session_id}/title",
+            self.update_session_title,
+            methods=["PATCH"],
+            response_model=SessionResponse,
+            status_code=status.HTTP_200_OK,
+            summary="Ubah judul session",
         )
 
     # ── Chat handlers ──────────────────────────────────────────────── #
@@ -141,6 +169,43 @@ class ChatRouter:
         """
         return await controller.handle_get_audit_all(
             skip=skip, limit=limit, current_user=current_user
+        )
+
+
+    async def get_sessions(
+        self,
+        current_user: UserORM = Depends(get_current_user),
+        controller: ChatController = Depends(ChatController),
+    ):
+        """Kembalikan semua session chatbot milik user yang sedang login."""
+        return await controller.handle_get_sessions(current_user=current_user)
+
+    async def delete_session(
+        self,
+        session_id: str,
+        current_user: UserORM = Depends(get_current_user),
+        controller: ChatController = Depends(ChatController),
+    ):
+        """
+        Hapus session beserta seluruh pesan dan clarification log-nya.
+        Hanya pemilik session yang dapat melakukan ini.
+        """
+        await controller.handle_delete_session(
+            session_id=session_id, current_user=current_user
+        )
+
+    async def update_session_title(
+        self,
+        session_id: str,
+        request: UpdateSessionTitleRequest,
+        current_user: UserORM = Depends(get_current_user),
+        controller: ChatController = Depends(ChatController),
+    ):
+        """
+        Ubah judul session. Hanya pemilik session yang dapat melakukan ini.
+        """
+        return await controller.handle_update_session_title(
+            session_id=session_id, request=request, current_user=current_user
         )
 
 
