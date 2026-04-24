@@ -6,36 +6,45 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 
 class SchedulerService:
-    """
-    Service untuk mengelola APScheduler lifecycle dan job scheduling.
-    Saat job fire, query tracker_sources untuk mendapatkan URLs aktif+terjadwal.
-    """
-
     JOB_ID = "kpi_tracker_ingestion"
     TIMEZONE = "UTC"
     MISFIRE_GRACE_TIME = 300
     # Jeda antar spreadsheet saat scheduler auto-run.
     # Google Sheets API limit: 6 request per menit per user.
-    # Setiap spreadsheet bisa memicu beberapa request (1 per tab).
-    # Set ke 10.0 detik sebagai safe default.
     RATE_LIMIT_DELAY_SECONDS: float = 30.0
 
     def __init__(self):
-        self.scheduler: AsyncIOScheduler = AsyncIOScheduler(
-            timezone=self.TIMEZONE)
+        self.scheduler: AsyncIOScheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
 
-    def _build_trigger(self, interval_value: int, interval_unit: str) -> IntervalTrigger:
-        if interval_unit == "months":
-            return IntervalTrigger(days=interval_value * 30)
-        return IntervalTrigger(**{interval_unit: interval_value})
+    def _build_trigger(self, interval_value: datetime) -> CronTrigger:
+        return CronTrigger(
+            day=interval_value.day,
+            hour=interval_value.hour,
+            minute=0,
+            timezone=self.TIMEZONE,
+        )
+
+    async def _auto_pause_if_december(self, now: Optional[datetime] = None) -> None:
+        """Pause the scheduler after a December run (year-end cycle complete)."""
+        if now is None:
+            now = datetime.now(timezone.utc)
+        if now.month != 12:
+            return
+        from databaseConfig import AsyncSessionLocal
+        from repository.schedulerRepository import SchedulerRepository
+        async with AsyncSessionLocal() as db:
+            repo = SchedulerRepository(db)
+            await repo.get_config()
+            await repo.update_config({"is_enabled": False})
+        if self.scheduler.get_job(self.JOB_ID):
+            self.scheduler.remove_job(self.JOB_ID)
 
     async def _run_ingestion_job(self) -> None:
-        """Dieksekusi oleh APScheduler pada setiap interval tick.
-        Query tracker_sources aktif+terjadwal lalu jalankan batch ingestion."""
+        """Executed by APScheduler on each cron tick."""
         from databaseConfig import AsyncSessionLocal
         from controller.kpiTrackerController import KPITrackerController
         from repository.schedulerRepository import SchedulerRepository
@@ -62,7 +71,6 @@ class SchedulerService:
             )
             await controller.ingest_batch_from_google_sheets(request)
 
-        # Update run timestamps
         async with AsyncSessionLocal() as db:
             repo = SchedulerRepository(db)
             job = self.scheduler.get_job(self.JOB_ID)
@@ -79,14 +87,15 @@ class SchedulerService:
                 next_run_at=next_run,
             )
 
+        await self._auto_pause_if_december()
+
     async def register_job(self, config) -> None:
-        """Tambah atau replace scheduler job dari SchedulerConfigORM instance."""
+        """Add or replace scheduler job from SchedulerConfigORM instance."""
         if self.scheduler.get_job(self.JOB_ID):
             self.scheduler.remove_job(self.JOB_ID)
         if not config.is_enabled:
             return
-        trigger = self._build_trigger(
-            config.interval_value, config.interval_unit)
+        trigger = self._build_trigger(config.interval_value)
         self.scheduler.add_job(
             self._run_ingestion_job,
             trigger=trigger,

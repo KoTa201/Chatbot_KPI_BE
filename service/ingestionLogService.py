@@ -5,9 +5,8 @@ Service untuk menangani logika bisnis ingestion logs.
 
 import re
 from typing import Optional
-from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.Base import GroupTypeEnum
@@ -24,59 +23,45 @@ class IngestionLogService:
     async def get_ingestion_logs(
         self,
         limit: int,
+        offset: int = 0,
         group_type: Optional[str] = None,
     ) -> dict:
         group_type_filter = self._normalize_group_type(group_type)
-        return await self._get_latest_logs_per_group(
-            group_type_filter=group_type_filter,
-            limit=limit,
+
+        count_query = select(func.count()).select_from(IngestionLogORM).join(
+            KPIGroupORM,
+            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
 
-    async def _get_latest_logs_per_group(
-        self,
-        group_type_filter: Optional[GroupTypeEnum],
-        limit: int,
-    ) -> dict:
-        """Fetch latest log per kpi_group_id, optionally filtered by group_type."""
-        query = select(IngestionLogORM).join(
-            KPIGroupORM, IngestionLogORM.kpi_group_id == KPIGroupORM.id
+        if group_type_filter is not None:
+            count_query = count_query.where(KPIGroupORM.group_type == group_type_filter)
+
+        total_result = await self.db.execute(count_query)
+        total_count = int(total_result.scalar_one() or 0)
+
+        query = select(IngestionLogORM, KPIGroupORM).join(
+            KPIGroupORM,
+            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
 
         if group_type_filter is not None:
             query = query.where(KPIGroupORM.group_type == group_type_filter)
 
-        # DISTINCT ON (kpi_group_id) with ORDER BY kpi_group_id, created_at DESC
-        # gives us the latest log per group
-        query = (
-            query.order_by(
-                IngestionLogORM.kpi_group_id,
-                IngestionLogORM.created_at.desc(),
-            )
-            .distinct(IngestionLogORM.kpi_group_id)
-            .limit(limit)
-        )
+        query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
 
         result = await self.db.execute(query)
-        logs = result.scalars().all()
-
-        group_ids = [log.kpi_group_id for log in logs if log.kpi_group_id]
-        groups_map = await self._fetch_groups_map(group_ids)
+        rows = result.all()
 
         logs_payload = [
-            self._format_log_response(log, groups_map.get(log.kpi_group_id))
-            for log in logs
+            self._format_log_response(log, group)
+            for log, group in rows
         ]
 
-        return {"total": len(logs_payload), "logs": logs_payload}
+        return {
+            "total": total_count,
+            "logs": logs_payload,
+        }
 
-    async def _fetch_groups_map(self, group_ids: list[UUID]) -> dict:
-        if not group_ids:
-            return {}
-        result = await self.db.execute(
-            select(KPIGroupORM).where(KPIGroupORM.id.in_(group_ids))
-        )
-        groups = result.scalars().all()
-        return {g.id: g for g in groups}
 
     def _format_log_response(
         self,
