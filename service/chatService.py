@@ -1,10 +1,11 @@
 """
 Chat Service — Orchestrator Pipeline Structured RAG.
-Menjalankan 4 stage secara berurutan:
+Menjalankan stage secara berurutan:
     Stage 1: NL-to-SQL (GitHub Models)
   Stage 2: SQLWireguard Validation
   Stage 3: SQL Execution (PostgreSQL)
-    Stage 4: Result Analysis (GitHub Models)
+  Stage 4: Graphic Generation (opsional, jika diminta user)
+    Stage 5: Result Analysis (GitHub Models)
 """
 import logging
 import time
@@ -16,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from config import get_settings
-from service.llmService import GitHubModelsService
+from service.llmService import GitHubModelsService, VisualizationDecision
+from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlWireguardService import SQLWireguardService
-from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt
+from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
 from repository.chatbotAuditLogRepository import AuditLogRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
 
@@ -26,6 +28,7 @@ settings = get_settings()
 
 llm = GitHubModelsService()
 wireguard = SQLWireguardService()
+graphic_service = GraphicSeervice()
 
 
 class ChatService:
@@ -52,7 +55,8 @@ class ChatService:
         [STAGE 1] NL-to-SQL (GitHub Models)
         [STAGE 2] SQLWireguard Validation
         [STAGE 3] SQL Execution (PostgreSQL)
-        [STAGE 4] Result Analysis (GitHub Models)
+        [STAGE 4] Graphic Generation (opsional)
+        [STAGE 5] Result Analysis (GitHub Models)
         """
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
@@ -108,7 +112,7 @@ class ChatService:
                 SessionContextManager.get_session_context(session_id)
 
             # STAGE 1 — NL-TO-SQL
-            generated_sql = await self._run_nl_to_sql_stage(
+            generated_sql, visualization_decision = await self._run_nl_to_sql_stage(
                 stages=stages,
                 user_message=user_message,
                 user_id=user_id,
@@ -147,7 +151,16 @@ class ChatService:
                 pipeline=pipeline,
             )
 
-            # STAGE 4 — RESULT ANALYSIS
+            # STAGE 4 — GRAPHIC GENERATION (OPSIONAL)
+            graphic_result: GraphicResult | None = None
+            if visualization_decision.is_visualize:
+                graphic_result = self._run_graphic_generation_stage(
+                    stages=stages,
+                    query_result=query_result,
+                    chart_type=visualization_decision.chart_type or "bar",
+                )
+
+            # STAGE 5 — RESULT ANALYSIS
             narrative = await self._run_result_analysis_stage(
                 stages=stages,
                 user_query=user_message,
@@ -163,6 +176,8 @@ class ChatService:
                 session_id=session_id,
                 message=narrative,
                 generated_sql=sanitized_sql if show_sql else None,
+                graphic_chart_type=graphic_result.chart_type if graphic_result else None,
+                graphic_image_base64=graphic_result.image_base64 if graphic_result else None,
                 rows_returned=rows_count,
                 execution_time_ms=total_ms,
                 pipeline_stages=stages,
@@ -244,7 +259,7 @@ class ChatService:
         user_role: str,
         user_divisi: str | None,
         pipeline: dict[str, Any],
-    ) -> str:
+    ) -> tuple[str, VisualizationDecision]:
         stage = self._start_stage(stages, "nl_to_sql")
         nl_prompt = build_nl_to_sql_prompt(
             user_query=user_message,
@@ -253,9 +268,20 @@ class ChatService:
             divisi=user_divisi,
         )
         generated_sql = await llm.generate_sql(nl_prompt)
+
+        n2_prompt = build_graphic_generation_prompt(user_query=user_message)
+        visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
         pipeline["generated_sql"] = generated_sql
-        self._complete_stage(stage, "success", "SQL berhasil digenerate.")
-        return generated_sql
+
+        if visualization_decision.is_visualize:
+            detail = (
+                "SQL berhasil digenerate. Permintaan visualisasi terdeteksi "
+                f"(chart: {visualization_decision.chart_type or 'bar'})."
+            )
+        else:
+            detail = "SQL berhasil digenerate."
+        self._complete_stage(stage, "success", detail)
+        return generated_sql, visualization_decision
 
     def _run_sql_validation_stage(
         self,
@@ -342,6 +368,28 @@ class ChatService:
                 "karena kuota/rate limit GitHub Models tercapai. "
                 "Silakan coba lagi nanti."
             )
+
+    def _run_graphic_generation_stage(
+        self,
+        stages: list[PipelineStageInfo],
+        query_result: list[dict],
+        chart_type: str,
+    ) -> GraphicResult | None:
+        stage = self._start_stage(stages, "graphic_generation")
+        try:
+            graphic_result = graphic_service.generateGraphic(
+                query_result=query_result,
+                chart_type=chart_type,
+            )
+            self._complete_stage(
+                stage,
+                "success",
+                f"Grafik {graphic_result.chart_type} berhasil digenerate.",
+            )
+            return graphic_result
+        except ValueError as error:
+            self._complete_stage(stage, "degraded", str(error))
+            return None
 
     async def _execute_sql(
         self, sql: str

@@ -28,7 +28,7 @@ class AmbiguityAssessmentResult(BaseModel):
 class ClarifyingQuestionData(BaseModel):
     """Data pertanyaan klarifikasi yang siap dikirim ke user."""
     clarifying_question: str
-    options: List[str] = Field(..., min_items=2, max_items=4)
+    options: List[str] = Field(..., min_length=2, max_length=4)
     default_if_no_answer: str
     ambiguity_type: str
 
@@ -48,8 +48,10 @@ class QueryDisambiguationResult(BaseModel):
 
 class ClarificationResponseRequest(BaseModel):
     """Request untuk mengirimkan jawaban atas pertanyaan klarifikasi."""
-    session_id: str = Field(..., description="Session ID dari pertanyaan klarifikasi")
-    answer: str = Field(..., description="Jawaban pengguna (pilihan chip atau teks bebas)")
+    session_id: str = Field(...,
+                            description="Session ID dari pertanyaan klarifikasi")
+    answer: str = Field(...,
+                        description="Jawaban pengguna (pilihan chip atau teks bebas)")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -62,15 +64,16 @@ class ClarificationResponseRequest(BaseModel):
 class ClarificationMessageResponse(BaseModel):
     """Response untuk menampilkan pertanyaan klarifikasi kepada user."""
     session_id: str
-    message_type: str = Field(default="clarification")  # "clarification" atau "direct_answer"
-    
+    # "clarification" atau "direct_answer"
+    message_type: str = Field(default="clarification")
+
     # Untuk clarification
     clarifying_question: Optional[str] = None
     options: Optional[List[str]] = None
-    
+
     # Untuk direct_answer dengan asumsi
     assumptions: Optional[List[str]] = None
-    
+
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "session_id": "sess_123",
@@ -116,7 +119,8 @@ class SessionClarificationContext(BaseModel):
     """Context clarification disimpan per session."""
     session_id: str
     clarification_history: List[dict] = Field(default_factory=list)
-    scope_preferences: dict = Field(default_factory=dict)  # menyimpan preferensi yang sudah dijawab
+    # menyimpan preferensi yang sudah dijawab
+    scope_preferences: dict = Field(default_factory=dict)
     clarification_count: int = 0
     last_clarification_at: Optional[datetime] = None
 

@@ -19,6 +19,7 @@ def _json_default_serializer(value):
         return str(value)
     return str(value)
 
+
 DB_SCHEMA = """
 -- users (akses login)
 users(
@@ -397,5 +398,32 @@ CONTOH:
 - Disambiguasi: "Tampilkan karyawan dengan persentase pencapaian KPI tertinggi pada bulan April 2025"
 
 Jawab HANYA dengan kalimat query yang sudah disambiguasi, TANPA JSON, TANPA penjelasan lain."""
+
+    return prompt
+
+
+def build_graphic_generation_prompt(
+    user_query: str,
+) -> str:
+    """
+    Membangun prompt untuk LLM-based graphic generation.
+    Menilai jenis grafik terbaik untuk data dan menghasilkan instruksi pembuatan grafik.
+    """
+    prompt = f"""[SYSTEM PROMPT]
+Kamu adalah intent-classifier untuk chatbot KPI.
+Tentukan apakah pertanyaan user meminta hasil dalam bentuk grafik.
+
+ATURAN:
+1. Jika user meminta grafik/diagram/chart/visualisasi, set is_visualize=true.
+2. Chart type wajib salah satu: "bar", "pie", "donut".
+3. Jika user tidak meminta visualisasi, set is_visualize=false dan chart_type=null.
+4. Jika user meminta visualisasi tapi tipe tidak spesifik, default chart_type="bar".
+5. DILARANG output selain JSON.
+
+Pertanyaan user:
+{user_query}
+
+Output JSON wajib:
+{{"is_visualize": true|false, "chart_type": "bar"|"pie"|"donut"|null}}"""
 
     return prompt
