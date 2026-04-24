@@ -11,9 +11,8 @@ Responsibilities:
 
 import re
 from typing import Optional
-from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.IngestionLog import IngestionLogORM
@@ -33,6 +32,7 @@ class IngestionLogService:
     async def get_ingestion_logs(
         self,
         limit: int,
+        offset: int = 0,
         group_type: Optional[str] = None,
     ) -> dict:
         """
@@ -40,6 +40,7 @@ class IngestionLogService:
 
         Args:
             limit: Jumlah maksimal logs yang dikembalikan
+            offset: Posisi awal data untuk pagination
             group_type: Filter berdasarkan group_type ('tracker', 'master', atau None untuk semua)
 
         Returns:
@@ -61,123 +62,50 @@ class IngestionLogService:
                 ]
             }
         """
-        # Normalize group_type untuk mapping ke source_type
-        source_type_filter = self._normalize_group_type(group_type)
-
-        # Special handling untuk tracker/master: ambil latest per source_id
-        if source_type_filter in (None, ["kpi_tracker", "kpi_master"]):
-            return await self._get_latest_logs_per_source(
-                source_type_filter=source_type_filter,
-                limit=limit,
-            )
-
-        # Fallback: ambil logs berdasarkan source_type tanpa grouping
-        return await self._get_logs_by_source_type(
-            source_type=source_type_filter,
-            limit=limit,
+        count_query = select(func.count()).select_from(IngestionLogORM).join(
+            KPIGroupORM,
+            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
+
+        if group_type is not None:
+            count_query = count_query.where(KPIGroupORM.group_type == group_type)
+
+        total_result = await self.db.execute(count_query)
+        total_count = int(total_result.scalar_one() or 0)
+
+        query = select(IngestionLogORM, KPIGroupORM).join(
+            KPIGroupORM,
+            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+        )
+
+        if group_type is not None:
+            query = query.where(KPIGroupORM.group_type == group_type)
+
+        query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
+
+        result = await self.db.execute(query)
+        rows = result.all()
+
+        logs_payload = [
+            self._format_log_response(log, group)
+            for log, group in rows
+        ]
+
+        return {
+            "total": total_count,
+            "logs": logs_payload,
+        }
 
     # ─────────────────────────────────────────────────────────────────────────
     # PRIVATE: Query builders
     # ─────────────────────────────────────────────────────────────────────────
 
-    async def _get_latest_logs_per_source(
-        self,
-        source_type_filter: list[str] | None,
-        limit: int,
-    ) -> dict:
-        """
-        Fetch latest log per source_id (KPI Group).
-        Ini memastikan hanya log terbaru per sheet yang ditampilkan.
-        """
-        # Build query
-        latest_query = select(IngestionLogORM)
-
-        if source_type_filter:
-            latest_query = latest_query.where(
-                IngestionLogORM.source_type.in_(source_type_filter)
-            )
-        else:
-            latest_query = latest_query.where(
-                IngestionLogORM.source_type.in_(["kpi_tracker", "kpi_master"])
-            )
-
-        # Order dan distinct untuk ambil latest per source_id
-        latest_query = (
-            latest_query.order_by(
-                IngestionLogORM.source_type,
-                IngestionLogORM.source_id,
-                IngestionLogORM.created_at.desc(),
-            )
-            .distinct(IngestionLogORM.source_type, IngestionLogORM.source_id)
-            .limit(limit)
-        )
-
-        latest_result = await self.db.execute(latest_query)
-        latest_logs = latest_result.scalars().all()
-
-        # Fetch KPI Groups untuk enrichment
-        group_ids = [
-            log.source_id for log in latest_logs if log.source_id
-        ]
-        groups_map = await self._fetch_groups_map(group_ids)
-
-        # Transform dan return
-        logs_payload = [
-            self._format_log_response(log, groups_map.get(log.source_id))
-            for log in latest_logs
-        ]
-
-        return {
-            "total": len(logs_payload),
-            "logs": logs_payload,
-        }
-
-    async def _get_logs_by_source_type(
-        self,
-        source_type: str,
-        limit: int,
-    ) -> dict:
-        """Fetch logs berdasarkan source_type tanpa special grouping."""
-        query = (
-            select(IngestionLogORM)
-            .where(IngestionLogORM.source_type == source_type)
-            .order_by(IngestionLogORM.created_at.desc())
-            .limit(limit)
-        )
-
-        result = await self.db.execute(query)
-        logs = result.scalars().all()
-
-        # Fetch KPI Groups untuk enrichment
-        group_ids = [log.source_id for log in logs if log.source_id]
-        groups_map = await self._fetch_groups_map(group_ids)
-
-        # Transform dan return
-        logs_payload = [
-            self._format_log_response(log, groups_map.get(log.source_id))
-            for log in logs
-        ]
-
-        return {
-            "total": len(logs_payload),
-            "logs": logs_payload,
-        }
+    # (Legacy helper methods removed: source_type/source_id no longer exist
+    # on IngestionLogORM after KPIGroup migration.)
 
     # ─────────────────────────────────────────────────────────────────────────
     # PRIVATE: Helpers
     # ─────────────────────────────────────────────────────────────────────────
-
-    async def _fetch_groups_map(self, group_ids: list[UUID]) -> dict:
-        """Fetch KPI Groups dan return sebagai mapping {id: group}."""
-        if not group_ids:
-            return {}
-
-        group_result = await self.db.execute(
-            select(KPIGroupORM).where(KPIGroupORM.id.in_(group_ids))
-        )
-        groups = group_result.scalars().all()
-        return {g.id: g for g in groups}
 
     def _format_log_response(
         self,
@@ -193,7 +121,9 @@ class IngestionLogService:
         sheet_name = group.nama_grup if group else log.sheet_name
         nama_orang = None
 
-        if group and log.source_type == "kpi_tracker":
+        source_type = self._map_source_type(group.group_type) if group else "kpi_tracker"
+
+        if group and source_type == "kpi_tracker":
             nama_orang = self._extract_nama_orang(group.nama_grup)
 
         return {
@@ -204,33 +134,16 @@ class IngestionLogService:
             "ingested": log.ingested_count,
             "failed": log.failed_count,
             "status": log.status,
-            "source_type": log.source_type,
-            "source_id": log.source_id,
+            "source_type": source_type,
+            "source_id": log.kpi_group_id,
             "created_at": log.created_at,
         }
 
     @staticmethod
-    def _normalize_group_type(
-        group_type: Optional[str],
-    ) -> Optional[list[str]]:
-        """
-        Normalize group_type ke source_type list.
-
-        Returns:
-          - None → ambil semua (kpi_tracker + kpi_master)
-          - "tracker" → ["kpi_tracker"]
-          - "master" → ["kpi_master"]
-        """
-        if group_type is None:
-            return None
-
-        if group_type == "tracker":
-            return ["kpi_tracker"]
-        elif group_type == "master":
-            return ["kpi_master"]
-
-        # Fallback: treat as-is
-        return [group_type]
+    def _map_source_type(group_type: str) -> str:
+        if group_type == "master":
+            return "kpi_master"
+        return "kpi_tracker"
 
     @staticmethod
     def _extract_nama_orang(nama_grup: Optional[str]) -> Optional[str]:

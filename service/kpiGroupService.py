@@ -20,6 +20,7 @@ from schema.kpiGroupSchema import (
 )
 from service.googleSheetService import GoogleSheetService
 from service.kpiMasterIngestionService import KPIMasterIngestionService
+from service.kpiMasterService import KPIMasterService
 from service.TrackeringestionService import TrackerIngestionService
 
 
@@ -201,7 +202,16 @@ class KPIGroupService:
         if sheet_url_changed:
             new_url = update_fields["sheet_url"]
             if existing.group_type == "master":
-                svc = KPIMasterIngestionService(self.db)
+                from repository.ingestionLogRepository import IngestionLogRepository
+                from repository.kpiMasterRepository import KPIMasterRepository
+
+                kpi_repo = KPIMasterRepository(self.db)
+                svc = KPIMasterIngestionService(
+                    kpi_repo=kpi_repo,
+                    kpi_service=KPIMasterService(kpi_repo),
+                    log_repo=IngestionLogRepository(self.db),
+                    group_repo=self.repo,
+                )
                 await svc.ingest_kpi_master(sheet_url=new_url, tahun=payload.tahun)
             elif existing.group_type == "tracker":
                 svc = TrackerIngestionService(self.db)

@@ -89,15 +89,21 @@ class TrackerIngestionService:
         Returns:
             BulkIngestionResponse dengan agregasi per-tab + grand total.
         """
+        run_log_id: UUID | None = None
         try:
             all_sheets = self._fetch_all_sheets(sheet_url, skip_on_error)
             spreadsheet_id = self._extract_spreadsheet_id(all_sheets)
             group = await self._ensure_tracker_group(sheet_url, spreadsheet_id, tahun)
 
+            if group:
+                run_log = await self.log_repo.create(kpi_group_id=group.id)
+                run_log_id = run_log.id
+
             sheets_result, totals = await self._process_all_sheets(
                 all_sheets=all_sheets,
                 sheet_url=sheet_url,
                 group=group,
+                run_log_id=run_log_id,
                 nama_orang_override=nama_orang_override,
                 tahun=tahun,
             )
@@ -106,6 +112,22 @@ class TrackerIngestionService:
                 totals.grand_ingested,
                 [] if totals.grand_failed == 0 else ["errors"],
             )
+
+            if run_log_id:
+                run_errors = [
+                    f"{r.sheet_name}: {r.reason or '; '.join(r.errors or [])}"
+                    for r in sheets_result
+                    if r.status == "failed"
+                ]
+                await self.log_repo.update_status(
+                    log_id=run_log_id,
+                    status=overall_status,
+                    total_rows=totals.grand_total_rows,
+                    ingested_count=totals.grand_ingested,
+                    failed_count=totals.grand_failed,
+                    errors=self._format_errors(run_errors) if run_errors else None,
+                )
+
             self.logger.info(
                 "[TrackerIngestion] Done: %s/%s records",
                 totals.grand_ingested,
@@ -123,10 +145,22 @@ class TrackerIngestionService:
             )
 
         except HTTPException:
+            if run_log_id:
+                await self.log_repo.update_status(
+                    log_id=run_log_id,
+                    status="failed",
+                    errors="HTTPException saat ingestion KPI Tracker.",
+                )
             raise
         except Exception as e:
             self.logger.error("[TrackerIngestion] Error: %s",
                               traceback.format_exc())
+            if run_log_id:
+                await self.log_repo.update_status(
+                    log_id=run_log_id,
+                    status="failed",
+                    errors=str(e),
+                )
             raise HTTPException(
                 status_code=500,
                 detail=f"Error saat ingest KPI Tracker: {str(e)}",
@@ -220,6 +254,7 @@ class TrackerIngestionService:
         all_sheets: list[dict],
         sheet_url: str,
         group,
+        run_log_id: Optional[UUID],
         nama_orang_override: Optional[str],
         tahun: int,
     ) -> tuple[list[SheetIngestionResult], "_BulkTotals"]:
@@ -235,6 +270,7 @@ class TrackerIngestionService:
                 sheet=sheet,
                 sheet_url=sheet_url,
                 group=group,
+                run_log_id=run_log_id,
                 nama_orang_override=nama_orang_override,
                 tahun=tahun,
             )
@@ -305,20 +341,20 @@ class TrackerIngestionService:
         sheet: dict,
         sheet_url: str,
         group,
+        run_log_id: Optional[UUID],
         nama_orang_override: Optional[str],
         tahun: int,
     ) -> SheetIngestionResult:
         """
         Pipeline ingestion untuk satu tab sheet.
-        Log dibuat di awal (status=running) dan diupdate di akhir.
+        Log dikelola di level ingest spreadsheet (bukan per tab).
         """
         del sheet_url
 
         context = self._build_sheet_context(sheet, nama_orang_override, tahun)
-        log_id: UUID | None = None
+        log_id = run_log_id
 
         try:
-            log_id = await self._create_running_log(group)
             records, errors = self._parse_records(
                 df=context.df,
                 nama_orang=context.nama_orang,
@@ -330,9 +366,9 @@ class TrackerIngestionService:
             total_rows = len(context.df)
             if not records:
                 return await self._build_failed_no_records_result(
-                    log_id=log_id,
                     context=context,
                     total_rows=total_rows,
+                    log_id=log_id,
                 )
 
             master_id_map, unmatched_names = await self._match_master_ids(
@@ -341,11 +377,11 @@ class TrackerIngestionService:
             )
             if unmatched_names:
                 return await self._build_failed_unmatched_master_result(
-                    log_id=log_id,
                     context=context,
                     total_rows=total_rows,
                     errors=errors,
                     unmatched_names=unmatched_names,
+                    log_id=log_id,
                 )
 
             clean_records = self._build_clean_records(
@@ -364,11 +400,11 @@ class TrackerIngestionService:
 
             ingested_count = await self.tracker_repo.bulk_insert_kpi_records(clean_records)
             return await self._finalize_success_result(
-                log_id=log_id,
                 context=context,
                 total_rows=total_rows,
                 ingested_count=ingested_count,
                 errors=errors,
+                log_id=log_id,
             )
 
         except Exception as e:
@@ -377,8 +413,6 @@ class TrackerIngestionService:
                 context.sheet_name,
                 str(e),
             )
-            if log_id:
-                await self._mark_log_failed(log_id, str(e))
             return SheetIngestionResult(
                 log_id=log_id,
                 sheet_name=context.sheet_name,
@@ -410,29 +444,12 @@ class TrackerIngestionService:
             bulan_num=meta.get("bulan_num") if meta else None,
         )
 
-    async def _create_running_log(self, group) -> UUID:
-        if not group:
-            raise HTTPException(
-                status_code=500,
-                detail="KPIGroup tracker tidak tersedia untuk sheet ini.",
-            )
-
-        log = await self.log_repo.create(kpi_group_id=group.id)
-        return log.id
-
     async def _build_failed_no_records_result(
         self,
-        log_id: UUID,
         context: "_SheetContext",
         total_rows: int,
+        log_id: Optional[UUID] = None,
     ) -> SheetIngestionResult:
-        reason = "Tidak ada records valid setelah parsing."
-        await self.log_repo.update_status(
-            log_id=log_id,
-            status="failed",
-            total_rows=total_rows,
-            errors=reason,
-        )
         return SheetIngestionResult(
             log_id=log_id,
             sheet_name=context.sheet_name,
@@ -469,24 +486,14 @@ class TrackerIngestionService:
 
     async def _build_failed_unmatched_master_result(
         self,
-        log_id: UUID,
         context: "_SheetContext",
         total_rows: int,
         errors: list[str],
         unmatched_names: list[str],
+        log_id: Optional[UUID] = None,
     ) -> SheetIngestionResult:
         errors.extend(
             [f"KPI '{name}' tidak ditemukan di kpi_master_records" for name in unmatched_names]
-        )
-        error_str = self._format_errors(errors)
-
-        await self.log_repo.update_status(
-            log_id=log_id,
-            status="failed",
-            total_rows=total_rows,
-            ingested_count=0,
-            failed_count=total_rows,
-            errors=error_str,
         )
 
         return SheetIngestionResult(
@@ -548,23 +555,13 @@ class TrackerIngestionService:
 
     async def _finalize_success_result(
         self,
-        log_id: UUID,
         context: "_SheetContext",
         total_rows: int,
         ingested_count: int,
         errors: list[str],
+        log_id: Optional[UUID] = None,
     ) -> SheetIngestionResult:
         status = self._resolve_status(ingested_count, errors)
-        error_str = self._format_errors(errors) if errors else None
-
-        await self.log_repo.update_status(
-            log_id=log_id,
-            status=status,
-            total_rows=total_rows,
-            ingested_count=ingested_count,
-            failed_count=total_rows - ingested_count,
-            errors=error_str,
-        )
 
         return SheetIngestionResult(
             log_id=log_id,
@@ -696,20 +693,6 @@ class TrackerIngestionService:
         if len(errors) > max_errors:
             result += f" ... dan {len(errors) - max_errors} error lainnya."
         return result
-
-    async def _mark_log_failed(self, log_id: UUID, reason: str) -> None:
-        try:
-            await self.log_repo.update_status(
-                log_id=log_id,
-                status="failed",
-                errors=reason,
-            )
-        except Exception:
-            self.logger.warning(
-                "[TrackerIngestion] Gagal update log %s ke 'failed'",
-                log_id,
-            )
-
 
 @dataclass
 class _SheetContext:

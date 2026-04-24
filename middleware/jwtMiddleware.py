@@ -37,6 +37,8 @@ ALL_ROLES = {ADMIN, HRD, KEPALA_DIVISI, KARYAWAN}
 PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
     ("OPTIONS", r"^/api/v1"),
     ("POST",    r"^/api/v1/users/login$"),
+    ("POST",    r"^/api/v1/users/refresh$"),
+    ("POST",    r"^/api/v1/users/logout$"),
     ("POST",    r"^/api/v1/users/forgot-password$"),
     ("POST",    r"^/api/v1/users/verify-reset-pin$"),
     ("POST",    r"^/api/v1/users/reset-password$"),

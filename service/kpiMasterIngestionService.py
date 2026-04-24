@@ -90,6 +90,7 @@ class KPIMasterIngestionService:
                 sheet_url=sheet_url,
                 sheet_name=sheet_name,
                 nama_grup=sheet_name + " Master " + str(tahun),
+                tahun=tahun,
             )
             group_id = group.id
             logger.info(

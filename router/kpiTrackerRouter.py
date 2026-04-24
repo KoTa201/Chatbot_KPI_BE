@@ -91,12 +91,13 @@ class IngestionRouter:
     async def get_ingestion_logs(
         self,
         limit: int = Query(default=20, le=100),
+        offset: int = Query(default=0, ge=0),
         group_type: Optional[Literal["tracker", "master"]
                              ] = Query(default=None),
         db: AsyncSession = Depends(get_db),
     ):
         return await self._get_log_controller(db).get_ingestion_logs(
-            limit=limit, group_type=group_type
+            limit=limit, offset=offset, group_type=group_type
         )
 
 

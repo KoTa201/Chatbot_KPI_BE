@@ -1,6 +1,7 @@
 """
 controller/schedulerController.py
 """
+from datetime import datetime
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +14,7 @@ class SchedulerController:
     def __init__(self, db: AsyncSession):
         self.db: AsyncSession = db
         self.repo: SchedulerRepository = SchedulerRepository(db)
-        self.scheduler_service: callable = get_scheduler_service()
+        self.scheduler_service = get_scheduler_service()
 
     async def get_config(self) -> dict:
         config = await self.repo.get_config()
@@ -23,8 +24,7 @@ class SchedulerController:
 
     async def create_config(
         self,
-        interval_value: int,
-        interval_unit: str,
+        interval_value: datetime,
         is_enabled: bool,
     ) -> dict:
         existing = await self.repo.get_config()
@@ -35,7 +35,6 @@ class SchedulerController:
             )
         config = await self.repo.create_config(
             interval_value=interval_value,
-            interval_unit=interval_unit,
             is_enabled=is_enabled,
         )
         await self.scheduler_service.register_job(config)
@@ -59,7 +58,6 @@ class SchedulerController:
         return self._to_dict(config)
 
     async def trigger_now(self) -> dict:
-        """Manually fire the scheduled job once."""
         config = await self.repo.get_config()
         if not config:
             raise HTTPException(
@@ -73,7 +71,6 @@ class SchedulerController:
         return {
             "id":             str(config.id),
             "interval_value": config.interval_value,
-            "interval_unit":  config.interval_unit,
             "is_enabled":     config.is_enabled,
             "last_run_at":    config.last_run_at,
             "next_run_at":    config.next_run_at,

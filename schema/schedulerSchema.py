@@ -1,24 +1,41 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional
 from datetime import datetime
 
 
 class SchedulerConfigCreate(BaseModel):
-    interval_value: int
-    interval_unit: str   # hours / days / weeks / months
+    interval_value: datetime
     is_enabled: bool = True
+
+    @field_validator("interval_value")
+    @classmethod
+    def validate_day_and_hour(cls, v: datetime) -> datetime:
+        if not (1 <= v.day <= 28):
+            raise ValueError("Day must be between 1 and 28")
+        if not (0 <= v.hour <= 23):
+            raise ValueError("Hour must be between 0 and 23")
+        return v
 
 
 class SchedulerConfigUpdate(BaseModel):
-    interval_value: Optional[int] = None
-    interval_unit: Optional[str] = None
+    interval_value: Optional[datetime] = None
     is_enabled: Optional[bool] = None
+
+    @field_validator("interval_value")
+    @classmethod
+    def validate_day_and_hour(cls, v: Optional[datetime]) -> Optional[datetime]:
+        if v is None:
+            return v
+        if not (1 <= v.day <= 28):
+            raise ValueError("Day must be between 1 and 28")
+        if not (0 <= v.hour <= 23):
+            raise ValueError("Hour must be between 0 and 23")
+        return v
 
 
 class SchedulerConfigResponse(BaseModel):
     id: str
-    interval_value: int
-    interval_unit: str
+    interval_value: datetime
     is_enabled: bool
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None

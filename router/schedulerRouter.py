@@ -42,7 +42,6 @@ class SchedulerRouter:
         self.scheduler_controller = SchedulerController(db)
         return await self.scheduler_controller.create_config(
             interval_value=body.interval_value,
-            interval_unit=body.interval_unit,
             is_enabled=body.is_enabled,
         )
 

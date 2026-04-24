@@ -43,6 +43,7 @@ class IngestionLogController:
     async def get_ingestion_logs(
         self,
         limit: int = DEFAULT_LIMIT,
+        offset: int = 0,
         group_type: Optional[Literal["tracker", "master"]] = None,
     ) -> dict:
         """
@@ -50,6 +51,7 @@ class IngestionLogController:
 
         Args:
             limit: Jumlah logs yang dikembalikan (max 100)
+            offset: Posisi awal data untuk pagination
             group_type: Filter berdasarkan jenis KPI ("tracker" atau "master")
 
         Returns:
@@ -65,6 +67,7 @@ class IngestionLogController:
         # ── Validate limit ──────────────────────────────────────────────
         try:
             limit = self._validate_limit(limit)
+            offset = self._validate_offset(offset)
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -82,6 +85,7 @@ class IngestionLogController:
         try:
             result = await self.service.get_ingestion_logs(
                 limit=limit,
+                offset=offset,
                 group_type=group_type,
             )
             return result
@@ -121,3 +125,14 @@ class IngestionLogController:
             limit = MAX_LIMIT
 
         return limit
+
+    @staticmethod
+    def _validate_offset(offset: int) -> int:
+        if not isinstance(offset, int):
+            raise ValueError(
+                f"offset harus berupa integer. Diterima: {type(offset).__name__}")
+
+        if offset < 0:
+            raise ValueError(f"offset harus >= 0. Diterima: {offset}")
+
+        return offset

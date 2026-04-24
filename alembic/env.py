@@ -10,6 +10,15 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# Load DATABASE_URL from .env and override alembic.ini placeholder.
+# asyncpg is for async use; Alembic needs a sync driver (psycopg2).
+from dotenv import load_dotenv
+load_dotenv()
+_db_url = os.environ.get("DATABASE_URL", "")
+if _db_url:
+    _db_url = _db_url.replace("postgresql+asyncpg://", "postgresql://")
+    context.config.set_main_option("sqlalchemy.url", _db_url)
+
 from databaseConfig import Base
 
 # this is the Alembic Config object, which provides

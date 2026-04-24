@@ -24,13 +24,11 @@ class SchedulerRepository:
 
     async def create_config(
         self,
-        interval_value: int,
-        interval_unit: str,
+        interval_value: datetime,
         is_enabled: bool,
     ) -> SchedulerConfigORM:
         self.config = SchedulerConfigORM(
             interval_value=interval_value,
-            interval_unit=interval_unit,
             is_enabled=is_enabled,
         )
         self.db.add(self.config)
