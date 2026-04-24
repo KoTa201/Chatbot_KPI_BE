@@ -115,6 +115,7 @@ class SQLWireguardService:
             self._check_column_blacklist,
             self._check_injection_patterns,
             self._check_subquery_depth,
+            self._check_structural_integrity,
         )
         for check in checks:
             result = check(normalized_sql)
@@ -265,6 +266,18 @@ class SQLWireguardService:
             )
         return ValidationResult(is_valid=True, reason=None, sanitized_sql=sql)
 
+    # -- Rule W-09 -------------------------------------------------------------
+
+    def _check_structural_integrity(self, sql: str) -> "ValidationResult":
+        balanced, reason = self._has_balanced_brackets_and_quotes(sql)
+        if not balanced:
+            return ValidationResult(
+                is_valid=False,
+                reason=f"W-09: Struktur SQL tidak lengkap ({reason}).",
+                sanitized_sql=None,
+            )
+        return ValidationResult(is_valid=True, reason=None, sanitized_sql=sql)
+
     @staticmethod
     def _count_subquery_depth(sql: str) -> int:
         max_depth = 0
@@ -276,3 +289,52 @@ class SQLWireguardService:
             elif char == ")":
                 current_depth -= 1
         return max_depth
+
+    @staticmethod
+    def _has_balanced_brackets_and_quotes(sql: str) -> tuple[bool, str | None]:
+        in_single_quote = False
+        in_double_quote = False
+        depth = 0
+        i = 0
+        length = len(sql)
+
+        while i < length:
+            ch = sql[i]
+
+            if in_single_quote:
+                if ch == "'":
+                    # Escaped single quote in SQL literal: ''
+                    if i + 1 < length and sql[i + 1] == "'":
+                        i += 2
+                        continue
+                    in_single_quote = False
+                i += 1
+                continue
+
+            if in_double_quote:
+                if ch == '"':
+                    in_double_quote = False
+                i += 1
+                continue
+
+            if ch == "'":
+                in_single_quote = True
+            elif ch == '"':
+                in_double_quote = True
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth < 0:
+                    return False, "jumlah tanda kurung tidak seimbang"
+
+            i += 1
+
+        if in_single_quote:
+            return False, "string literal belum ditutup"
+        if in_double_quote:
+            return False, "identifier quote belum ditutup"
+        if depth != 0:
+            return False, "jumlah tanda kurung tidak seimbang"
+
+        return True, None

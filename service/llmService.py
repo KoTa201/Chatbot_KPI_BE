@@ -1,6 +1,8 @@
 """Service untuk komunikasi ke GitHub Models (NL-to-SQL dan analisis hasil)."""
 
 import asyncio
+import json
+from dataclasses import dataclass
 from typing import Any
 import httpx
 from fastapi import HTTPException, status
@@ -10,6 +12,12 @@ from config import get_settings
 settings = get_settings()
 
 
+@dataclass
+class VisualizationDecision:
+    is_visualize: bool
+    chart_type: str | None = None
+
+
 class GitHubModelsService:
     """Wrapper GitHub Models API dengan alur request yang eksplisit."""
 
@@ -17,25 +25,84 @@ class GitHubModelsService:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.retry_delay_seconds = 1
-        self.model_aliases = {
-            "gpt-4o": "openai/gpt-4o",
-            "gpt-4o-mini": "openai/gpt-4o-mini",
-        }
         self.api_key = (settings.GITHUB_MODELS_API_KEY or "").strip()
         self.base_url = (
             settings.GITHUB_MODELS_BASE_URL or "").strip().rstrip("/")
         # Inisialisasi client OpenAI (GitHub Models kompatibel)
         self.client = AsyncOpenAI(base_url=self.base_url, api_key=self.api_key)
 
-    def _resolve_candidate_models(self, model: str) -> list[str]:
-        normalized_model = (model or "").strip()
-        if not normalized_model:
-            return []
+    async def call_model(
+        self,
+        prompt: str,
+        temperature: float = 0.3,
+        max_tokens: int = 500,
+        model: str | None = None,
+    ) -> str:
+        """
+        Generic method untuk memanggil LLM dengan prompt dan parameter custom.
+        Digunakan oleh services lain seperti ClarificationQuestionGeneratorService.
 
-        fallback_model = self.model_aliases.get(normalized_model)
-        if fallback_model and fallback_model != normalized_model:
-            return [normalized_model, fallback_model]
-        return [normalized_model]
+        Args:
+            prompt: Pertanyaan/prompt untuk LLM
+            temperature: Tingkat kreativitas (0.0-1.0)
+            max_tokens: Maksimal token output
+            model: Model yang digunakan (default: GITHUB_MODELS_MODEL_ANALYSIS)
+
+        Returns:
+            Respons text dari LLM
+        """
+        if model is None:
+            model = settings.GITHUB_MODELS_MODEL_ANALYSIS
+
+        return await self._call_llm(
+            model=model,
+            prompt=prompt,
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+
+    async def generate_sql(self, prompt: str) -> str:
+        """
+        Stage 1: Konversi prompt NL-to-SQL.
+        Temperature rendah (0.1) untuk konsistensi output SQL.
+        """
+        raw = await self._call_llm(
+            model=settings.GITHUB_MODELS_MODEL_NL_TO_SQL,
+            prompt=prompt,
+            temperature=0.1,
+            max_output_tokens=1024,
+            stop_sequences=["```"],
+        )
+        return self._clean_sql_output(raw)
+
+    async def analyze_result(self, prompt: str) -> str:
+        """
+        Stage 4: Analisis hasil query menjadi narasi Bahasa Indonesia.
+        Temperature lebih tinggi (0.4) untuk narasi yang natural.
+        """
+        return await self._call_llm(
+            model=settings.GITHUB_MODELS_MODEL_ANALYSIS,
+            prompt=prompt,
+            temperature=0.4,
+            max_output_tokens=2048,
+        )
+
+    async def decide_visualization_request(self, prompt: str) -> VisualizationDecision:
+        """
+        Fungsi classifier khusus untuk memutuskan apakah user meminta visualisasi.
+        Chart yang didukung hanya: bar, pie, donut.
+        """
+
+        try:
+            raw = await self._call_llm(
+                model=settings.GITHUB_MODELS_MODEL_ANALYSIS,
+                prompt=prompt,
+                temperature=0.0,
+                max_output_tokens=100,
+            )
+            return self._parse_visualization_decision(raw)
+        except HTTPException:
+            return VisualizationDecision(is_visualize=False, chart_type=None)
 
     def _build_payload(
         self,
@@ -107,23 +174,23 @@ class GitHubModelsService:
         max_output_tokens: int,
         stop_sequences: list[str] | None = None,
     ) -> str:
-        candidate_models = self._resolve_candidate_models(model)
-
-        for model_index, candidate_model in enumerate(candidate_models):
-            has_next_model = model_index < (len(candidate_models) - 1)
+        try:
             payload = self._build_payload(
-                model=candidate_model,
+                model=settings.GITHUB_MODELS_MODEL_NL_TO_SQL,
                 prompt=prompt,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 stop_sequences=stop_sequences,
             )
-            try:
-                return await self._request_with_retry(payload, has_next_model)
-            except _UseNextModelCandidate:
-                continue
-
-        self._raise_model_not_available()
+            return await self._request_with_retry(
+                payload=payload,
+                has_next_model=False,
+            )
+        except (KeyError, ValueError) as error:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Respons AI tidak sesuai format yang diharapkan: {str(error)}",
+            ) from error
 
     @staticmethod
     def _raise_model_not_available() -> None:
@@ -179,60 +246,27 @@ class GitHubModelsService:
 
         return ""
 
-    async def generate_sql(self, prompt: str) -> str:
-        """
-        Stage 1: Konversi prompt NL-to-SQL.
-        Temperature rendah (0.1) untuk konsistensi output SQL.
-        """
-        raw = await self._call_llm(
-            model=settings.GITHUB_MODELS_MODEL_NL_TO_SQL,
-            prompt=prompt,
-            temperature=0.1,
-            max_output_tokens=1024,
-            stop_sequences=["```"],
-        )
-        return self._clean_sql_output(raw)
+    @staticmethod
+    def _parse_visualization_decision(raw: str) -> VisualizationDecision:
+        cleaned = (raw or "").strip()
+        if cleaned.startswith("```"):
+            lines = [line for line in cleaned.splitlines()
+                     if not line.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
 
-    async def analyze_result(self, prompt: str) -> str:
-        """
-        Stage 4: Analisis hasil query menjadi narasi Bahasa Indonesia.
-        Temperature lebih tinggi (0.4) untuk narasi yang natural.
-        """
-        return await self._call_llm(
-            model=settings.GITHUB_MODELS_MODEL_ANALYSIS,
-            prompt=prompt,
-            temperature=0.4,
-            max_output_tokens=2048,
-        )
+        try:
+            payload = json.loads(cleaned)
+        except json.JSONDecodeError:
+            return VisualizationDecision(is_visualize=False, chart_type=None)
 
-    async def call_model(
-        self,
-        prompt: str,
-        temperature: float = 0.3,
-        max_tokens: int = 500,
-        model: str | None = None,
-    ) -> str:
-        """
-        Generic method untuk memanggil LLM dengan prompt dan parameter custom.
-        Digunakan oleh services lain seperti ClarificationQuestionGeneratorService.
+        is_visualize = bool(payload.get("is_visualize", False))
+        chart_type = payload.get("chart_type")
+        if chart_type not in {"bar", "pie", "donut"}:
+            chart_type = "bar" if is_visualize else None
 
-        Args:
-            prompt: Pertanyaan/prompt untuk LLM
-            temperature: Tingkat kreativitas (0.0-1.0)
-            max_tokens: Maksimal token output
-            model: Model yang digunakan (default: GITHUB_MODELS_MODEL_ANALYSIS)
-
-        Returns:
-            Respons text dari LLM
-        """
-        if model is None:
-            model = settings.GITHUB_MODELS_MODEL_ANALYSIS
-
-        return await self._call_llm(
-            model=model,
-            prompt=prompt,
-            temperature=temperature,
-            max_output_tokens=max_tokens,
+        return VisualizationDecision(
+            is_visualize=is_visualize,
+            chart_type=chart_type,
         )
 
     @staticmethod

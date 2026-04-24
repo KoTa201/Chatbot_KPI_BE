@@ -4,6 +4,7 @@ Tanggung jawab: routing, HTTP method, status code, response model.
 Logika bisnis didelegasikan ke ChatController → ChatService.
 """
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 
 from service.authService import get_current_user
 from controller.chatController import ChatController
@@ -30,9 +31,9 @@ class ChatRouter:
             "",
             self.send_message,
             methods=["POST"],
-            response_model=ChatResponse,
+            response_class=StreamingResponse,
             status_code=status.HTTP_200_OK,
-            summary="Kirim pesan ke chatbot KPI (pipeline Structured RAG)",
+            summary="Kirim pesan ke chatbot KPI (streaming message)",
         )
 
         # ── Clarification Response ──────────────────────────────────── #
@@ -40,9 +41,9 @@ class ChatRouter:
             "/clarification",
             self.handle_clarification,
             methods=["POST"],
-            response_model=ChatResponse,
+            response_class=StreamingResponse,
             status_code=status.HTTP_200_OK,
-            summary="Respond to clarification question",
+            summary="Respond to clarification question (streaming message)",
         )
 
         # ── History ─────────────────────────────────────────────────── #
@@ -101,12 +102,13 @@ class ChatRouter:
         controller: ChatController = Depends(ChatController),
     ):
         """
-        Endpoint utama chatbot. Menjalankan pipeline 4 stage:
+        Endpoint utama chatbot. Menjalankan pipeline 5 stage:
 
         1. **NL-to-SQL**: Pertanyaan bahasa Indonesia dikonversi ke SQL via GitHub Models.
         2. **SQLWireguard**: SQL divalidasi keamanannya (whitelist, RLS, injection detection).
         3. **SQL Execution**: SQL yang lolos dieksekusi ke PostgreSQL (read-only).
-        4. **Result Analysis**: Hasil query dianalisis oleh GitHub Models menjadi narasi Bahasa Indonesia.
+        4. **Graphic Generation (Opsional)**: Jika user meminta visualisasi, sistem membuat grafik (bar/pie/donut).
+        5. **Result Analysis**: Hasil query dianalisis oleh GitHub Models menjadi narasi Bahasa Indonesia.
 
         **Role access:**
         - `Karyawan`: Hanya melihat data KPI milik sendiri (RLS enforced).

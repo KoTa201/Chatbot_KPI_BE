@@ -6,6 +6,7 @@ Berdasarkan skenario di PRD Section 8.
 
 import pytest
 from uuid import uuid4
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from service.ambiguityDetectorService import AmbiguityDetectorService
@@ -24,7 +25,7 @@ class TestAmbiguityDetectorLLM:
     async def test_llm_detects_ambiguity(self):
         """Test LLM-based detection mendeteksi ambiguitas."""
         detector = AmbiguityDetectorService()
-        
+
         # Mock LLM response untuk ambiguous query
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = '''{
@@ -38,12 +39,12 @@ class TestAmbiguityDetectorLLM:
                 "suggested_clarifying_question": "Anda ingin data per individu atau per divisi?",
                 "answer_options": ["Per individu", "Per divisi", "Seluruh perusahaan"]
             }'''
-            
+
             result = await detector.detect_ambiguity(
                 "Siapa yang performa terbaik?",
                 "Owner"
             )
-            
+
             assert result.is_ambiguous is True
             assert result.ambiguity_type == "scope"
             assert result.ambiguity_score == 0.85
@@ -54,7 +55,7 @@ class TestAmbiguityDetectorLLM:
     async def test_llm_clear_query(self):
         """Test LLM menganggap query yang jelas sebagai tidak ambiguous."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = '''{
                 "is_ambiguous": false,
@@ -64,12 +65,12 @@ class TestAmbiguityDetectorLLM:
                 "suggested_clarifying_question": null,
                 "answer_options": []
             }'''
-            
+
             result = await detector.detect_ambiguity(
                 "Tampilkan semua KPI Januari 2025 per divisi",
                 "Owner"
             )
-            
+
             assert result.is_ambiguous is False
             assert result.ambiguity_score == 0.2
             assert result.ambiguity_type == "none"
@@ -107,7 +108,7 @@ class TestAmbiguityDetectorLLM:
     async def test_llm_tie_breaking_rule(self):
         """Test tie-breaking rule: score 0.55-0.65 treated as NOT ambiguous."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             # Score dalam range tie-breaking
             mock_llm.return_value = '''{
@@ -118,12 +119,12 @@ class TestAmbiguityDetectorLLM:
                 "suggested_clarifying_question": "Scope tidak jelas",
                 "answer_options": []
             }'''
-            
+
             result = await detector.detect_ambiguity(
                 "Berapa KPI?",
                 "Owner"
             )
-            
+
             # Tie-breaking rule should apply
             assert result.is_ambiguous is False
             assert result.ambiguity_score == 0.60
@@ -132,15 +133,15 @@ class TestAmbiguityDetectorLLM:
     async def test_llm_api_error_fallback(self):
         """Test fallback behavior ketika LLM API error."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = Exception("503 Service Unavailable")
-            
+
             result = await detector.detect_ambiguity(
                 "Siapa yang terbaik?",
                 "Owner"
             )
-            
+
             # Should fall back to NOT ambiguous (safe default)
             assert result.is_ambiguous is False
             assert result.ambiguity_score == 0.3
@@ -150,15 +151,15 @@ class TestAmbiguityDetectorLLM:
     async def test_llm_invalid_json_fallback(self):
         """Test fallback ketika LLM return invalid JSON."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = "Invalid JSON response"
-            
+
             result = await detector.detect_ambiguity(
                 "Siapa karyawan terbaik?",
                 "Owner"
             )
-            
+
             # Should fall back to NOT ambiguous
             assert result.is_ambiguous is False
             assert result.detection_source == "llm_fallback"
@@ -171,21 +172,23 @@ class TestClarificationQuestionGenerator:
     async def test_generate_question_from_llm(self):
         """Test generate pertanyaan dari LLM."""
         generator = ClarificationQuestionGeneratorService()
-        
+
         with patch.object(generator.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = '''{
                 "clarifying_question": "Anda ingin data per individu atau per divisi?",
                 "options": ["Per individu", "Per divisi", "Seluruh perusahaan"],
                 "default_if_no_answer": "Per divisi"
             }'''
-            
+
             result = await generator.generate_clarifying_question(
                 user_query="Siapa yang terbaik?",
                 ambiguity_type="scope",
                 possible_interpretations=["Per individu", "Per divisi"],
+                suggested_question=None,
+                suggested_options=None,
                 user_role="Owner"
             )
-            
+
             assert "Anda ingin" in result.clarifying_question
             assert len(result.options) == 3
             assert result.default_if_no_answer == "Per divisi"
@@ -194,17 +197,19 @@ class TestClarificationQuestionGenerator:
     async def test_generate_question_llm_error_fallback(self):
         """Test fallback ke template ketika LLM error."""
         generator = ClarificationQuestionGeneratorService()
-        
+
         with patch.object(generator.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = Exception("LLM Error")
-            
+
             result = await generator.generate_clarifying_question(
                 user_query="Siapa yang terbaik?",
                 ambiguity_type="scope",
                 possible_interpretations=[],
+                suggested_question=None,
+                suggested_options=None,
                 user_role="Owner"
             )
-            
+
             # Should use template default
             assert result.clarifying_question is not None
             assert len(result.options) >= 2
@@ -217,12 +222,10 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_process_direct_answer_no_ambiguity(self):
         """Test direct answer ketika query tidak ambiguous."""
-        service = ClarificationService(
-            db_session=None,
-            llm=AsyncMock(),
-            clarification_repo=None
-        )
-        
+        service = ClarificationService(db=None)
+        service.repo.create = AsyncMock(
+            return_value=SimpleNamespace(id=uuid4()))
+
         # Mock ambiguity detection to return NOT ambiguous
         with patch.object(
             service.ambiguity_detector,
@@ -238,25 +241,25 @@ class TestClarificationService:
                 answer_options=[],
                 detection_source="llm"
             )
-            
-            result = await service.detect_ambiguity(
-                session_id="test-1",
+
+            result = await service.process_user_query(
                 user_query="Tampilkan semua KPI Januari 2025",
-                user_role="Owner"
+                user_id=uuid4(),
+                user_role="Owner",
+                session_id="test-1",
+                clarification_count=0,
             )
-            
-            assert result.ambiguity_detected is False
-            assert result.clarifying_question is None
+
+            assert result is None
+            service.repo.create.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_process_clarification_needed(self):
         """Test clarification diperlukan ketika query ambiguous."""
-        service = ClarificationService(
-            db_session=None,
-            llm=AsyncMock(),
-            clarification_repo=None
-        )
-        
+        service = ClarificationService(db=None)
+        service.repo.create = AsyncMock(
+            return_value=SimpleNamespace(id=uuid4()))
+
         with patch.object(
             service.ambiguity_detector,
             'detect_ambiguity',
@@ -266,27 +269,35 @@ class TestClarificationService:
                 is_ambiguous=True,
                 ambiguity_type="scope",
                 ambiguity_score=0.85,
-                possible_interpretations=["Per individu", "Per divisi"],
+                possible_interpretations=[
+                    {"label": "Per individu"},
+                    {"label": "Per divisi"},
+                ],
                 suggested_clarifying_question="Scope mana yang Anda maksud?",
                 answer_options=["Per individu", "Per divisi"],
                 detection_source="llm"
             )
-            
+
             with patch.object(
                 service.question_generator,
                 'generate_clarifying_question',
                 new_callable=AsyncMock
             ) as mock_gen:
-                mock_gen.return_value.clarifying_question = "Scope mana?"
-                mock_gen.return_value.options = ["Per individu", "Per divisi"]
-                
-                result = await service.detect_ambiguity(
-                    session_id="test-2",
-                    user_query="Siapa yang terbaik?",
-                    user_role="Owner"
+                mock_gen.return_value = SimpleNamespace(
+                    clarifying_question="Scope mana?",
+                    options=["Per individu", "Per divisi"],
                 )
-                
-                assert result.ambiguity_detected is True
+
+                result = await service.process_user_query(
+                    user_query="Siapa yang terbaik?",
+                    user_id=uuid4(),
+                    user_role="Owner",
+                    session_id="test-2",
+                    clarification_count=0,
+                )
+
+                assert result is not None
+                assert result.message_type == "clarification"
                 assert result.clarifying_question is not None
 
     @pytest.mark.asyncio
@@ -294,19 +305,21 @@ class TestClarificationService:
         """Test max clarification limit per session."""
         ctx_manager = SessionContextManager()
         session_id = "test-3"
-        
+
         # Add 2 clarifications (max)
         ctx_manager.add_clarification_to_history(
             session_id,
-            original_query="Query 1",
+            question="Pertanyaan 1",
+            answer="Jawaban 1",
             ambiguity_type="scope"
         )
         ctx_manager.add_clarification_to_history(
             session_id,
-            original_query="Query 2",
+            question="Pertanyaan 2",
+            answer="Jawaban 2",
             ambiguity_type="temporal"
         )
-        
+
         # Check count
         history = ctx_manager.get_clarification_history(session_id)
         assert len(history) == 2
@@ -319,65 +332,67 @@ class TestSessionContextManager:
         """Test create new session context."""
         manager = SessionContextManager()
         session_id = "test-session-1"
-        
+
         ctx = manager.get_session_context(session_id)
         assert ctx is not None
-        assert ctx.session_id == session_id
-        assert len(ctx.clarification_history) == 0
+        assert ctx["session_id"] == session_id
+        assert len(ctx["clarification_history"]) == 0
 
     def test_add_clarification_to_history(self):
         """Test add clarification to session history."""
         manager = SessionContextManager()
         session_id = "test-session-2"
-        
+
         manager.add_clarification_to_history(
             session_id,
-            original_query="Berapa KPI?",
+            question="Berapa KPI?",
+            answer="Per bulan",
             ambiguity_type="temporal"
         )
-        
+
         ctx = manager.get_session_context(session_id)
-        assert len(ctx.clarification_history) == 1
-        assert ctx.clarification_history[0]["original_query"] == "Berapa KPI?"
+        assert len(ctx["clarification_history"]) == 1
+        assert ctx["clarification_history"][0]["question"] == "Berapa KPI?"
 
     def test_scope_preference_storage(self):
         """Test store scope preference dari clarification answer."""
         manager = SessionContextManager()
         session_id = "test-session-3"
-        
-        manager.store_scope_preference(session_id, "Per divisi")
-        
+
+        manager.set_scope_preference(session_id, "scope", "Per divisi")
+
         ctx = manager.get_session_context(session_id)
-        assert ctx.user_preferences.get("scope") == "Per divisi"
+        assert ctx["scope_preferences"].get("scope") == "Per divisi"
 
     def test_preference_persistence_across_queries(self):
         """Test scope preference persist across multiple queries."""
         manager = SessionContextManager()
         session_id = "test-session-4"
-        
+
         # Store preference
-        manager.store_scope_preference(session_id, "Per divisi")
-        
+        manager.set_scope_preference(session_id, "scope", "Per divisi")
+
         # Add multiple clarifications
-        manager.add_clarification_to_history(session_id, "Query 1", "scope")
-        manager.add_clarification_to_history(session_id, "Query 2", "temporal")
-        
+        manager.add_clarification_to_history(session_id, "Q1", "A1", "scope")
+        manager.add_clarification_to_history(
+            session_id, "Q2", "A2", "temporal")
+
         # Check preference still there
         ctx = manager.get_session_context(session_id)
-        assert ctx.user_preferences.get("scope") == "Per divisi"
+        assert ctx["scope_preferences"].get("scope") == "Per divisi"
 
     def test_session_ttl_cleanup(self):
         """Test session TTL cleanup mechanism."""
         manager = SessionContextManager()
         session_id = "test-session-5"
-        
+
         # Create context
         manager.get_session_context(session_id)
-        assert session_id in manager.sessions
-        
+        assert manager.get_stats()["active_sessions"] >= 1
+
         # Access again
         manager.get_session_context(session_id)
-        assert session_id in manager.sessions
+        assert manager.get_stats()["active_sessions"] >= 1
 
 
 class TestScenarios:
@@ -387,7 +402,7 @@ class TestScenarios:
     async def test_scenario_llm_ambiguous_query(self):
         """Skenario: LLM mendeteksi ambiguitas dan generate pertanyaan."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = '''{
                 "is_ambiguous": true,
@@ -397,12 +412,12 @@ class TestScenarios:
                 "suggested_clarifying_question": "Apakah Anda ingin data per individu atau per divisi?",
                 "answer_options": ["Per individu", "Per divisi", "Seluruh perusahaan"]
             }'''
-            
+
             result = await detector.detect_ambiguity(
                 "Siapa yang performa terbaik?",
                 "Owner"
             )
-            
+
             assert result.is_ambiguous is True
             assert result.ambiguity_type == "scope"
 
@@ -410,7 +425,7 @@ class TestScenarios:
     async def test_scenario_no_ambiguity(self):
         """Skenario: LLM menganggap query sudah jelas."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = '''{
                 "is_ambiguous": false,
@@ -420,19 +435,19 @@ class TestScenarios:
                 "suggested_clarifying_question": null,
                 "answer_options": []
             }'''
-            
+
             result = await detector.detect_ambiguity(
                 "Tampilkan semua KPI Januari 2025 per divisi untuk status achieve",
                 "Owner"
             )
-            
+
             assert result.is_ambiguous is False
 
     @pytest.mark.asyncio
     async def test_scenario_tie_breaking(self):
         """Skenario: Score borderline (0.55-0.65) apply tie-breaking."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.return_value = '''{
                 "is_ambiguous": true,
@@ -442,12 +457,12 @@ class TestScenarios:
                 "suggested_clarifying_question": null,
                 "answer_options": []
             }'''
-            
+
             result = await detector.detect_ambiguity(
                 "Data KPI",
                 "Owner"
             )
-            
+
             # Tie-breaking should apply
             assert result.is_ambiguous is False
             assert result.ambiguity_score == 0.58
@@ -456,15 +471,15 @@ class TestScenarios:
     async def test_scenario_llm_unavailable(self):
         """Skenario: LLM tidak tersedia, fallback to safe default."""
         detector = AmbiguityDetectorService()
-        
+
         with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
             mock_llm.side_effect = Exception("503: Service Unavailable")
-            
+
             result = await detector.detect_ambiguity(
                 "Siapa yang terbaik?",
                 "Owner"
             )
-            
+
             # Should fallback gracefully
             assert result.is_ambiguous is False
             assert result.detection_source == "llm_fallback"
