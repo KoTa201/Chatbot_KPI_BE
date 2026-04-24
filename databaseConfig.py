@@ -3,11 +3,11 @@ database.py - Koneksi PostgreSQL dengan SQLAlchemy async
 """
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 from typing import AsyncGenerator
 
 
 from config import settings
+from model.Base import Base
 
 
 def _normalize_async_database_url(db_url: str | None) -> str:
@@ -42,14 +42,6 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
-
-
-# ------------------------------------------------------------------ #
-#  Base Model                                                          #
-# ------------------------------------------------------------------ #
-
-class Base(DeclarativeBase):
-    pass
 
 
 # ------------------------------------------------------------------ #
