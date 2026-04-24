@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.ChatbotAuditLog import ChatbotAuditLog
 
@@ -58,3 +58,9 @@ class AuditLogRepository:
             select(ChatbotAuditLog).where(ChatbotAuditLog.id == log_id)
         )
         return result.scalar_one_or_none()
+
+    async def delete_by_session(self, session_id: str) -> int:
+        result = await self.db.execute(
+            delete(ChatbotAuditLog).where(ChatbotAuditLog.session_id == session_id)
+        )
+        return result.rowcount
