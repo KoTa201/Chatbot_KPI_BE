@@ -14,6 +14,7 @@ asyncpg==0.29.0
 alembic==1.13.3
 greenlet==3.1.1
 sqlparse==0.5.1
+psycopg2-binary==2.9.9
 
 # --- Authentication & Security ---
 python-jose[cryptography]==3.3.0

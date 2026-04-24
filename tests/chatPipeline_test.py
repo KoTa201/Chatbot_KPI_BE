@@ -41,6 +41,7 @@ def _patch_clarification_service(monkeypatch, clarification_response):
 def _create_chat_service(monkeypatch) -> ChatService:
     service = ChatService(db=None)
     monkeypatch.setattr(service, "_write_audit", AsyncMock(return_value=None))
+    monkeypatch.setattr(service, "create_session", AsyncMock(return_value=None))
     return service
 
 

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from databaseConfig import Base
+from model.Base import Base
 from model.PasswordReset import PasswordResetORM
 if TYPE_CHECKING:
     from model.ChatbotAuditLog import ChatbotAuditLog

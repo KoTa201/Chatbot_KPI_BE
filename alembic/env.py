@@ -1,7 +1,10 @@
+
+from model.Base import Base
+from dotenv import load_dotenv
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import pool, text
 
 from alembic import context
 
@@ -12,14 +15,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 # Load DATABASE_URL from .env and override alembic.ini placeholder.
 # asyncpg is for async use; Alembic needs a sync driver (psycopg2).
-from dotenv import load_dotenv
 load_dotenv()
 _db_url = os.environ.get("DATABASE_URL", "")
 if _db_url:
     _db_url = _db_url.replace("postgresql+asyncpg://", "postgresql://")
     context.config.set_main_option("sqlalchemy.url", _db_url)
 
-from databaseConfig import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -32,16 +33,6 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from model.User import UserORM
-from model.KPIMaster import KPIMasterORM
-from model.KPITracker import KPITrackerORM
-from model.KPIGroup import KPIGroupORM
-from model.Chatbot import Chatbot
-from model.ChatbotAuditLog import ChatbotAuditLog
-from model.PasswordReset import PasswordResetORM
-from model.IngestionLog import IngestionLogORM
-from model.RevokedToken import RevokedTokenORM
-from model.SchedulerConfig import SchedulerConfigORM
 
 target_metadata = Base.metadata
 
@@ -89,6 +80,10 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        result = connection.execute(
+            text("SELECT current_database(), inet_server_addr(), inet_server_port();")
+        )
+        print(">>> DB CHECK:", result.fetchone())
         context.configure(
             connection=connection, target_metadata=target_metadata
         )

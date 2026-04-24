@@ -6,7 +6,7 @@ from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from databaseConfig import Base
+from model.Base import Base
 
 if TYPE_CHECKING:
     from model.User import UserORM

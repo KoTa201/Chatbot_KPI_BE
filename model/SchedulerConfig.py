@@ -10,7 +10,7 @@ from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from databaseConfig import Base
+from model.Base import Base
 
 if TYPE_CHECKING:
     from model.IngestionLog import IngestionLogORM
@@ -25,7 +25,8 @@ class SchedulerConfigORM(Base):
     interval_value: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

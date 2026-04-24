@@ -30,7 +30,7 @@ from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
-from databaseConfig import Base
+from model.Base import Base
 
 if TYPE_CHECKING:
     from model.KPIGroup import KPIGroupORM
