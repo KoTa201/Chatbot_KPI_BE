@@ -13,6 +13,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from databaseConfig import Base
 from model.PasswordReset import PasswordResetORM
 if TYPE_CHECKING:
+    from model.ChatbotAuditLog import ChatbotAuditLog
     from model.PasswordReset import PasswordResetORM
 
 
@@ -52,6 +53,10 @@ class UserORM(Base):
 
     password_resets: Mapped[list["PasswordResetORM"]] = relationship(
         "PasswordResetORM", back_populates="user", cascade="all, delete-orphan"
+    )
+
+    audit_logs: Mapped[list["ChatbotAuditLog"]] = relationship(
+        "ChatbotAuditLog", back_populates="user"
     )
 
     def __repr__(self) -> str:

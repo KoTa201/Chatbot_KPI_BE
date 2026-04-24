@@ -1,0 +1,60 @@
+import uuid
+from datetime import datetime
+from typing import Optional, List
+from pydantic import BaseModel, field_validator
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str | None = None
+    show_sql: bool = False  # Opsional: tampilkan SQL ke user
+    # Jawaban atas pertanyaan klarifikasi
+    clarification_answer: Optional[str] = None
+
+    @field_validator("message")
+    @classmethod
+    def message_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Pesan tidak boleh kosong.")
+        if len(v) > 2000:
+            raise ValueError("Pesan terlalu panjang, maksimal 2000 karakter.")
+        return v
+
+
+class PipelineStageInfo(BaseModel):
+    stage: str
+    status: str
+    detail: str | None = None
+
+
+class ChatResponse(BaseModel):
+    session_id: str
+    message: str                        # Jawaban naratif dari GitHub Models
+    # Jika ada pertanyaan klarifikasi
+    clarification_message_answer_options: List[str] | None = None
+    generated_sql: str | None = None    # Hanya ditampilkan jika show_sql=True
+    rows_returned: int | None = None
+    execution_time_ms: int | None = None
+    pipeline_stages: list[PipelineStageInfo] = []
+
+
+class ChatErrorResponse(BaseModel):
+    error: str
+    stage: str | None = None
+    safe: bool = True
+
+
+class AuditLogResponse(BaseModel):
+    id: uuid.UUID
+    session_id: str | None
+    user_role: str | None
+    user_query: str | None
+    wireguard_status: str | None
+    wireguard_reason: str | None
+    execution_status: str | None
+    rows_returned: int | None
+    execution_time_ms: int | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}

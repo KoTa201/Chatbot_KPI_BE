@@ -10,6 +10,8 @@ Sheet format:
 """
 
 from typing import Optional
+from difflib import SequenceMatcher
+import re
 import pandas as pd
 
 # Maps canonical field names to possible column header aliases (lowercase, stripped)
@@ -22,17 +24,47 @@ _COLUMN_ALIASES: dict[str, list[str]] = {
     "fail":                  ["fail", "failed"],
     "responsibility_persons": [
         "responsobility persons", "responsibility persons",
-        "responsible persons", "person", "persons", "penanggung jawab",
+        "rresponsobility persons",
+        "responsibility person", "responsible persons", "responsible person",
+        "pic", "penanggung jawab", "person in charge",
     ],
 }
+
+
+def _normalize_header(val: str) -> str:
+    """Normalize header token for resilient alias matching."""
+    s = str(val).strip().lower()
+    s = re.sub(r"[_\-/\n\r\t]+", " ", s)
+    s = re.sub(r"[^a-z0-9\s]", " ", s)
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
 
 
 def _resolve(header_cells: list[str], field: str) -> Optional[int]:
     """Return column index for field, or None if not found."""
     aliases = _COLUMN_ALIASES.get(field, [field])
+    normalized_aliases = {_normalize_header(a) for a in aliases}
+
+    # Pass 1: exact normalized match
     for i, cell in enumerate(header_cells):
-        if str(cell).strip().lower() in aliases:
+        normalized_cell = _normalize_header(str(cell))
+        if normalized_cell in normalized_aliases:
             return i
+
+    # Pass 2: typo-tolerant fallback for responsibility column only
+    # Example: "Rresponsobility Persons" (double leading "r")
+    if field == "responsibility_persons":
+        threshold = 0.88
+        for i, cell in enumerate(header_cells):
+            normalized_cell = _normalize_header(str(cell))
+            best_similarity = max(
+                (SequenceMatcher(None, normalized_cell, alias).ratio()
+                 for alias in normalized_aliases),
+                default=0.0,
+            )
+            if best_similarity >= threshold:
+                return i
+
     return None
 
 
@@ -117,6 +149,11 @@ def parse_kpi_master_dataframe(
                 field: _resolve(header_cells, field)
                 for field in _COLUMN_ALIASES
             }
+
+            if col_map.get("responsibility_persons") is None:
+                errors.append(
+                    f"Row {row_idx + 1}: kolom responsibility_persons tidak ditemukan di header, field akan dianggap wajib. Header: {header_cells}"
+                )
             continue
 
         if current_category is None:
@@ -134,6 +171,15 @@ def parse_kpi_master_dataframe(
             errors.append(f"Row {row_idx + 1}: kpi_name is empty, skipped.")
             continue
 
+        responsibility_persons = _normalize_persons(
+            _get_field(row, col_map, "responsibility_persons")
+        )
+        if not responsibility_persons:
+            errors.append(
+                f"Row {row_idx + 1}: responsibility_persons is empty, skipped."
+            )
+            continue
+
         records.append({
             "tahun":                  tahun,
             "category":               current_category,
@@ -143,7 +189,7 @@ def parse_kpi_master_dataframe(
             "achieve":                _get_field(row, col_map, "achieve"),
             "partial":                _get_field(row, col_map, "partial"),
             "fail":                   _get_field(row, col_map, "fail"),
-            "responsibility_persons": _normalize_persons(_get_field(row, col_map, "responsibility_persons")),
+            "responsibility_persons": responsibility_persons,
         })
 
     return records, errors

@@ -1,9 +1,10 @@
 """Repository operasi database untuk ingestion KPI Tracker."""
 
 from uuid import UUID
+from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.KPITracker import KPITrackerORM
 
@@ -45,15 +46,21 @@ class KPITrackerRepository:
                 detail=f"Gagal simpan KPI Tracker records ke database: {str(e)}",
             )
 
+    # ================================================================ #
+    #  DELETE                                                           #
+    # ================================================================ #
+
     async def delete_kpi_records_by_group_and_period(
         self,
         group_id: UUID,
         tahun: int,
-        bulan_num: int | None = None,
+        bulan_num: Optional[int] = None,
     ) -> int:
         """
-        Hapus records tracker untuk kombinasi group + periode tertentu.
-        Dipakai untuk idempotent re-ingest per bulan/tahun.
+        Hapus data tracker existing untuk satu group + periode.
+
+        Jika bulan_num None, hapus semua bulan pada tahun tersebut.
+        Returns jumlah baris terhapus.
         """
         try:
             stmt = delete(KPITrackerORM).where(
@@ -61,18 +68,15 @@ class KPITrackerRepository:
                 KPITrackerORM.tahun == tahun,
             )
 
-            if bulan_num is None:
-                stmt = stmt.where(KPITrackerORM.bulan_num.is_(None))
-            else:
+            if bulan_num is not None:
                 stmt = stmt.where(KPITrackerORM.bulan_num == bulan_num)
 
             result = await self.db.execute(stmt)
-            await self.db.flush()
-            return result.rowcount or 0
-
+            await self.db.commit()
+            return int(result.rowcount or 0)
         except Exception as e:
             await self.db.rollback()
             raise HTTPException(
                 status_code=500,
-                detail=f"Gagal hapus KPI Tracker records untuk group={group_id}, tahun={tahun}, bulan={bulan_num}: {str(e)}",
+                detail=f"Gagal hapus KPI Tracker records untuk periode: {str(e)}",
             )

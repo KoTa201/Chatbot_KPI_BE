@@ -25,10 +25,12 @@ class Settings:
     # GitHub Models (primary LLM provider)
     GITHUB_MODELS_API_KEY: str = (
         os.getenv("GITHUB_MODELS_API_KEY")
-
+        or os.getenv("GITHUB_TOKEN")
+        or os.getenv("GH_TOKEN")
     )
     GITHUB_MODELS_BASE_URL: str = (
         os.getenv("GITHUB_MODELS_BASE_URL")
+        or "https://models.github.ai/inference"
     )
     GITHUB_MODELS_MODEL_NL_TO_SQL: str = (
         os.getenv("GITHUB_MODELS_MODEL_NL_TO_SQL")
