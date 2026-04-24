@@ -3,6 +3,11 @@ model/base.py
 Shared enums — import dari sini untuk menghindari circular import.
 """
 import enum
+from sqlalchemy.orm import DeclarativeBase
+
+
+class Base(DeclarativeBase):
+    pass
 
 
 class RoleEnum(str, enum.Enum):
