@@ -4,7 +4,7 @@ Data access layer untuk clarification logs.
 """
 
 from uuid import UUID
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.ClarificationLog import ClarificationLogORM
@@ -148,3 +148,9 @@ class ClarificationRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def delete_by_session(self, session_id: str) -> int:
+        result = await self.db.execute(
+            delete(ClarificationLogORM).where(ClarificationLogORM.session_id == session_id)
+        )
+        return result.rowcount

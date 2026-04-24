@@ -14,6 +14,7 @@ from service.authService import get_current_user
 from service.chatService import ChatService
 from service.clarificationService import ClarificationService
 from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
+from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
 from repository.chatbotAuditLogRepository import AuditLogRepository
 from model.User import UserORM
 
@@ -157,6 +158,39 @@ class ChatController:
 
         logs = await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
         return [AuditLogResponse.model_validate(log) for log in logs]
+
+    async def handle_get_sessions(
+        self,
+        current_user: UserORM = Depends(get_current_user),
+    ) -> list[SessionResponse]:
+        user_id = str(current_user.id)
+        service = ChatService(self.db)
+        sessions = await service.get_sessions(user_id=user_id)
+        return [SessionResponse.model_validate(s) for s in sessions]
+
+    async def handle_delete_session(
+        self,
+        session_id: str,
+        current_user: UserORM = Depends(get_current_user),
+    ) -> None:
+        user_id = str(current_user.id)
+        service = ChatService(self.db)
+        await service.delete_session(session_id=session_id, user_id=user_id)
+
+    async def handle_update_session_title(
+        self,
+        session_id: str,
+        request: UpdateSessionTitleRequest,
+        current_user: UserORM = Depends(get_current_user),
+    ) -> SessionResponse:
+        user_id = str(current_user.id)
+        service = ChatService(self.db)
+        updated = await service.update_session_title(
+            session_id=session_id,
+            user_id=user_id,
+            title=request.title,
+        )
+        return SessionResponse.model_validate(updated)
 
     @staticmethod
     def _extract_role_value(current_user: UserORM) -> str:

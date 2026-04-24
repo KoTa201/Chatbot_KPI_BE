@@ -9,7 +9,9 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.KPIGroup import KPIGroupORM
+from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
+from repository.kpiMasterRepository import KPIMasterRepository
 from schema.kpiGroupSchema import (
     KPIGroupCreate,
     KPIGroupUpdate,
@@ -20,6 +22,7 @@ from schema.kpiGroupSchema import (
 )
 from service.googleSheetService import GoogleSheetService
 from service.kpiMasterIngestionService import KPIMasterIngestionService
+from service.kpiMasterService import KPIMasterService
 from service.TrackeringestionService import TrackerIngestionService
 
 
@@ -201,8 +204,20 @@ class KPIGroupService:
         if sheet_url_changed:
             new_url = update_fields["sheet_url"]
             if existing.group_type == "master":
-                svc = KPIMasterIngestionService(self.db)
-                await svc.ingest_kpi_master(sheet_url=new_url, tahun=payload.tahun)
+                kpi_repo = KPIMasterRepository(self.db)
+                kpi_service = KPIMasterService(kpi_repo)
+                log_repo = IngestionLogRepository(self.db)
+                svc = KPIMasterIngestionService(
+                    kpi_repo=kpi_repo,
+                    kpi_service=kpi_service,
+                    log_repo=log_repo,
+                    group_repo=self.repo,
+                )
+                await svc.update_and_reingest(
+                    group_id=group_id,
+                    sheet_url=new_url,
+                    tahun=payload.tahun,
+                )
             elif existing.group_type == "tracker":
                 svc = TrackerIngestionService(self.db)
                 await svc.ingest_all_sheets(

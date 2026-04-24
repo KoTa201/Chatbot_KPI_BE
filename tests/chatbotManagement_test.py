@@ -244,6 +244,28 @@ class TestCreateChatbot:
         assert res.status_code == 201
         assert res.json()["addon_prompt"] is None
 
+    async def test_create_same_otoritas_deactivates_previous_active(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ):
+        """Create chatbot aktif baru dengan otoritas sama harus nonaktifkan chatbot aktif lama."""
+        first = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Lama", otoritas="HRD"))
+        second = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Baru", otoritas="HRD"))
+
+        assert first.status_code == 201
+        assert second.status_code == 201
+
+        first_id = first.json()["id"]
+        second_id = second.json()["id"]
+        result = await db_session.execute(
+            select(Chatbot).where(Chatbot.otoritas == AuthorityEnum.HRD)
+        )
+        status_by_id = {str(chatbot.id): chatbot.is_active for chatbot in result.scalars().all()}
+
+        assert status_by_id[first_id] is False
+        assert status_by_id[second_id] is True
+
     async def test_create_duplicate_nama_returns_409(self, client: AsyncClient):
         """Nama chatbot yang sudah ada harus return 409 Conflict."""
         payload = make_payload(nama="Duplikat Bot")
@@ -524,6 +546,78 @@ class TestUpdateChatbot:
 
         assert res.status_code == 200
         assert res.json()["is_active"] is False
+
+    async def test_update_activate_chatbot_deactivates_other_same_otoritas(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ):
+        """Saat aktivasi chatbot, chatbot aktif lain pada otoritas sama harus dinonaktifkan."""
+        old_active = await seed_chatbot(
+            db_session,
+            nama_chatbot="HR Active Lama",
+            otoritas=AuthorityEnum.HRD,
+            is_active=True,
+        )
+        to_activate = await seed_chatbot(
+            db_session,
+            nama_chatbot="HR Active Baru",
+            otoritas=AuthorityEnum.HRD,
+            is_active=True,
+        )
+
+        res = await client.patch(f"/api/v1/chatbots/{to_activate.id}", json={"is_active": True})
+
+        assert res.status_code == 200
+        assert res.json()["is_active"] is True
+
+        result = await db_session.execute(
+            select(Chatbot).where(Chatbot.id.in_([old_active.id, to_activate.id]))
+        )
+        chatbots = result.scalars().all()
+        for chatbot in chatbots:
+            await db_session.refresh(chatbot)
+        status_by_id = {str(chatbot.id): chatbot.is_active for chatbot in chatbots}
+
+        assert status_by_id[str(old_active.id)] is False
+        assert status_by_id[str(to_activate.id)] is True
+
+    async def test_update_otoritas_active_chatbot_deactivates_active_target_otoritas(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+    ):
+        """Pindah otoritas chatbot aktif harus nonaktifkan chatbot aktif lain di otoritas tujuan."""
+        target_active = await seed_chatbot(
+            db_session,
+            nama_chatbot="Karyawan Active Lama",
+            otoritas=AuthorityEnum.KARYAWAN,
+            is_active=True,
+        )
+        mover = await seed_chatbot(
+            db_session,
+            nama_chatbot="HRD Pindah",
+            otoritas=AuthorityEnum.HRD,
+            is_active=True,
+        )
+
+        res = await client.patch(f"/api/v1/chatbots/{mover.id}", json={"otoritas": "Karyawan"})
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["otoritas"] == "Karyawan"
+        assert data["is_active"] is True
+
+        result = await db_session.execute(
+            select(Chatbot).where(Chatbot.id.in_([target_active.id, mover.id]))
+        )
+        chatbots = result.scalars().all()
+        for chatbot in chatbots:
+            await db_session.refresh(chatbot)
+        status_by_id = {str(chatbot.id): chatbot.is_active for chatbot in chatbots}
+
+        assert status_by_id[str(target_active.id)] is False
+        assert status_by_id[str(mover.id)] is True
 
     async def test_update_nama_to_existing_returns_409(self, client: AsyncClient, db_session: AsyncSession):
         """Ganti nama ke nama chatbot lain yang sudah ada harus return 409."""

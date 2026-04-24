@@ -48,6 +48,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(JWTMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -55,8 +57,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(JWTMiddleware)
 
 app.include_router(
     ingestion.router, prefix="/api/v1/ingest", tags=["Ingestion"])

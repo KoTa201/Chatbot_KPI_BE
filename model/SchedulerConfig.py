@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -19,24 +19,19 @@ if TYPE_CHECKING:
 class SchedulerConfigORM(Base):
     __tablename__ = "scheduler_configs"
 
-    __table_args__ = (
-        CheckConstraint(
-            "interval_unit IN ('hours', 'days', 'weeks', 'months')",
-            name="ck_scheduler_interval_unit",
-        ),
-    )
-
     id: Mapped[SAUUID] = mapped_column(
         SAUUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    interval_value: Mapped[int] = mapped_column(Integer, nullable=False)
-    interval_unit: Mapped[str] = mapped_column(String(20), nullable=False)
-    is_enabled: Mapped[bool] = mapped_column(
-        Boolean, default=True, nullable=False)
+    interval_value: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_run_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True)
+        DateTime(timezone=True), nullable=True
+    )
     next_run_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True)
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

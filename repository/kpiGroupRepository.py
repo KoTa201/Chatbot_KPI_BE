@@ -68,6 +68,17 @@ class KPIGroupRepository:
             KPIGroupORM — grup yang sudah ada atau baru dibuat.
         """
         try:
+            update_set = {
+                "sheet_url":  sheet_url,
+                "sheet_name": sheet_name,
+                "nama_grup":  nama_grup,
+                "updated_at": func.now(),
+                # tahun diupdate jika caller mengirimkan nilai eksplisit
+                # agar grup lama dengan tahun NULL bisa terisi saat re-ingest.
+            }
+            if tahun is not None:
+                update_set["tahun"] = tahun
+
             stmt = (
                 insert(KPIGroupORM)
                 .values(
@@ -82,14 +93,7 @@ class KPIGroupRepository:
                 )
                 .on_conflict_do_update(
                     constraint="uq_kpigroup_sheet_type",
-                    set_={
-                        "sheet_url":  sheet_url,
-                        "sheet_name": sheet_name,
-                        "nama_grup":  nama_grup,
-                        "updated_at": func.now(),
-                        # tahun, is_scheduled, is_active TIDAK di-overwrite saat upsert
-                        # agar setting user tidak hilang saat re-ingest
-                    },
+                    set_=update_set,
                 )
                 .returning(KPIGroupORM.id)
             )

@@ -23,6 +23,11 @@ jobs:
         run: |
           pip install -r requirement.txt
           pip install pytest
+
+      - name: Install Playwright browsers
+        run: |
+          playwright install --with-deps
+
       - name: Create .env file
         run: |
           echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> .env

@@ -28,13 +28,20 @@ class ChatbotService:
             )
         return chatbot
 
-    async def _check_nama_unique(self, nama: str, exclude_id: Optional[int] = None) -> None:
+    async def _check_nama_unique(self, nama: str, exclude_id: Optional[UUID] = None) -> None:
         existing = await self.repo.get_by_nama(nama)
         if existing and existing.id != exclude_id:
             raise HTTPException(
                 status_code=409,
                 detail=f"Nama chatbot '{nama}' sudah digunakan."
             )
+
+    async def _enforce_single_active_per_otoritas(
+        self,
+        otoritas: AuthorityEnum,
+        exclude_id: Optional[UUID] = None,
+    ) -> None:
+        await self.repo.deactivate_active_by_otoritas(otoritas, exclude_id=exclude_id)
 
     # ─── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -63,6 +70,7 @@ class ChatbotService:
 
     async def create(self, payload: ChatbotCreate) -> ChatbotResponse:
         await self._check_nama_unique(payload.nama_chatbot)
+        await self._enforce_single_active_per_otoritas(payload.otoritas)
         chatbot = await self.repo.create(payload)
         return ChatbotResponse.model_validate(chatbot)
 
@@ -75,6 +83,14 @@ class ChatbotService:
             )
         if payload.nama_chatbot:
             await self._check_nama_unique(payload.nama_chatbot, exclude_id=chatbot_id)
+
+        target_otoritas = payload.otoritas if payload.otoritas is not None else existing.otoritas
+        target_is_active = payload.is_active if payload.is_active is not None else existing.is_active
+        if target_is_active:
+            await self._enforce_single_active_per_otoritas(
+                target_otoritas,
+                exclude_id=chatbot_id,
+            )
 
         self.repo.chatbot = existing
 

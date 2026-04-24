@@ -6,3 +6,4 @@ from .Chatbot import Chatbot
 from .ChatbotAuditLog import ChatbotAuditLog
 from .KPIMaster import KPIMasterORM
 from .SchedulerConfig import SchedulerConfigORM
+from .ChatSession import ChatSession

@@ -90,6 +90,7 @@ class KPIMasterIngestionService:
                 sheet_url=sheet_url,
                 sheet_name=sheet_name,
                 nama_grup=sheet_name + " Master " + str(tahun),
+                tahun=tahun,
             )
             group_id = group.id
             logger.info(
@@ -175,6 +176,117 @@ class KPIMasterIngestionService:
             raise HTTPException(
                 status_code=500,
                 detail=f"Error tidak terduga saat ingestion: {str(e)}",
+            )
+
+    async def update_and_reingest(
+        self,
+        group_id: UUID,
+        sheet_url: Optional[str] = None,
+        tahun: Optional[int] = None,
+    ) -> dict:
+        """
+        Update KPIGroup (sheet_url/tahun), hapus seluruh master lama,
+        lalu lakukan ingest ulang untuk group tersebut.
+        """
+        log_id = None
+
+        try:
+            group = await self.group_repo.get_by_id(group_id)
+            if not group:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"KPI Group {group_id} tidak ditemukan.",
+                )
+
+            effective_sheet_url = sheet_url if sheet_url is not None else str(group.sheet_url)
+            effective_tahun = tahun if tahun is not None else group.tahun
+            if effective_tahun is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Tahun wajib diisi untuk KPI Master.",
+                )
+
+            logger.info(
+                f"[update_and_reingest] Fetching sheet for group_id={group_id}: {effective_sheet_url}"
+            )
+            df, spreadsheet_id, sheet_name = self._fetch_sheet(effective_sheet_url)
+
+            await self.group_repo.update(
+                group_id=group_id,
+                fields={
+                    "sheet_url": effective_sheet_url,
+                    "sheet_id": spreadsheet_id,
+                    "sheet_name": sheet_name,
+                    "nama_grup": f"{sheet_name} Master {effective_tahun}",
+                    "tahun": effective_tahun,
+                },
+            )
+
+            deleted_count = await self.kpi_repo.delete_by_group_id(group_id)
+            logger.info(
+                f"[update_and_reingest] Deleted {deleted_count} old records for group_id={group_id}"
+            )
+
+            log = await self.log_repo.create(kpi_group_id=group_id)
+            log_id = log.id
+
+            records, errors = self._parse(
+                df, spreadsheet_id, sheet_name, effective_tahun)
+
+            if not records:
+                await self.log_repo.update_status(
+                    log_id=log_id,
+                    status="failed",
+                    total_rows=0,
+                    ingested_count=0,
+                    errors="Tidak ada records valid setelah parsing.",
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail="Sheet tidak menghasilkan records valid.",
+                )
+
+            for record in records:
+                record["group_id"] = group_id
+
+            total_rows = len(records)
+            ingested_count = await self.kpi_repo.upsert_by_group(records)
+
+            status = self._resolve_status(ingested_count, total_rows, errors)
+            error_summary = self._format_errors(errors) if errors else None
+
+            await self.log_repo.update_status(
+                log_id=log_id,
+                status=status,
+                total_rows=total_rows,
+                ingested_count=ingested_count,
+                failed_count=total_rows - ingested_count,
+                errors=error_summary,
+            )
+
+            return {
+                "status": status,
+                "count": ingested_count,
+                "message": f"Berhasil re-ingest {ingested_count} dari {total_rows} KPI Master records.",
+                "group_id": str(group_id),
+                "log_id": str(log_id),
+            }
+
+        except HTTPException:
+            if log_id:
+                await self._mark_log_failed(
+                    log_id, "HTTPException saat update_and_reingest.")
+            raise
+
+        except Exception as e:
+            logger.error(
+                f"[update_and_reingest] Unexpected error: {traceback.format_exc()}"
+            )
+            if log_id:
+                await self._mark_log_failed(log_id, str(e))
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error tidak terduga saat update_and_reingest: {str(e)}",
             )
 
     # ================================================================ #

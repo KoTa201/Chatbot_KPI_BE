@@ -1,15 +1,12 @@
 from typing import Optional
 from uuid import UUID
-from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+
+from sqlalchemy import func, or_, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from model.Chatbot import Chatbot, AuthorityEnum
 from schema.chatbotSchema import ChatbotCreate, ChatbotUpdate
-
-
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy import func, or_
 
 
 class ChatbotRepository:
@@ -63,6 +60,21 @@ class ChatbotRepository:
         await self.db.commit()
         await self.db.refresh(self.chatbot)
         return self.chatbot
+
+    async def deactivate_active_by_otoritas(
+        self,
+        otoritas: AuthorityEnum,
+        exclude_id: Optional[UUID] = None,
+    ) -> None:
+        stmt = (
+            update(Chatbot)
+            .where((Chatbot.otoritas == otoritas) & (Chatbot.is_active == True))
+            .values(is_active=False)
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Chatbot.id != exclude_id)
+
+        await self.db.execute(stmt)
 
     async def update(self, payload: ChatbotUpdate) -> Chatbot:
         for field, value in payload.model_dump(exclude_unset=True).items():

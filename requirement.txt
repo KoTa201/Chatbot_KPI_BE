@@ -43,5 +43,12 @@ pytest==8.3.5
 pytest-asyncio==0.25.3
 aiosqlite==0.20.0
 
+#env
+python-dotenv>=1.0.0
+
+#convert-pdf
+playwright>=1.40
+pytest-html>=3.2.0
+
 #llm
 openai==1.30.1
