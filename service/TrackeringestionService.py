@@ -65,8 +65,8 @@ class TrackerIngestionService:
         self.group_repo = group_repo
         self.google_svc = GoogleSheetService()
         self.logger = logging.getLogger(__name__)
-        self.strip_fields = {"nama_kpi",
-                             "source_sheet_name", "source_sheet_id"}
+        self.strip_fields = {"nama_kpi", "source_sheet_name", "source_sheet_id",
+                             "document_text", "source_row"}
 
     # ================================================================ #
     #  PUBLIC: Entry point                                             #
@@ -125,7 +125,8 @@ class TrackerIngestionService:
                     total_rows=totals.grand_total_rows,
                     ingested_count=totals.grand_ingested,
                     failed_count=totals.grand_failed,
-                    errors=self._format_errors(run_errors) if run_errors else None,
+                    errors=self._format_errors(
+                        run_errors) if run_errors else None,
                 )
 
             self.logger.info(
@@ -693,6 +694,7 @@ class TrackerIngestionService:
         if len(errors) > max_errors:
             result += f" ... dan {len(errors) - max_errors} error lainnya."
         return result
+
 
 @dataclass
 class _SheetContext:

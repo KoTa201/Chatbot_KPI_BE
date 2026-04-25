@@ -78,12 +78,6 @@ class KPITrackerORM(Base):
         String(255), nullable=True)
     keterangan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Teks gabungan untuk RAG retrieval — diisi pipeline saat ingestion
-    document_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-
-    # Posisi baris di spreadsheet sumber — untuk re-import / debugging
-    source_row: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
