@@ -43,22 +43,7 @@ def normalize_realisasi(val) -> Optional[str]:
     return cleaned if cleaned.lower() not in ("", "nan", "none") else None
 
 
-def build_document_text(record: dict) -> str:
-    """
-    Gabungkan field penting menjadi kalimat natural language untuk RAG retrieval.
-    """
-    parts = []
-    if record.get("nama_orang"):
-        parts.append(f"Nama: {record['nama_orang']}.")
-    if record.get("nama_kpi"):
-        parts.append(f"KPI: {record['nama_kpi']}.")
-    if record.get("tahun"):
-        parts.append(f"Tahun: {record['tahun']}.")
-    if record.get("realisasi"):
-        parts.append(f"Realisasi: {record['realisasi']}.")
-    if record.get("keterangan"):
-        parts.append(f"Keterangan: {record['keterangan']}.")
-    return " ".join(parts)
+
 
 
 def parse_dataframe(
@@ -129,10 +114,8 @@ def parse_dataframe(
 
             records.append({
                 **raw,
-                "document_text":     build_document_text(raw),
                 "source_sheet_id":   spreadsheet_id,
                 "source_sheet_name": sheet_name,
-                "source_row":        int(idx) + 2,
             })
 
         except Exception as e:

@@ -24,14 +24,10 @@ class CreateKPIRecordRequest(BaseModel):
     nama_orang: Optional[str] = Field(
         None, max_length=255, description="Nama orang")
     keterangan: Optional[str] = Field(None, description="Keterangan/catatan")
-    document_text: Optional[str] = Field(
-        None, description="Teks dokumen untuk RAG")
     source_sheet_id: Optional[str] = Field(
         None, max_length=255, description="ID sheet sumber")
     source_sheet_name: Optional[str] = Field(
         None, max_length=255, description="Nama sheet sumber")
-    source_row: Optional[int] = Field(
-        None, ge=1, description="Nomor baris sumber")
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -52,10 +48,8 @@ class UpdateKPIRecordRequest(BaseModel):
     realisasi: Optional[str] = Field(None, max_length=100)
     nama_orang: Optional[str] = Field(None, max_length=255)
     keterangan: Optional[str] = None
-    document_text: Optional[str] = None
     source_sheet_id: Optional[str] = Field(None, max_length=255)
     source_sheet_name: Optional[str] = Field(None, max_length=255)
-    source_row: Optional[int] = Field(None, ge=1)
 
     model_config = ConfigDict(json_schema_extra={
         "example": {
@@ -135,10 +129,8 @@ class KPIRecordResponse(BaseModel):
     realisasi: Optional[str]
     nama_orang: Optional[str]
     keterangan: Optional[str]
-    document_text: Optional[str]
     source_sheet_id: Optional[str]
     source_sheet_name: Optional[str]
-    source_row: Optional[int]
     created_at: datetime
     updated_at: datetime
 
