@@ -76,7 +76,7 @@ class ChatbotRepository:
             stmt = stmt.where(Chatbot.id != exclude_id)
 
         await self.db.execute(stmt)
-        await self.db.expire_all()
+        self.db.expire_all()
 
     async def update(self, payload: ChatbotUpdate) -> Chatbot:
         for field, value in payload.model_dump(exclude_unset=True).items():

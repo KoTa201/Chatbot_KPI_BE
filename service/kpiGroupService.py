@@ -88,12 +88,14 @@ class KPIGroupService:
         self,
         page:       int,
         page_size:  int,
+        tahun:      int | None = None,
         group_type: str | None = None,
         search:     str | None = None,
     ) -> KPIGroupListResponse:
         rows, total = await self.repo.list_groups(
             page=page,
             page_size=page_size,
+            tahun=tahun,
             group_type=group_type,
             search=search,
         )

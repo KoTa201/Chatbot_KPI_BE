@@ -52,8 +52,7 @@ class KPIGroupRouter:
             summary="Daftar semua KPI Group",
             description=(
                 "Ambil seluruh KPI Group dengan pagination, filter tipe grup "
-                "('master' / 'tracker'), dan pencarian berdasarkan nama grup "
-                "atau nama sheet."
+                "('master' / 'tracker'), filter tahun, dan pencarian berdasarkan nama grup."
             ),
         )
 
@@ -114,13 +113,19 @@ class KPIGroupRouter:
                                 description="Nomor halaman"),
         page_size:  int = Query(default=10, ge=1, le=100,
                                 description="Jumlah item per halaman"),
+        tahun: Optional[int] = Query(
+            default=None,
+            ge=2000,
+            le=2100,
+            description="Filter tahun KPI Group",
+        ),
         group_type: Optional[str] = Query(
             default=None,
             description=f"Filter tipe grup: {sorted(VALID_GROUP_TYPES)}",
         ),
         search:     Optional[str] = Query(
             default=None,
-            description="Cari berdasarkan nama grup atau nama sheet",
+            description="Cari berdasarkan nama grup",
         ),
         db: AsyncSession = Depends(get_db),
     ) -> KPIGroupListResponse:
@@ -128,6 +133,7 @@ class KPIGroupRouter:
         return await self.kpi_group_controller.list_groups(
             page=page,
             page_size=page_size,
+            tahun=tahun,
             group_type=group_type,
             search=search,
         )

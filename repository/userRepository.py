@@ -7,13 +7,12 @@ Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.PasswordReset import PasswordResetORM
 from datetime import datetime, timezone
-from sqlalchemy import delete, select
 
-from model.User import UserORM
+from model.User import RoleEnum, UserORM
 from model.RevokedToken import RevokedTokenORM          # ← model baru
 
 
@@ -70,18 +69,59 @@ class AuthRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_all_users(self, limit: int = 20, offset: int = 0) -> list[UserORM]:
+    async def get_all_users(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        search: str | None = None,
+        role: RoleEnum | None = None,
+        status: bool | None = None,
+    ) -> list[UserORM]:
+        query = select(UserORM)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    UserORM.username.ilike(pattern),
+                    UserORM.full_name.ilike(pattern),
+                    UserORM.email.ilike(pattern),
+                )
+            )
+        if role is not None:
+            query = query.where(UserORM.role == role)
+        if status is not None:
+            query = query.where(UserORM.is_active == status)
+
         result = await self.db.execute(
-            select(UserORM)
+            query
             .order_by(UserORM.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
         return result.scalars().all()
 
-    async def count_all_users(self) -> int:
-        from sqlalchemy import func
-        result = await self.db.execute(select(func.count()).select_from(UserORM))
+    async def count_all_users(
+        self,
+        search: str | None = None,
+        role: RoleEnum | None = None,
+        status: bool | None = None,
+    ) -> int:
+        query = select(func.count()).select_from(UserORM)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    UserORM.username.ilike(pattern),
+                    UserORM.full_name.ilike(pattern),
+                    UserORM.email.ilike(pattern),
+                )
+            )
+        if role is not None:
+            query = query.where(UserORM.role == role)
+        if status is not None:
+            query = query.where(UserORM.is_active == status)
+
+        result = await self.db.execute(query)
         return result.scalar_one()
 
     # ------------------------------------------------------------------ #

@@ -907,11 +907,56 @@ class TestGetAllUsers:
                 "/api/v1/users?limit=5&offset=10",
                 headers={"Authorization": f"Bearer {admin_access}"},
             )
-            mock_get.assert_awaited_once_with(limit=5, offset=10)
+            mock_get.assert_awaited_once_with(
+                limit=5,
+                offset=10,
+                search=None,
+                role=None,
+                status=None,
+            )
 
         assert resp.status_code == 200
         assert resp.json()["limit"] == 5
         assert resp.json()["offset"] == 10
+
+    @pytest.mark.asyncio
+    async def test_get_all_users_with_search_role_status_filter(self, client: AsyncClient):
+        """Parameter search, role, dan status diteruskan ke service/repository."""
+        from model.User import RoleEnum
+
+        admin_access, _ = _make_admin_tokens()
+        admin_user = _make_admin()
+        users = [_make_user(role_value="hrd", full_name="Rina Marlina")]
+
+        with (
+            patch(f"{_REPO}.get_by_id",
+                  new_callable=AsyncMock, return_value=admin_user),
+            patch(f"{_REPO}.get_all_users",
+                  new_callable=AsyncMock, return_value=users) as mock_get,
+            patch(f"{_REPO}.count_all_users",
+                  new_callable=AsyncMock, return_value=1) as mock_count,
+        ):
+            resp = await client.get(
+                "/api/v1/users?search=rina&role=hrd&status=active",
+                headers={"Authorization": f"Bearer {admin_access}"},
+            )
+
+            mock_get.assert_awaited_once_with(
+                limit=20,
+                offset=0,
+                search="rina",
+                role=RoleEnum.hrd,
+                status=True,
+            )
+            mock_count.assert_awaited_once_with(
+                search="rina",
+                role=RoleEnum.hrd,
+                status=True,
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+        assert len(resp.json()["users"]) == 1
 
     @pytest.mark.asyncio
     async def test_get_all_users_forbidden_sebagai_hrd(self, client: AsyncClient):

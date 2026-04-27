@@ -339,15 +339,17 @@ class TestListChatbot:
 
         assert res.json()["total"] == 2
 
-    async def test_list_inactive_not_included(self, client: AsyncClient, db_session: AsyncSession):
-        """Chatbot dengan is_active=False tidak boleh muncul di list."""
+    async def test_list_inactive_included(self, client: AsyncClient, db_session: AsyncSession):
+        """Chatbot dengan is_active=False tetap muncul di list default."""
         await seed_chatbot(db_session, nama_chatbot="Aktif Bot")
         await seed_chatbot(db_session, nama_chatbot="Nonaktif Bot", is_active=False)
 
         res = await client.get("/api/v1/chatbots/")
 
-        assert res.json()["total"] == 1
-        assert res.json()["data"][0]["nama_chatbot"] == "Aktif Bot"
+        body = res.json()
+        assert body["total"] == 2
+        names = {item["nama_chatbot"] for item in body["data"]}
+        assert names == {"Aktif Bot", "Nonaktif Bot"}
 
     async def test_list_pagination_page_size(self, client: AsyncClient, db_session: AsyncSession):
         """page_size membatasi jumlah item per halaman."""
@@ -461,13 +463,14 @@ class TestGetChatbotById:
         assert res.status_code == 404
         assert "tidak ditemukan" in res.json()["detail"]
 
-    async def test_get_inactive_returns_404(self, client: AsyncClient, db_session: AsyncSession):
-        """Chatbot yang sudah di-soft-delete tidak bisa diakses via GET /{id}."""
+    async def test_get_inactive_returns_200(self, client: AsyncClient, db_session: AsyncSession):
+        """Chatbot nonaktif tetap bisa diakses via GET /{id}."""
         chatbot = await seed_chatbot(db_session, nama_chatbot="Nonaktif Bot", is_active=False)
 
         res = await client.get(f"/api/v1/chatbots/{chatbot.id}")
 
-        assert res.status_code == 404
+        assert res.status_code == 200
+        assert res.json()["is_active"] is False
 
     async def test_get_invalid_id_returns_422(self, client: AsyncClient):
         """ID bukan integer harus return 422."""
@@ -689,24 +692,26 @@ class TestSoftDeleteChatbot:
         assert db_chatbot is not None
         assert db_chatbot.is_active is False
 
-    async def test_soft_delete_not_accessible_via_get(self, client: AsyncClient, db_session: AsyncSession):
-        """Setelah soft delete, GET /{id} harus return 404."""
+    async def test_soft_delete_still_accessible_via_get(self, client: AsyncClient, db_session: AsyncSession):
+        """Setelah soft delete, GET /{id} tetap bisa diakses dengan status nonaktif."""
         chatbot = await seed_chatbot(db_session, nama_chatbot="Invisible Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.get(f"/api/v1/chatbots/{chatbot.id}")
 
-        assert res.status_code == 404
+        assert res.status_code == 200
+        assert res.json()["is_active"] is False
 
-    async def test_soft_delete_not_in_list(self, client: AsyncClient, db_session: AsyncSession):
-        """Setelah soft delete, chatbot tidak muncul di GET /."""
+    async def test_soft_delete_still_in_list(self, client: AsyncClient, db_session: AsyncSession):
+        """Setelah soft delete, chatbot tetap muncul di GET / dengan status nonaktif."""
         chatbot = await seed_chatbot(db_session, nama_chatbot="Hidden Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.get("/api/v1/chatbots/")
 
-        ids = [c["id"] for c in res.json()["data"]]
-        assert chatbot.id not in ids
+        data_by_id = {c["id"]: c for c in res.json()["data"]}
+        assert str(chatbot.id) in data_by_id
+        assert data_by_id[str(chatbot.id)]["is_active"] is False
 
     async def test_soft_delete_not_found_returns_404(self, client: AsyncClient):
         """Soft delete chatbot yang tidak ada harus return 404."""
@@ -714,14 +719,15 @@ class TestSoftDeleteChatbot:
 
         assert res.status_code == 404
 
-    async def test_soft_delete_twice_returns_404(self, client: AsyncClient, db_session: AsyncSession):
-        """Soft delete dua kali harus return 404 pada percobaan kedua."""
+    async def test_soft_delete_twice_returns_200(self, client: AsyncClient, db_session: AsyncSession):
+        """Soft delete dua kali bersifat idempotent dan tetap return 200."""
         chatbot = await seed_chatbot(db_session, nama_chatbot="Double Del Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.delete(f"/api/v1/chatbots/{chatbot.id}")
 
-        assert res.status_code == 404
+        assert res.status_code == 200
+        assert res.json()["success"] is True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
