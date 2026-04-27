@@ -164,11 +164,12 @@ class KPIGroupRepository:
         self,
         page:       int,
         page_size:  int,
+        tahun:      int | None = None,
         group_type: str | None = None,
         search:     str | None = None,
     ) -> tuple[list[KPIGroupORM], int]:
         """
-        List KPI Groups dengan pagination, filter tipe, dan pencarian nama.
+        List KPI Groups dengan pagination, filter tipe/tahun, dan pencarian nama grup.
 
         Returns:
             (rows, total_count)
@@ -178,12 +179,12 @@ class KPIGroupRepository:
         if group_type:
             base_query = base_query.where(KPIGroupORM.group_type == group_type)
 
+        if tahun is not None:
+            base_query = base_query.where(KPIGroupORM.tahun == tahun)
+
         if search:
             pattern = f"%{search}%"
-            base_query = base_query.where(
-                KPIGroupORM.nama_grup.ilike(pattern)
-                | KPIGroupORM.sheet_name.ilike(pattern)
-            )
+            base_query = base_query.where(KPIGroupORM.nama_grup.ilike(pattern))
 
         # Hitung total sebelum pagination
         count_result = await self.db.execute(

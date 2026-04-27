@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model.User import UserORM
+from model.User import RoleEnum, UserORM
 from schema.authSchema import (
     MessageResponse,
     UpdateUserRequest,
@@ -54,7 +54,13 @@ class UserController:
         return UserResponse.model_validate(result)
 
     async def get_all_users(
-        self, limit: int, offset: int, admin: UserORM
+        self,
+        limit: int,
+        offset: int,
+        admin: UserORM,
+        search: str | None = None,
+        role: RoleEnum | None = None,
+        user_status: str | None = None,
     ) -> dict:
         """[Admin] Daftar semua user."""
         # -- validasi input --
@@ -68,9 +74,24 @@ class UserController:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'offset' tidak boleh negatif.",
             )
+        if user_status is not None and user_status.lower() not in {"active", "inactive"}:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'status' harus 'active' atau 'inactive'.",
+            )
+
+        active_status_filter = None
+        if user_status is not None:
+            active_status_filter = user_status.lower() == "active"
 
         # -- delegasi --
-        result = await self.user_svc.get_all_users(limit=limit, offset=offset)
+        result = await self.user_svc.get_all_users(
+            limit=limit,
+            offset=offset,
+            search=search,
+            role=role,
+            status=active_status_filter,
+        )
 
         # -- validasi & mapping output --
         return {

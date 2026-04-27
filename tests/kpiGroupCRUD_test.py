@@ -257,6 +257,9 @@ async def test_list_kpi_groups_all():
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["page"] == 1
         assert call_kwargs["page_size"] == 10
+        assert call_kwargs["tahun"] is None
+        assert call_kwargs["group_type"] is None
+        assert call_kwargs["search"] is None
 
 
 @pytest.mark.asyncio
@@ -285,6 +288,7 @@ async def test_list_kpi_groups_with_filter():
         assert result.total == 1
         assert all(g.group_type == "master" for g in result.data)
         call_kwargs = service.repo.list_groups.call_args.kwargs
+        assert call_kwargs["tahun"] is None
         assert call_kwargs["group_type"] == "master"
 
 
@@ -312,7 +316,36 @@ async def test_list_kpi_groups_with_search():
 
         assert result.total == 1
         call_kwargs = service.repo.list_groups.call_args.kwargs
+        assert call_kwargs["tahun"] is None
         assert call_kwargs["search"] == "KPI Master"
+
+
+@pytest.mark.asyncio
+async def test_list_kpi_groups_with_tahun_filter():
+    """List KPI Groups dengan filter tahun."""
+    db = make_db()
+    service = KPIGroupService(db)
+
+    groups_2025 = [
+        make_kpi_group(
+            nama_grup="KPI Group 2025",
+            tahun=2025,
+        ),
+    ]
+
+    with patch.object(
+        service.repo, "list_groups",
+        new_callable=AsyncMock, return_value=(groups_2025, 1)
+    ):
+        result = await service.list_groups(
+            page=1,
+            page_size=10,
+            tahun=2025,
+        )
+
+        assert result.total == 1
+        call_kwargs = service.repo.list_groups.call_args.kwargs
+        assert call_kwargs["tahun"] == 2025
 
 
 @pytest.mark.asyncio

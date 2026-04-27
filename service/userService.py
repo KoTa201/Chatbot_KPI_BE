@@ -1,6 +1,7 @@
 
 import logging
 from uuid import UUID
+from model.User import RoleEnum
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -71,9 +72,26 @@ class UserService:
 
         return UserResponse.model_validate(self.user)
 
-    async def get_all_users(self, limit: int, offset: int) -> dict:
-        users = await self.repo.get_all_users(limit=limit, offset=offset)
-        total = await self.repo.count_all_users()
+    async def get_all_users(
+        self,
+        limit: int,
+        offset: int,
+        search: str | None = None,
+        role: RoleEnum | None = None,
+        status: bool | None = None,
+    ) -> dict:
+        users = await self.repo.get_all_users(
+            limit=limit,
+            offset=offset,
+            search=search,
+            role=role,
+            status=status,
+        )
+        total = await self.repo.count_all_users(
+            search=search,
+            role=role,
+            status=status,
+        )
         return {
             "total": total,
             "limit": limit,

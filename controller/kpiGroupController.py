@@ -38,12 +38,14 @@ class KPIGroupController:
         self,
         page:       int,
         page_size:  int,
+        tahun:      int | None,
         group_type: str | None,
         search:     str | None,
     ) -> KPIGroupListResponse:
         return await self.service.list_groups(
             page=page,
             page_size=page_size,
+            tahun=tahun,
             group_type=group_type,
             search=search,
         )
