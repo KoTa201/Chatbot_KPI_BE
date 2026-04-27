@@ -12,8 +12,11 @@ import logging
 import re
 
 from schema.clarificationSchema import AmbiguityAssessmentResult
-from service.llmService import GitHubModelsService
+from service.llmService import LLMService
 from template.promptTemplate import build_ambiguity_assessment_prompt
+from config import get_settings
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ class AmbiguityDetectorService:
     """Service untuk deteksi ambiguitas query pengguna menggunakan LLM."""
 
     def __init__(self):
-        self.llm = GitHubModelsService()
+        self.llm = LLMService()
         # Tie-breaking threshold: score < 0.55 = definitely not ambiguous
         # score >= 0.65 = definitely ambiguous
         # 0.55-0.65 = borderline, treated as NOT ambiguous (prefer direct answer)
@@ -66,20 +69,21 @@ class AmbiguityDetectorService:
     ) -> AmbiguityAssessmentResult:
         """
         Deteksi ambiguitas query pengguna menggunakan LLM.
-        
+
         Args:
             user_query: Pertanyaan dari pengguna
             user_role: Role pengguna (Owner, HRD, Karyawan)
-        
+
         Returns:
             AmbiguityAssessmentResult dengan score, tipe, dan interpretasi
         """
-        logger.info(f"[AmbiguityDetector] Detecting ambiguity for query: {user_query}")
+        logger.info(
+            f"[AmbiguityDetector] Detecting ambiguity for query: {user_query}")
 
         try:
             # Single-stage: langsung call LLM untuk assessment
             result = await self._assess_ambiguity_with_llm(user_query, user_role)
-            
+
             # Apply tie-breaking rule
             if self.TIEBREAK_LOW <= result.ambiguity_score < self.TIEBREAK_HIGH:
                 logger.info(
@@ -87,7 +91,7 @@ class AmbiguityDetectorService:
                     f"({result.ambiguity_score}), applying tie-breaking rule (treat as NOT ambiguous)"
                 )
                 result.is_ambiguous = False
-            
+
             logger.info(
                 f"[AmbiguityDetector] Ambiguity assessment: "
                 f"score={result.ambiguity_score}, is_ambiguous={result.is_ambiguous}, "
@@ -116,11 +120,11 @@ class AmbiguityDetectorService:
     ) -> AmbiguityAssessmentResult:
         """
         Call LLM untuk menilai ambiguitas query.
-        
+
         Args:
             user_query: Pertanyaan dari pengguna
             user_role: Role pengguna (Owner, HRD, Karyawan)
-        
+
         Returns:
             AmbiguityAssessmentResult dengan semua field dari LLM
         """
@@ -133,6 +137,7 @@ class AmbiguityDetectorService:
                 prompt=prompt,
                 temperature=0.1,  # rendah untuk keputusan yang konsisten
                 max_tokens=500,
+                model=settings.LLM_MODEL_DISAMBIGUATION,
             )
 
             # Parse JSON response
@@ -142,7 +147,7 @@ class AmbiguityDetectorService:
             ambiguity_score = float(result_dict.get("ambiguity_score", 0.0))
             is_ambiguous = ambiguity_score >= self.AMBIGUITY_THRESHOLD
             ambiguity_type = result_dict.get("ambiguity_type", "none")
-            
+
             # Handle possible_interpretations: could be list of strings or list of dicts
             interpretations = result_dict.get("possible_interpretations", [])
             if interpretations and isinstance(interpretations[0], str):
@@ -152,10 +157,12 @@ class AmbiguityDetectorService:
                 ]
             else:
                 possible_interpretations = interpretations or []
-            
-            suggested_question = result_dict.get("suggested_clarifying_question")
+
+            suggested_question = result_dict.get(
+                "suggested_clarifying_question")
             # Handle both "answer_options" and "suggested_options" field names
-            answer_options = result_dict.get("answer_options") or result_dict.get("suggested_options", [])
+            answer_options = result_dict.get(
+                "answer_options") or result_dict.get("suggested_options", [])
 
             return AmbiguityAssessmentResult(
                 ambiguity_score=ambiguity_score,
@@ -174,5 +181,6 @@ class AmbiguityDetectorService:
             raise RuntimeError(f"LLM response parsing error: {e}")
 
         except Exception as e:
-            logger.error(f"[AmbiguityDetector] LLM API error: {type(e).__name__}: {e}")
+            logger.error(
+                f"[AmbiguityDetector] LLM API error: {type(e).__name__}: {e}")
             raise RuntimeError(f"LLM API error: {e}")

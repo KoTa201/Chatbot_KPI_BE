@@ -1,5 +1,5 @@
 """
-Prompt Service — membangun semua prompt yang dikirim ke GitHub Models API.
+Prompt Service — membangun semua prompt yang dikirim ke LLM API.
 Mengimplementasikan prinsip Schema First, Few-Shot, dan Anti-Hallucination
 sesuai PRD Section 10.
 """
@@ -354,7 +354,7 @@ Interpretasi yang teridentifikasi:
 
 Buat SATU pertanyaan klarifikasi dalam Bahasa Indonesia yang:
 1. Langsung merujuk pada aspek ambigu yang spesifik
-2. Menawarkan 2-4 pilihan konkret (BUKAN pertanyaan ya/tidak atau terbuka)
+2. Menawarkan 3-4 pilihan konkret (BUKAN pertanyaan ya/tidak atau terbuka)
 3. Singkat (maksimal 2 kalimat)
 4. Menggunakan bahasa yang dipahami {user_role}
 5. Menggunakan terminologi domain KPI (periode, target, realisasi, divisi, dll.)

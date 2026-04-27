@@ -104,11 +104,11 @@ class ChatRouter:
         """
         Endpoint utama chatbot. Menjalankan pipeline 5 stage:
 
-        1. **NL-to-SQL**: Pertanyaan bahasa Indonesia dikonversi ke SQL via GitHub Models.
+        1. **NL-to-SQL**: Pertanyaan bahasa Indonesia dikonversi ke SQL via LLM.
         2. **SQLWireguard**: SQL divalidasi keamanannya (whitelist, RLS, injection detection).
         3. **SQL Execution**: SQL yang lolos dieksekusi ke PostgreSQL (read-only).
         4. **Graphic Generation (Opsional)**: Jika user meminta visualisasi, sistem membuat grafik (bar/pie/donut).
-        5. **Result Analysis**: Hasil query dianalisis oleh GitHub Models menjadi narasi Bahasa Indonesia.
+        5. **Result Analysis**: Hasil query dianalisis oleh LLM menjadi narasi Bahasa Indonesia.
 
         **Role access:**
         - `Karyawan`: Hanya melihat data KPI milik sendiri (RLS enforced).

@@ -1,15 +1,17 @@
-"""Service untuk komunikasi ke GitHub Models (NL-to-SQL dan analisis hasil)."""
+"""Service untuk komunikasi ke LLM (NL-to-SQL dan analisis hasil)."""
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 import httpx
 from fastapi import HTTPException, status
-from openai import AsyncOpenAI, APITimeoutError, APIStatusError
+from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, APIStatusError
 from config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -18,18 +20,23 @@ class VisualizationDecision:
     chart_type: str | None = None
 
 
-class GitHubModelsService:
-    """Wrapper GitHub Models API dengan alur request yang eksplisit."""
+class LLMService:
+    """Wrapper LLM API dengan alur request yang eksplisit."""
 
     def __init__(self, timeout_seconds: float = 20.0, max_retries: int = 1):
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.retry_delay_seconds = 1
-        self.api_key = (settings.GITHUB_MODELS_API_KEY or "").strip()
+        self.api_key = (settings.LLM_API_KEY or "").strip()
         self.base_url = (
-            settings.GITHUB_MODELS_BASE_URL or "").strip().rstrip("/")
-        # Inisialisasi client OpenAI (GitHub Models kompatibel)
-        self.client = AsyncOpenAI(base_url=self.base_url, api_key=self.api_key)
+            settings.LLM_BASE_URL or "").strip().rstrip("/")
+        # Inisialisasi client OpenAI (LLM kompatibel)
+        self.client = AsyncOpenAI(
+            base_url=self.base_url if self.base_url else None,
+            api_key=self.api_key,
+            timeout=self.timeout_seconds,
+            max_retries=0,
+        )
 
     async def call_model(
         self,
@@ -46,13 +53,13 @@ class GitHubModelsService:
             prompt: Pertanyaan/prompt untuk LLM
             temperature: Tingkat kreativitas (0.0-1.0)
             max_tokens: Maksimal token output
-            model: Model yang digunakan (default: GITHUB_MODELS_MODEL_ANALYSIS)
+            model: Model yang digunakan (default: LLM_MODEL_ANALYSIS)
 
         Returns:
             Respons text dari LLM
         """
         if model is None:
-            model = settings.GITHUB_MODELS_MODEL_ANALYSIS
+            model = settings.LLM_MODEL_ANALYSIS
 
         return await self._call_llm(
             model=model,
@@ -67,12 +74,14 @@ class GitHubModelsService:
         Temperature rendah (0.1) untuk konsistensi output SQL.
         """
         raw = await self._call_llm(
-            model=settings.GITHUB_MODELS_MODEL_NL_TO_SQL,
+            model=settings.LLM_MODEL_NL_TO_SQL,
             prompt=prompt,
             temperature=0.1,
             max_output_tokens=1024,
             stop_sequences=["```"],
         )
+
+        logger.debug("Raw SQL output from LLM: %s", raw)
         return self._clean_sql_output(raw)
 
     async def analyze_result(self, prompt: str) -> str:
@@ -81,7 +90,7 @@ class GitHubModelsService:
         Temperature lebih tinggi (0.4) untuk narasi yang natural.
         """
         return await self._call_llm(
-            model=settings.GITHUB_MODELS_MODEL_ANALYSIS,
+            model=settings.LLM_MODEL_ANALYSIS,
             prompt=prompt,
             temperature=0.4,
             max_output_tokens=2048,
@@ -95,7 +104,7 @@ class GitHubModelsService:
 
         try:
             raw = await self._call_llm(
-                model=settings.GITHUB_MODELS_MODEL_ANALYSIS,
+                model=settings.LLM_MODEL_GRAPHIC_CLASSIFIER,
                 prompt=prompt,
                 temperature=0.0,
                 max_output_tokens=100,
@@ -123,15 +132,8 @@ class GitHubModelsService:
         return payload
 
     async def _post_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
-        try:
-            response = await self.client.chat.completions.create(**payload)
-            return response.model_dump()  # pydantic v2; atau .dict() jika v1
-        except Exception as error:
-            raise httpx.HTTPStatusError(
-                message=str(error),
-                request=None,
-                response=None,
-            ) from error
+        response = await self.client.chat.completions.create(**payload)
+        return response.model_dump()  # pydantic v2; atau .dict() jika v1
 
     async def _request_with_retry(
         self,
@@ -146,10 +148,19 @@ class GitHubModelsService:
             except APITimeoutError as error:
                 is_last_attempt = attempt >= self.max_retries
                 if is_last_attempt:
-                    raise HTTPException(
-                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
-                    ) from error
+                    logger.error(
+                        "LLM request timed out after %.1f seconds: %s",
+                        self.timeout_seconds,
+                        error,
+                    )
+                    self._raise_model_not_available()
+                await asyncio.sleep(self.retry_delay_seconds)
+
+            except APIConnectionError as error:
+                is_last_attempt = attempt >= self.max_retries
+                if is_last_attempt:
+                    logger.error("LLM connection failed: %s", error)
+                    self._raise_model_not_available()
                 await asyncio.sleep(self.retry_delay_seconds)
 
             except APIStatusError as error:
@@ -166,6 +177,24 @@ class GitHubModelsService:
                     detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
                 ) from error
 
+            except httpx.TimeoutException as error:
+                is_last_attempt = attempt >= self.max_retries
+                if is_last_attempt:
+                    logger.error(
+                        "LLM HTTP timeout after %.1f seconds: %s",
+                        self.timeout_seconds,
+                        error,
+                    )
+                    self._raise_model_not_available()
+                await asyncio.sleep(self.retry_delay_seconds)
+
+            except httpx.HTTPError as error:
+                is_last_attempt = attempt >= self.max_retries
+                if is_last_attempt:
+                    logger.error("LLM HTTP request failed: %s", error)
+                    self._raise_model_not_available()
+                await asyncio.sleep(self.retry_delay_seconds)
+
     async def _call_llm(
         self,
         model: str,
@@ -175,8 +204,9 @@ class GitHubModelsService:
         stop_sequences: list[str] | None = None,
     ) -> str:
         try:
+            self._ensure_runtime_config(model)
             payload = self._build_payload(
-                model=settings.GITHUB_MODELS_MODEL_NL_TO_SQL,
+                model=model,
                 prompt=prompt,
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
@@ -191,6 +221,20 @@ class GitHubModelsService:
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Respons AI tidak sesuai format yang diharapkan: {str(error)}",
             ) from error
+
+    def _ensure_runtime_config(self, model: str) -> None:
+        if self.api_key and self.base_url and model:
+            return
+        logger.error(
+            "LLM config incomplete (base_url_set=%s, api_key_set=%s, model_set=%s)",
+            bool(self.base_url),
+            bool(self.api_key),
+            bool(model),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Konfigurasi layanan AI belum lengkap. Hubungi admin.",
+        )
 
     @staticmethod
     def _raise_model_not_available() -> None:

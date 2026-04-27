@@ -20,19 +20,6 @@ class SQLWireguardService:
 
     def __init__(self):
 
-        # Whitelist and blacklist rules
-        self.allowed_tables = frozenset(
-            {
-                "kpi_master_records",
-                "kpi_tracker_records",
-                "kpi_groups",
-                "users",
-                # Backward compatibility
-                "kpi_master",
-                "kpi_tracker",
-                "v_kpi_lengkap",
-            }
-        )
         self.forbidden_keywords = frozenset(
             {
                 "INSERT",
@@ -111,7 +98,6 @@ class SQLWireguardService:
         checks = (
             self._check_select_only,
             self._check_forbidden_keywords,
-            self._check_table_whitelist,
             self._check_column_blacklist,
             self._check_injection_patterns,
             self._check_subquery_depth,
@@ -158,21 +144,6 @@ class SQLWireguardService:
                 return ValidationResult(
                     is_valid=False,
                     reason=f"W-02: Phrase terlarang ditemukan: '{pattern}'.",
-                    sanitized_sql=None,
-                )
-
-        return ValidationResult(is_valid=True, reason=None, sanitized_sql=sql)
-
-    # -- Rule W-03 -------------------------------------------------------------
-
-    def _check_table_whitelist(self, sql: str) -> "ValidationResult":
-        tables_in_query = set(self.table_pattern.findall(sql))
-
-        for table in tables_in_query:
-            if table.lower() not in self.allowed_tables:
-                return ValidationResult(
-                    is_valid=False,
-                    reason=f"W-03: Tabel '{table}' tidak diizinkan untuk diakses.",
                     sanitized_sql=None,
                 )
 
