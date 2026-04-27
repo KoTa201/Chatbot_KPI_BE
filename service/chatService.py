@@ -1,11 +1,11 @@
 """
 Chat Service — Orchestrator Pipeline Structured RAG.
 Menjalankan stage secara berurutan:
-    Stage 1: NL-to-SQL (GitHub Models)
+    Stage 1: NL-to-SQL (LLM)
   Stage 2: SQLWireguard Validation
   Stage 3: SQL Execution (PostgreSQL)
   Stage 4: Graphic Generation (opsional, jika diminta user)
-    Stage 5: Result Analysis (GitHub Models)
+    Stage 5: Result Analysis (LLM)
 """
 import logging
 import time
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from config import get_settings
-from service.llmService import GitHubModelsService, VisualizationDecision
+from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlWireguardService import SQLWireguardService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
@@ -28,7 +28,7 @@ from schema.chatSchema import ChatResponse, PipelineStageInfo
 
 settings = get_settings()
 
-llm = GitHubModelsService()
+llm = LLMService()
 wireguard = SQLWireguardService()
 graphic_service = GraphicSeervice()
 
@@ -67,11 +67,11 @@ class ChatService:
         Entry point utama. Jalankan pipeline dengan clarification mechanism:
 
         [STAGE 0 - BARU] Ambiguity Detection & Clarification
-        [STAGE 1] NL-to-SQL (GitHub Models)
+        [STAGE 1] NL-to-SQL (LLM)
         [STAGE 2] SQLWireguard Validation
         [STAGE 3] SQL Execution (PostgreSQL)
         [STAGE 4] Graphic Generation (opsional)
-        [STAGE 5] Result Analysis (GitHub Models)
+        [STAGE 5] Result Analysis (LLM)
         """
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
@@ -132,14 +132,25 @@ class ChatService:
                 SessionContextManager.get_session_context(session_id)
 
             # STAGE 1 — NL-TO-SQL
-            generated_sql, visualization_decision = await self._run_nl_to_sql_stage(
-                stages=stages,
-                user_message=user_message,
-                user_id=user_id,
-                user_role=user_role,
-                user_divisi=user_divisi,
-                pipeline=pipeline,
-            )
+            try:
+                generated_sql, visualization_decision = await self._run_nl_to_sql_stage(
+                    stages=stages,
+                    user_message=user_message,
+                    user_id=user_id,
+                    user_role=user_role,
+                    user_divisi=user_divisi,
+                    pipeline=pipeline,
+                )
+            except HTTPException as error:
+                if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                    pipeline["execution_status"] = "degraded"
+                    await self._write_audit(pipeline)
+                    return ChatResponse(
+                        session_id=session_id,
+                        message="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
+                        pipeline_stages=stages,
+                    )
+                raise
 
             # STAGE 2 — SQL VALIDATION
             validation = self._run_sql_validation_stage(
@@ -281,27 +292,38 @@ class ChatService:
         pipeline: dict[str, Any],
     ) -> tuple[str, VisualizationDecision]:
         stage = self._start_stage(stages, "nl_to_sql")
-        nl_prompt = build_nl_to_sql_prompt(
-            user_query=user_message,
-            user_id=user_id,
-            user_role=user_role,
-            divisi=user_divisi,
-        )
-        generated_sql = await llm.generate_sql(nl_prompt)
-
-        n2_prompt = build_graphic_generation_prompt(user_query=user_message)
-        visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
-        pipeline["generated_sql"] = generated_sql
-
-        if visualization_decision.is_visualize:
-            detail = (
-                "SQL berhasil digenerate. Permintaan visualisasi terdeteksi "
-                f"(chart: {visualization_decision.chart_type or 'bar'})."
+        try:
+            nl_prompt = build_nl_to_sql_prompt(
+                user_query=user_message,
+                user_id=user_id,
+                user_role=user_role,
+                divisi=user_divisi,
             )
-        else:
-            detail = "SQL berhasil digenerate."
-        self._complete_stage(stage, "success", detail)
-        return generated_sql, visualization_decision
+            generated_sql = await llm.generate_sql(nl_prompt)
+
+            n2_prompt = build_graphic_generation_prompt(user_query=user_message)
+            visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
+            pipeline["generated_sql"] = generated_sql
+
+            if visualization_decision.is_visualize:
+                detail = (
+                    "SQL berhasil digenerate. Permintaan visualisasi terdeteksi "
+                    f"(chart: {visualization_decision.chart_type or 'bar'})."
+                )
+            else:
+                detail = "SQL berhasil digenerate."
+            self._complete_stage(stage, "success", detail)
+            return generated_sql, visualization_decision
+        except HTTPException as error:
+            if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                self._complete_stage(
+                    stage,
+                    "degraded",
+                    "SQL tidak dapat digenerate karena layanan AI sedang tidak tersedia.",
+                )
+            else:
+                self._complete_stage(stage, "failed", "Gagal melakukan proses NL-to-SQL.")
+            raise
 
     def _run_sql_validation_stage(
         self,
@@ -385,7 +407,7 @@ class ChatService:
             )
             return (
                 "Data berhasil diambil, namun analisis AI belum tersedia "
-                "karena kuota/rate limit GitHub Models tercapai. "
+                "karena kuota/rate limit LLM tercapai."
                 "Silakan coba lagi nanti."
             )
 

@@ -22,23 +22,24 @@ class Settings:
     SMTP_PORT: int = int(os.getenv("SMTP_PORT") or 587)
     SMTP_USER: str = os.getenv("SMTP_USER")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD")
-    # GitHub Models (primary LLM provider)
-    GITHUB_MODELS_API_KEY: str = (
-        os.getenv("GITHUB_MODELS_API_KEY")
-        or os.getenv("GITHUB_TOKEN")
-        or os.getenv("GH_TOKEN")
+    # LLM Configuration
+    LLM_API_KEY: str = (
+        os.getenv("LLM_MODEL_API_KEY")
     )
-    GITHUB_MODELS_BASE_URL: str = (
-        os.getenv("GITHUB_MODELS_BASE_URL")
-        or "https://models.github.ai/inference"
+    LLM_BASE_URL: str = (
+        os.getenv("LLM_MODEL_BASE_URl")
     )
-    GITHUB_MODELS_MODEL_NL_TO_SQL: str = (
-        os.getenv("GITHUB_MODELS_MODEL_NL_TO_SQL")
-        or "openai/gpt-4o"
+    LLM_MODEL_NL_TO_SQL: str = (
+        os.getenv("LLM_MODEL_NL_TO_SQL")
     )
-    GITHUB_MODELS_MODEL_ANALYSIS: str = (
-        os.getenv("GITHUB_MODELS_MODEL_ANALYSIS")
-        or "openai/gpt-4o"
+    LLM_MODEL_ANALYSIS: str = (
+        os.getenv("LLM_MODEL_ANALYSIS")
+    )
+    LLM_MODEL_GRAPHIC_CLASSIFIER: str = (
+        os.getenv("LLM_MODEL_GRAPHIC_CLASSIFIER")
+    )
+    LLM_MODEL_DISAMBIGUATION: str = (
+        os.getenv("LLM_MODEL_DISAMBIGUATION")
     )
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE") or 30)
     SQL_MAX_LIMIT: int = int(os.getenv("SQL_MAX_LIMIT") or 5000)

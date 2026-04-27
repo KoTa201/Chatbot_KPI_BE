@@ -319,3 +319,34 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
         )
 
     assert error_info.value.status_code == status.HTTP_408_REQUEST_TIMEOUT
+
+
+@pytest.mark.asyncio
+async def test_process_query_returns_fallback_message_when_llm_unavailable(monkeypatch):
+    _patch_clarification_service(monkeypatch, clarification_response=None)
+
+    monkeypatch.setattr(
+        chat_service_module.llm,
+        "generate_sql",
+        AsyncMock(
+            side_effect=HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Layanan AI sementara tidak tersedia.",
+            )
+        ),
+    )
+
+    service = _create_chat_service(monkeypatch)
+
+    response = await service.process_query(
+        user_message="Tampilkan KPI bulan ini",
+        user_id="user-7",
+        user_role="Owner",
+        user_divisi=None,
+        session_id="sess-llm-down",
+    )
+
+    assert "sementara tidak tersedia" in response.message.lower()
+    nl_to_sql_stage = _stage_by_name(response, "nl_to_sql")
+    assert nl_to_sql_stage is not None
+    assert nl_to_sql_stage.status == "degraded"

@@ -16,7 +16,7 @@ from service.ambiguityDetectorService import AmbiguityDetectorService
 from service.clarificationQuestionGeneratorService import (
     ClarificationQuestionGeneratorService,
 )
-from service.llmService import GitHubModelsService
+from service.llmService import LLMService
 from repository.clarificationRepository import ClarificationRepository
 from template.promptTemplate import build_query_disambiguation_prompt
 from config import get_settings
@@ -33,7 +33,7 @@ class ClarificationService:
         self.db = db
         self.ambiguity_detector = AmbiguityDetectorService()
         self.question_generator = ClarificationQuestionGeneratorService()
-        self.llm = GitHubModelsService()
+        self.llm = LLMService()
         self.repo = ClarificationRepository(db)
 
     async def process_user_query(
@@ -181,7 +181,7 @@ class ClarificationService:
                 prompt=prompt,
                 temperature=0.2,
                 max_output_tokens=200,
-                model=settings.GITHUB_MODELS_MODEL_ANALYSIS,
+                model=settings.LLM_MODEL_DISAMBIGUATION,
             )
 
             # Response adalah langsung disambiguated query (bukan JSON)

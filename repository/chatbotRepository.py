@@ -48,7 +48,10 @@ class ChatbotRepository:
         total = count_result.scalar()
 
         result = await self.db.execute(
-            query.order_by(Chatbot.created_at.desc()).offset(skip).limit(limit)
+            query.order_by(Chatbot.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .execution_options(populate_existing=True)
         )
         return result.scalars().all(), total
 
@@ -73,6 +76,7 @@ class ChatbotRepository:
             stmt = stmt.where(Chatbot.id != exclude_id)
 
         await self.db.execute(stmt)
+        await self.db.expire_all()
 
     async def update(self, payload: ChatbotUpdate) -> Chatbot:
         for field, value in payload.model_dump(exclude_unset=True).items():

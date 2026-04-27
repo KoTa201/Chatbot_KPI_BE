@@ -74,3 +74,4 @@ ehthumbs.db
 # IDE specific
 *.sublime-project
 *.sublime-workspace
+.blackboxcli/

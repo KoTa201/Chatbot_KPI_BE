@@ -30,7 +30,7 @@ class PipelineStageInfo(BaseModel):
 
 class ChatResponse(BaseModel):
     session_id: str
-    message: str                        # Jawaban naratif dari GitHub Models
+    message: str                        # Jawaban naratif dari LLM
     # Jika ada pertanyaan klarifikasi
     clarification_message_answer_options: List[str] | None = None
     generated_sql: str | None = None    # Hanya ditampilkan jika show_sql=True

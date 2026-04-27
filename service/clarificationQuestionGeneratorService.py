@@ -8,8 +8,11 @@ import logging
 from typing import Optional
 
 from schema.clarificationSchema import ClarifyingQuestionData
-from service.llmService import GitHubModelsService
+from service.llmService import LLMService
 from template.promptTemplate import build_clarifying_question_prompt
+from config import get_settings
+
+settings = get_settings()
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +21,7 @@ class ClarificationQuestionGeneratorService:
     """Service untuk generate pertanyaan klarifikasi yang tepat sasaran."""
 
     def __init__(self):
-        self.llm = GitHubModelsService()
+        self.llm = LLMService()
 
     async def generate_clarifying_question(
         self,
@@ -31,7 +34,7 @@ class ClarificationQuestionGeneratorService:
     ) -> ClarifyingQuestionData:
         """
         Generate pertanyaan klarifikasi yang spesifik.
-        
+
         Jika suggested_question sudah ada (dari rule-based), gunakan itu.
         Jika tidak, panggil LLM untuk generate.
         """
@@ -73,6 +76,7 @@ class ClarificationQuestionGeneratorService:
                 prompt=prompt,
                 temperature=0.3,
                 max_tokens=300,
+                model=settings.LLM_MODEL_DISAMBIGUATION,
             )
 
             # Parse JSON response
