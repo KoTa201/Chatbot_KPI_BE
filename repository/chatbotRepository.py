@@ -16,9 +16,7 @@ class ChatbotRepository:
 
     async def get_by_id(self, chatbot_id: UUID) -> Optional[Chatbot]:
         result = await self.db.execute(
-            select(Chatbot)
-            .where((Chatbot.id == chatbot_id) & (Chatbot.is_active == True))
-            .execution_options(populate_existing=True)
+            select(Chatbot).where(Chatbot.id == chatbot_id)
         )
         self.chatbot = result.scalars().first()
         return self.chatbot
@@ -34,7 +32,7 @@ class ChatbotRepository:
         return self.chatbot
 
     async def get_all(self, skip, limit, otoritas=None, search=None):
-        query = select(Chatbot).where(Chatbot.is_active == True)
+        query = select(Chatbot)
 
         if otoritas:
             query = query.where(Chatbot.otoritas == otoritas)
