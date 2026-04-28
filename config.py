@@ -45,6 +45,11 @@ class Settings:
     SQL_MAX_LIMIT: int = int(os.getenv("SQL_MAX_LIMIT") or 5000)
     SQL_MAX_SUBQUERY_DEPTH: int = int(os.getenv("SQL_MAX_SUBQUERY_DEPTH") or 3)
     SQL_EXECUTION_TIMEOUT: int = int(os.getenv("SQL_EXECUTION_TIMEOUT") or 30)
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    CORS_ORIGIN_REGEX: str = os.getenv(
+        "CORS_ORIGIN_REGEX",
+        r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    )
 
 
 settings = Settings()

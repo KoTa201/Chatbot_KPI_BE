@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import model
 from databaseConfig import create_tables
+from config import settings
 from router import (
     kpiTrackerRouter as ingestion,
     userRouter as users,
@@ -32,9 +33,12 @@ app = FastAPI(
 
 app.add_middleware(JWTMiddleware)
 
+cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=cors_origins,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

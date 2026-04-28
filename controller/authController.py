@@ -45,7 +45,7 @@ class AuthController:
     def __init__(self, db: AsyncSession):
         self.db: AsyncSession = db
         self.repo: AuthRepository = AuthRepository(db)
-        self.svc: AuthService = AuthService()
+        self.svc: AuthService = AuthService(db)
         self.user_svc: UserService = UserService(db)
 
     # ------------------------------------------------------------------ #
@@ -201,6 +201,7 @@ class AuthController:
         result = await self.svc.change_password(
             payload=payload,
             current_user=current_user,
+            repo=self.repo,
         )
 
         # -- mapping output --

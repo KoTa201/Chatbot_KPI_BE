@@ -55,16 +55,26 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 class AuthService:
 
-    def __init__(self):
-        self.repo: AuthRepository = AuthRepository(Depends(get_db))
+    def __init__(self, db: AsyncSession | None = None):
+        self.repo: AuthRepository | None = AuthRepository(db) if db else None
         self.secret_key: str = settings.SECRET_KEY
         self.refresh_secret_key: str = settings.REFRESH_SECRET_KEY
         self.reset_secret_key: str = settings.RESET_SECRET_KEY
         self.access_token_expire_minutes: int = settings.ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days: int = settings.REFRESH_TOKEN_EXPIRE_DAYS
 
-    async def _get_user_or_404(self, user_id: UUID) -> UserORM:
-        user = await self.repo.get_by_id(user_id)
+    def _get_repo(self, repo: AuthRepository | None = None) -> AuthRepository:
+        if repo is not None:
+            return repo
+        if self.repo is None:
+            raise RuntimeError("AuthService repo belum diinisialisasi")
+        return self.repo
+
+    async def _get_user_or_404(
+        self, user_id: UUID, repo: AuthRepository | None = None
+    ) -> UserORM:
+        repo = self._get_repo(repo)
+        user = await repo.get_by_id(user_id)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -313,7 +323,10 @@ class AuthService:
         return user
 
     async def change_password(
-        self, payload: ChangePasswordRequest, current_user: UserORM
+        self,
+        payload: ChangePasswordRequest,
+        current_user: UserORM,
+        repo: AuthRepository | None = None,
     ) -> MessageResponse:
         if not self.verify_password(payload.old_password, current_user.hashed_password):
             raise HTTPException(
@@ -327,7 +340,8 @@ class AuthService:
             )
 
         current_user.hashed_password = self.hash_password(payload.new_password)
-        await self.repo.save(current_user)
+        repo = self._get_repo(repo)
+        await repo.save(current_user)
         return MessageResponse(message="Password berhasil diubah.")
 
     async def request_password_reset(self, email: str, repo: AuthRepository) -> MessageResponse:
