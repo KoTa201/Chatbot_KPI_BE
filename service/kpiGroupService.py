@@ -147,6 +147,8 @@ class KPIGroupService:
                 nama_grup = nama_grup or sheet_url_str
                 sheet_id = sheet_id or ""
 
+        is_scheduled = False if payload.group_type == "master" else payload.is_scheduled
+
         group = await self.repo.get_or_create(
             sheet_id=sheet_id,
             group_type=payload.group_type,
@@ -154,7 +156,7 @@ class KPIGroupService:
             sheet_name=payload.sheet_name,
             nama_grup=nama_grup,
             tahun=payload.tahun,
-            is_scheduled=payload.is_scheduled,
+            is_scheduled=is_scheduled,
             is_active=payload.is_active,
         )
         await self.db.commit()
@@ -181,6 +183,9 @@ class KPIGroupService:
             )
 
         update_fields = payload.model_dump(exclude_none=True)
+
+        if existing.group_type == "master" and "is_scheduled" in update_fields:
+            update_fields["is_scheduled"] = False
 
         if "sheet_url" in update_fields:
             update_fields["sheet_url"] = str(update_fields["sheet_url"])
