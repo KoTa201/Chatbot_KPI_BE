@@ -101,6 +101,8 @@ class KPIMasterIngestionService:
             # tetap terekam dengan status 'running' (detectable sebagai hung).
             log = await self.log_repo.create(
                 kpi_group_id=group_id,
+                source_type="master",
+                group_name=group.nama_grup,
             )
             log_id = log.id
             logger.info(
@@ -227,7 +229,11 @@ class KPIMasterIngestionService:
                 f"[update_and_reingest] Deleted {deleted_count} old records for group_id={group_id}"
             )
 
-            log = await self.log_repo.create(kpi_group_id=group_id)
+            log = await self.log_repo.create(
+                kpi_group_id=group_id,
+                source_type="master",
+                group_name=f"{sheet_name} Master {effective_tahun}",
+            )
             log_id = log.id
 
             records, errors = self._parse(

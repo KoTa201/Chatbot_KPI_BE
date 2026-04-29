@@ -525,6 +525,50 @@ async def test_update_kpi_group_sheet_url_triggers_re_ingestion_master():
 
         # Verify re-ingestion triggered
         assert str(result.sheet_url) == new_sheet_url
+        mock_ingest_svc.update_and_reingest.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_kpi_group_tahun_triggers_re_ingestion_master():
+    """Update tahun pada master group triggers KPI Master re-ingestion."""
+    db = make_db()
+    service = KPIGroupService(db)
+
+    original_group = make_kpi_group(
+        group_type="master",
+        sheet_url=SHEET_URL,
+        tahun=TAHUN,
+    )
+    updated_group = make_kpi_group(
+        group_type="master",
+        sheet_url=SHEET_URL,
+        tahun=2026,
+    )
+
+    payload = KPIGroupUpdate(
+        tahun=2026,
+    )
+
+    with (
+        patch.object(
+            service.repo, "get_by_id",
+            new_callable=AsyncMock, return_value=original_group
+        ),
+        patch.object(
+            service.repo, "update",
+            new_callable=AsyncMock, return_value=updated_group
+        ),
+        patch(
+            "service.kpiGroupService.KPIMasterIngestionService"
+        ) as mock_ingest_class,
+    ):
+        mock_ingest_svc = AsyncMock()
+        mock_ingest_class.return_value = mock_ingest_svc
+
+        result = await service.update_group(GROUP_ID, payload)
+
+        assert result.tahun == 2026
+        mock_ingest_svc.update_and_reingest.assert_awaited_once()
 
 
 @pytest.mark.asyncio

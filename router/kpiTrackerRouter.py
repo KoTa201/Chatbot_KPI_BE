@@ -3,6 +3,7 @@ router/ingestionRouter.py
 Class-based router untuk ingestion endpoints.
 """
 
+from datetime import date
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -95,6 +96,9 @@ class IngestionRouter:
         group_type: Optional[Literal["tracker", "master"]
                              ] = Query(default=None),
         source_type: Optional[Literal["kpi_tracker", "kpi_master"]] = Query(default=None),
+        status: Optional[Literal["success", "failed", "partial"]] = Query(default=None),
+        start_date: Optional[date] = Query(default=None, description="Filter dari tanggal (YYYY-MM-DD)"),
+        end_date: Optional[date] = Query(default=None, description="Filter sampai tanggal (YYYY-MM-DD)"),
         db: AsyncSession = Depends(get_db),
     ):
         effective_group_type = group_type

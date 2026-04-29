@@ -74,7 +74,6 @@ class KPIGroupService:
             sheet_id=group.sheet_id,
             sheet_name=group.sheet_name,
             tahun=group.tahun,
-            is_scheduled=group.is_scheduled,
             is_active=group.is_active,
             created_at=group.created_at,
             updated_at=group.updated_at,
@@ -154,7 +153,6 @@ class KPIGroupService:
             sheet_name=payload.sheet_name,
             nama_grup=nama_grup,
             tahun=payload.tahun,
-            is_scheduled=payload.is_scheduled,
             is_active=payload.is_active,
         )
         await self.db.commit()
@@ -169,8 +167,8 @@ class KPIGroupService:
         payload:  KPIGroupUpdate,
     ) -> KPIGroupResponse:
         """
-        Partial update. Jika sheet_url berubah → jalankan ulang ingestion
-        sesuai group_type setelah perubahan URL tersimpan ke DB.
+        Partial update. Jika sheet_url atau tahun berubah pada KPI Master,
+        jalankan ulang ingestion setelah perubahan tersimpan ke DB.
         Response tidak menyertakan records — GET /{id} untuk data terbaru.
         """
         existing = await self.repo.get_by_id(group_id)
@@ -182,12 +180,19 @@ class KPIGroupService:
 
         update_fields = payload.model_dump(exclude_none=True)
 
+        update_fields.pop("is_scheduled", None)
+
         if "sheet_url" in update_fields:
             update_fields["sheet_url"] = str(update_fields["sheet_url"])
 
         sheet_url_changed = (
             "sheet_url" in update_fields
             and update_fields["sheet_url"] != existing.sheet_url
+        )
+        tahun_changed = (
+            existing.group_type == "master"
+            and "tahun" in update_fields
+            and update_fields["tahun"] != existing.tahun
         )
 
         if sheet_url_changed and existing.group_type == "master" and not payload.tahun:
@@ -203,8 +208,7 @@ class KPIGroupService:
         await self.db.commit()
         await self.db.refresh(group)
 
-        if sheet_url_changed:
-            new_url = update_fields["sheet_url"]
+        if sheet_url_changed or tahun_changed:
             if existing.group_type == "master":
                 kpi_repo = KPIMasterRepository(self.db)
                 kpi_service = KPIMasterService(kpi_repo)
@@ -217,10 +221,11 @@ class KPIGroupService:
                 )
                 await svc.update_and_reingest(
                     group_id=group_id,
-                    sheet_url=new_url,
+                    sheet_url=update_fields["sheet_url"] if sheet_url_changed else None,
                     tahun=payload.tahun,
                 )
             elif existing.group_type == "tracker":
+                new_url = update_fields["sheet_url"]
                 svc = TrackerIngestionService(self.db)
                 await svc.ingest_all_sheets(
                     sheet_url=new_url,

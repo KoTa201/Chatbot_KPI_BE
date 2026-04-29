@@ -1,19 +1,19 @@
 """
 model/SchedulerConfig.py
+
+Konfigurasi scheduler untuk proses ingestion otomatis.
+Tidak ada FK relationship ke IngestionLog — logs standalone dengan scheduler_id sebagai data saja.
 """
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime
 from sqlalchemy import UUID as SAUUID
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.sql import func
 
 from model.Base import Base
-
-if TYPE_CHECKING:
-    from model.IngestionLog import IngestionLogORM
 
 
 class SchedulerConfigORM(Base):
@@ -38,11 +38,6 @@ class SchedulerConfigORM(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
-    )
-
-    ingestion_logs: Mapped[list["IngestionLogORM"]] = relationship(
-        "IngestionLogORM", back_populates="scheduler",
-        cascade="all, delete-orphan", lazy="select",
     )
 
     def __repr__(self) -> str:
