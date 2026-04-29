@@ -125,7 +125,7 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
             session_id="sess-stream-clarification",
             clarification_answer="Per divisi",
         ),
-        current_user=_fake_user(role="hrd"),
+        current_user=_fake_user(role="kepala_divisi"),
     )
 
     events = await _read_sse_events(response)

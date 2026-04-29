@@ -117,7 +117,7 @@ async def role_tokens(db_session: AsyncSession) -> dict[str, str]:
     auth_service = AuthService()
     tokens: dict[str, str] = {}
 
-    for role in (RoleEnum.admin, RoleEnum.hrd, RoleEnum.kepala_divisi, RoleEnum.karyawan):
+    for role in (RoleEnum.admin, RoleEnum.kepala_divisi, RoleEnum.karyawan):
         suffix = uuid4().hex[:8]
         user = UserORM(
             username=f"{role.value}_{suffix}",
@@ -187,7 +187,7 @@ class TestChatbotRBAC:
 
         assert res.status_code == 200
 
-    @pytest.mark.parametrize("role", ["hrd", "kepala_divisi", "karyawan"])
+    @pytest.mark.parametrize("role", ["kepala_divisi", "karyawan"])
     async def test_non_admin_cannot_access_chatbot_module(
         self,
         role: str,

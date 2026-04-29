@@ -1,7 +1,7 @@
 """
 middlewares/jwt_middleware.py
 Middleware JWT untuk FastAPI.
-Mendukung role: admin, hrd, kepala_divisi, karyawan
+Mendukung role: admin, kepala_divisi, karyawan
 """
 
 import json
@@ -23,11 +23,10 @@ ALGORITHM = "HS256"
 # ------------------------------------------------------------------ #
 
 ADMIN = "admin"
-HRD = "hrd"
 KEPALA_DIVISI = "kepala_divisi"
 KARYAWAN = "karyawan"
 
-ALL_ROLES = {ADMIN, HRD, KEPALA_DIVISI, KARYAWAN}
+ALL_ROLES = {ADMIN, KEPALA_DIVISI, KARYAWAN}
 
 
 # ------------------------------------------------------------------ #
@@ -72,9 +71,9 @@ ROLE_ROUTES: list[tuple[Optional[str], str, set[str]]] = [
     ("PATCH", r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
     (None,    r"^/api/v1/users",                        {ADMIN}),
     (None,    r"^/api/v1/chatbots",                     {ADMIN}),
-    (None,    r"^/api/v1/ingest",                       {ADMIN, HRD}),
-    (None,    r"^/api/v1/scheduler",                    {ADMIN, HRD}),
-    (None,    r"^/api/v1/kpi",                          {ADMIN, HRD}),
+    (None,    r"^/api/v1/ingest",                       {ADMIN, KEPALA_DIVISI}),
+    (None,    r"^/api/v1/scheduler",                    {ADMIN, KEPALA_DIVISI}),
+    (None,    r"^/api/v1/kpi",                          {ADMIN, KEPALA_DIVISI}),
     (None,    r"^/api/v1/chat",                         ALL_ROLES),
 
 ]
@@ -150,7 +149,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         .jwt_payload  → dict
         .user_id      → UUID
         .username     → str
-        .role         → str  ("admin" | "hrd" | "kepala_divisi" | "karyawan")
+        .role         → str  ("admin" | "kepala_divisi" | "karyawan")
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
