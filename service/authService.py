@@ -54,8 +54,13 @@ class AuthService:
         self.pin_expire_minutes: int = settings.AUTH_PIN_EXPIRE_MINUTES
         self.reset_token_expire_minutes: int = settings.AUTH_RESET_TOKEN_EXPIRE_MINUTES
 
-    async def _get_user_or_404(self, user_id: UUID) -> User:
-        user = await self.repo.get_by_id(user_id)
+    async def _get_user_or_404(
+        self,
+        user_id: UUID,
+        repo: UserRepository | None = None,
+    ) -> User:
+        active_repo = repo or self.repo
+        user = await active_repo.get_by_id(user_id)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

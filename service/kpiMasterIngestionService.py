@@ -101,8 +101,6 @@ class KPIMasterIngestionService:
             # tetap terekam dengan status 'running' (detectable sebagai hung).
             log = await self.log_repo.create(
                 kpi_group_id=group_id,
-                source_type="master",
-                group_name=group.nama_grup,
             )
             log_id = log.id
             logger.info(
@@ -231,8 +229,6 @@ class KPIMasterIngestionService:
 
             log = await self.log_repo.create(
                 kpi_group_id=group_id,
-                source_type="master",
-                group_name=f"{sheet_name} Master {effective_tahun}",
             )
             log_id = log.id
 

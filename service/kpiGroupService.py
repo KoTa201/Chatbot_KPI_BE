@@ -74,6 +74,7 @@ class KPIGroupService:
             sheet_id=group.sheet_id,
             sheet_name=group.sheet_name,
             tahun=group.tahun,
+            is_scheduled=group.is_scheduled,
             is_active=group.is_active,
             created_at=group.created_at,
             updated_at=group.updated_at,

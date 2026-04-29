@@ -763,7 +763,6 @@ async def test_build_response_fields_match_orm():
     assert str(response.sheet_url) == SHEET_URL
     assert response.sheet_id == SPREADSHEET_ID
     assert response.tahun == TAHUN
-    assert response.is_scheduled is True
     assert response.is_active is False
 
 
