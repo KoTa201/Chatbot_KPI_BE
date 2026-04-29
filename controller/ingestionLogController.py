@@ -10,8 +10,8 @@ Responsibilities:
   - Orchestrate request/response flow
 """
 
-from typing import Optional
-from typing import Literal
+from datetime import date
+from typing import Literal, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +45,9 @@ class IngestionLogController:
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
         group_type: Optional[Literal["tracker", "master"]] = None,
+        status: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
     ) -> dict:
         """
         Get ingestion logs dengan optional filtering.
@@ -87,6 +90,9 @@ class IngestionLogController:
                 limit=limit,
                 offset=offset,
                 group_type=group_type,
+                status=status,
+                start_date=start_date,
+                end_date=end_date,
             )
             return result
 

@@ -104,7 +104,19 @@ class GoogleSheetService:
         client = self._get_client()
         spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
         spreadsheet = self._open_spreadsheet(client, spreadsheet_id)
-        worksheets = spreadsheet.worksheets()
+
+        try:
+            worksheets = spreadsheet.worksheets()
+        except gspread.exceptions.APIError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            detail = str(e).strip() or f"HTTP {status_code}" if status_code else "API error"
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Gagal mengambil daftar sheet dari spreadsheet ({detail}). "
+                    "Pastikan service account memiliki izin akses minimal Viewer."
+                ),
+            )
 
         results = []
         for i, worksheet in enumerate(worksheets):

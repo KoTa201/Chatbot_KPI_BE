@@ -656,10 +656,16 @@ class TrackerIngestionService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error saat fetch semua sheet: {str(e)}",
+            err_str = str(e).strip()
+            detail = (
+                f"Gagal mengakses spreadsheet: {err_str}"
+                if err_str
+                else (
+                    "Gagal mengakses spreadsheet. Pastikan URL valid dan sheet sudah "
+                    f"dibagikan ke service account ({type(e).__name__})."
+                )
             )
+            raise HTTPException(status_code=500, detail=detail)
 
     def _parse_records(
         self,

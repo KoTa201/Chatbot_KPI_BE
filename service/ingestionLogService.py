@@ -4,6 +4,7 @@ Service untuk menangani logika bisnis ingestion logs.
 """
 
 import re
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -25,32 +26,42 @@ class IngestionLogService:
         limit: int,
         offset: int = 0,
         group_type: Optional[str] = None,
+        status: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
     ) -> dict:
+        from datetime import datetime, time as dt_time
+
         group_type_filter = self._normalize_group_type(group_type)
 
-        # Filter by stored source_type so orphaned logs (deleted group) still show
         source_type_value = None
         if group_type_filter is not None:
             source_type_value = "master" if group_type_filter == GroupTypeEnum.MASTER else "tracker"
 
-        count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
-            KPIGroupORM,
-            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
-        )
-
+        base_filters = []
         if source_type_value is not None:
-            count_query = count_query.where(IngestionLogORM.source_type == source_type_value)
+            base_filters.append(IngestionLogORM.source_type == source_type_value)
+        if status is not None:
+            base_filters.append(IngestionLogORM.status == status)
+        if start_date is not None:
+            base_filters.append(IngestionLogORM.created_at >= datetime.combine(start_date, dt_time.min))
+        if end_date is not None:
+            base_filters.append(IngestionLogORM.created_at <= datetime.combine(end_date, dt_time.max))
+
+        count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
+            KPIGroupORM, KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+        )
+        for f in base_filters:
+            count_query = count_query.where(f)
 
         total_result = await self.db.execute(count_query)
         total_count = int(total_result.scalar_one() or 0)
 
         query = select(IngestionLogORM, KPIGroupORM).outerjoin(
-            KPIGroupORM,
-            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+            KPIGroupORM, KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
-
-        if source_type_value is not None:
-            query = query.where(IngestionLogORM.source_type == source_type_value)
+        for f in base_filters:
+            query = query.where(f)
 
         query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
 
