@@ -15,6 +15,7 @@ agar controller dan service tidak perlu tahu detail JOIN internal.
 """
 
 from fastapi import HTTPException
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -79,4 +80,27 @@ class KPIMasterRepository:
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal simpan KPI Master ke database: {str(e)}",
+            )
+
+    async def delete_by_group_id(self, group_id) -> int:
+        """
+        Hapus seluruh KPI Master yang terkait dengan satu KPI Group.
+
+        Dipakai saat re-ingest agar data lama dibersihkan sebelum records baru
+        dimasukkan kembali.
+
+        Returns:
+            Jumlah baris yang dihapus.
+        """
+        try:
+            stmt = delete(KPIMasterORM).where(KPIMasterORM.group_id == group_id)
+            result = await self.db.execute(stmt)
+            await self.db.commit()
+            return int(result.rowcount or 0)
+
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Gagal hapus KPI Master berdasarkan group_id: {str(e)}",
             )

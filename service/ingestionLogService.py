@@ -28,24 +28,29 @@ class IngestionLogService:
     ) -> dict:
         group_type_filter = self._normalize_group_type(group_type)
 
-        count_query = select(func.count()).select_from(IngestionLogORM).join(
+        # Filter by stored source_type so orphaned logs (deleted group) still show
+        source_type_value = None
+        if group_type_filter is not None:
+            source_type_value = "master" if group_type_filter == GroupTypeEnum.MASTER else "tracker"
+
+        count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
             KPIGroupORM,
             KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
 
-        if group_type_filter is not None:
-            count_query = count_query.where(KPIGroupORM.group_type == group_type_filter)
+        if source_type_value is not None:
+            count_query = count_query.where(IngestionLogORM.source_type == source_type_value)
 
         total_result = await self.db.execute(count_query)
         total_count = int(total_result.scalar_one() or 0)
 
-        query = select(IngestionLogORM, KPIGroupORM).join(
+        query = select(IngestionLogORM, KPIGroupORM).outerjoin(
             KPIGroupORM,
             KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
 
-        if group_type_filter is not None:
-            query = query.where(KPIGroupORM.group_type == group_type_filter)
+        if source_type_value is not None:
+            query = query.where(IngestionLogORM.source_type == source_type_value)
 
         query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
 
@@ -68,18 +73,22 @@ class IngestionLogService:
         log: IngestionLogORM,
         group: KPIGroupORM | None = None,
     ) -> dict:
-        sheet_name = group.nama_grup if group else str(log.kpi_group_id)
+        sheet_name = group.nama_grup if group else (log.group_name or "—")
         nama_orang = None
 
         if group and group.group_type == GroupTypeEnum.TRACKER:
             nama_orang = self._extract_nama_orang(group.nama_grup)
+        elif not group and log.source_type == "tracker":
+            nama_orang = self._extract_nama_orang(log.group_name)
 
-        source_type = None
         if group:
-            if group.group_type == GroupTypeEnum.MASTER:
-                source_type = "kpi_master"
-            elif group.group_type == GroupTypeEnum.TRACKER:
-                source_type = "kpi_tracker"
+            source_type = "kpi_master" if group.group_type == GroupTypeEnum.MASTER else "kpi_tracker"
+        elif log.source_type == "master":
+            source_type = "kpi_master"
+        elif log.source_type == "tracker":
+            source_type = "kpi_tracker"
+        else:
+            source_type = None
 
         return {
             "id": log.id,
