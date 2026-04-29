@@ -16,7 +16,7 @@ from service.clarificationService import ClarificationService
 from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
 from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
 from repository.chatbotAuditLogRepository import AuditLogRepository
-from model.User import UserORM
+from model.User import User
 
 
 class ChatController:
@@ -29,7 +29,7 @@ class ChatController:
     async def handle_chat(
         self,
         request: ChatRequest,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> StreamingResponse:
         """
         Handle POST /chat — jalankan pipeline Structured RAG.
@@ -62,7 +62,7 @@ class ChatController:
     async def handle_clarification(
         self,
         request: ChatRequest,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> StreamingResponse:
         """
         Handle POST /chat/clarification — respons jawaban atas pertanyaan klarifikasi.
@@ -119,7 +119,7 @@ class ChatController:
         self,
         skip: int = 0,
         limit: int = 20,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> list[AuditLogResponse]:
         """
         Handle GET /chat/history — ambil riwayat query user dari audit log.
@@ -143,7 +143,7 @@ class ChatController:
         self,
         skip: int = 0,
         limit: int = 50,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> list[AuditLogResponse]:
         """
         Handle GET /chat/audit — hanya untuk Admin/Kepala Divisi.
@@ -161,7 +161,7 @@ class ChatController:
 
     async def handle_get_sessions(
         self,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> list[SessionResponse]:
         user_id = str(current_user.id)
         service = ChatService(self.db)
@@ -171,7 +171,7 @@ class ChatController:
     async def handle_delete_session(
         self,
         session_id: str,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> None:
         user_id = str(current_user.id)
         service = ChatService(self.db)
@@ -181,7 +181,7 @@ class ChatController:
         self,
         session_id: str,
         request: UpdateSessionTitleRequest,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
     ) -> SessionResponse:
         user_id = str(current_user.id)
         service = ChatService(self.db)
@@ -193,7 +193,7 @@ class ChatController:
         return SessionResponse.model_validate(updated)
 
     @staticmethod
-    def _extract_role_value(current_user: UserORM) -> str:
+    def _extract_role_value(current_user: User) -> str:
         role = current_user.role.value if hasattr(
             current_user.role, "value") else str(current_user.role)
         return str(role).strip().lower()

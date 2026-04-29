@@ -1,7 +1,6 @@
 
 import logging
 from uuid import UUID
-from model.User import RoleEnum
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +11,8 @@ from schema.authSchema import (
     UserCreateRequest,
     UserResponse,
 )
-from repository.userRepository import AuthRepository
-from model.User import UserORM
+from repository.userRepository import UserRepository
+from model.User import RoleEnum, User
 from service.emailService import EmailService
 from service.authService import AuthService, require_admin
 
@@ -23,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 class UserService:
     def __init__(self, db: AsyncSession):
-        self.repo = AuthRepository(db)
-        self.auth_service = AuthService(db)
-        self.email_service = EmailService()
+        self.repo: UserRepository = UserRepository(db)
+        self.auth_service: AuthService = AuthService()
+        self.email_service: EmailService = EmailService()
         # Akan di-set di Depends(require_admin) pada router
-        self.user: UserORM = None
+        self.user: User = None
 
         # ------------------------------------------------------------------ #
     #  User management                                                     #
@@ -45,7 +44,7 @@ class UserService:
                 detail=f"Email '{payload.email}' sudah terdaftar.",
             )
 
-        self.user = UserORM(
+        self.user = User(
             username=payload.username,
             email=payload.email,
             full_name=payload.full_name,
@@ -74,15 +73,15 @@ class UserService:
 
     async def get_all_users(
         self,
+        page: int,
         limit: int,
-        offset: int,
         search: str | None = None,
         role: RoleEnum | None = None,
         status: bool | None = None,
     ) -> dict:
         users = await self.repo.get_all_users(
+            page=page,
             limit=limit,
-            offset=offset,
             search=search,
             role=role,
             status=status,
@@ -94,8 +93,8 @@ class UserService:
         )
         return {
             "total": total,
+            "page": page,
             "limit": limit,
-            "offset": offset,
             "users": [UserResponse.model_validate(u) for u in users],
         }
 

@@ -42,8 +42,8 @@ class IngestionLogController:
 
     async def get_ingestion_logs(
         self,
+        page: int = 1,
         limit: int = DEFAULT_LIMIT,
-        offset: int = 0,
         group_type: Optional[Literal["tracker", "master"]] = None,
         status: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -53,8 +53,8 @@ class IngestionLogController:
         Get ingestion logs dengan optional filtering.
 
         Args:
+            page: Nomor halaman (mulai dari 1)
             limit: Jumlah logs yang dikembalikan (max 100)
-            offset: Posisi awal data untuk pagination
             group_type: Filter berdasarkan jenis KPI ("tracker" atau "master")
 
         Returns:
@@ -69,8 +69,8 @@ class IngestionLogController:
         """
         # ── Validate limit ──────────────────────────────────────────────
         try:
+            page = self._validate_page(page)
             limit = self._validate_limit(limit)
-            offset = self._validate_offset(offset)
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -87,8 +87,8 @@ class IngestionLogController:
         # ── Fetch logs dari service ────────────────────────────────────
         try:
             result = await self.service.get_ingestion_logs(
+                page=page,
                 limit=limit,
-                offset=offset,
                 group_type=group_type,
                 status=status,
                 start_date=start_date,
@@ -133,12 +133,12 @@ class IngestionLogController:
         return limit
 
     @staticmethod
-    def _validate_offset(offset: int) -> int:
-        if not isinstance(offset, int):
+    def _validate_page(page: int) -> int:
+        if not isinstance(page, int):
             raise ValueError(
-                f"offset harus berupa integer. Diterima: {type(offset).__name__}")
+                f"page harus berupa integer. Diterima: {type(page).__name__}")
 
-        if offset < 0:
-            raise ValueError(f"offset harus >= 0. Diterima: {offset}")
+        if page < 1:
+            raise ValueError(f"page harus >= 1. Diterima: {page}")
 
-        return offset
+        return page

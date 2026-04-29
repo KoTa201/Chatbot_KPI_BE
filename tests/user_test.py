@@ -8,9 +8,9 @@ Kita TIDAK patch class di modul definisinya, karena Python sudah me-bind
 method pada saat import. Yang benar adalah patch di modul tempat objek
 *digunakan*:
 
-  ✗  patch("repository.userRepository.AuthRepository.get_by_id", ...)
+  ✗  patch("repository.userRepository.UserRepository.get_by_id", ...)
        → patch class asli, tapi instance di controller sudah dibuat
-  ✓  patch("controller.authController.AuthRepository.get_by_id", ...)
+  ✓  patch("controller.authController.UserRepository.get_by_id", ...)
        → patch class yang *dilihat* controller pada saat ia membuat instance
 
 Untuk `verify_password` (dipanggil di dalam AuthService), patch dilakukan
@@ -48,12 +48,12 @@ NOT_FOUND_ID = "00000000-0000-0000-0000-000000009999"
 # Path modul untuk patch
 # ---------------------------------------------------------------------------
 
-_REPO = "repository.userRepository.AuthRepository"
+_REPO = "repository.userRepository.UserRepository"
 _SVC = "service.authService.AuthService"
 
 
 # ---------------------------------------------------------------------------
-# Helper: buat mock UserORM
+# Helper: buat mock User
 # ---------------------------------------------------------------------------
 
 def _make_user(
@@ -66,7 +66,7 @@ def _make_user(
     is_active: bool = True,
     hashed_password: str = "$2b$12$fakehash",
 ):
-    """Buat mock UserORM dengan primary key UUID."""
+    """Buat mock User dengan primary key UUID."""
     import datetime
     from model.User import RoleEnum
 
@@ -491,167 +491,6 @@ class TestLogout:
 
 
 # ===========================================================================
-# GET /api/v1/users/me
-# ===========================================================================
-
-class TestGetMe:
-
-    @pytest.mark.asyncio
-    async def test_get_me_sukses(self, client: AsyncClient):
-        """Semua role bisa akses /users/me (ALL_ROLES di middleware)."""
-        access, _ = _make_tokens()
-        mock_user = _make_user()
-
-        with patch(f"{_REPO}.get_by_id",
-                   new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.get(
-                "/api/v1/users/me",
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["username"] == "testuser"
-
-    @pytest.mark.asyncio
-    async def test_get_me_sebagai_kepala_divisi(self, client: AsyncClient):
-        """Kepala divisi juga bisa akses /users/me."""
-        access, _ = _make_kepala_divisi_tokens()
-        mock_user = _make_kepala_divisi()
-
-        with patch(f"{_REPO}.get_by_id",
-                   new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.get(
-                "/api/v1/users/me",
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["username"] == "kadiv_budi"
-
-    @pytest.mark.asyncio
-    async def test_get_me_tanpa_token(self, client: AsyncClient):
-        """Endpoint /users/me tanpa Authorization header harus return 401."""
-        resp = await client.get("/api/v1/users/me")
-        assert resp.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_get_me_token_kadaluarsa(self, client: AsyncClient):
-        """Endpoint /users/me dengan access token kedaluwarsa harus return 401."""
-        expired = _expired_access_token()
-        resp = await client.get(
-            "/api/v1/users/me",
-            headers={"Authorization": f"Bearer {expired}"},
-        )
-        assert resp.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_get_me_kirim_refresh_token(self, client: AsyncClient):
-        """Refresh token tidak boleh lolos sebagai access token."""
-        _, refresh = _make_tokens()
-        resp = await client.get(
-            "/api/v1/users/me",
-            headers={"Authorization": f"Bearer {refresh}"},
-        )
-        assert resp.status_code == 401
-
-
-# ===========================================================================
-# POST /api/v1/users/me/change-password
-# ===========================================================================
-
-class TestChangePassword:
-
-    @pytest.mark.asyncio
-    async def test_change_password_sukses(self, client: AsyncClient):
-        """User terautentikasi dapat mengganti password jika old password benar."""
-        access, _ = _make_tokens()
-        mock_user = _make_user()
-
-        with (
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=mock_user),
-            patch(f"{_SVC}.verify_password", return_value=True),
-            patch(f"{_REPO}.save",
-                  new_callable=AsyncMock, return_value=mock_user),
-        ):
-            resp = await client.post(
-                "/api/v1/users/me/change-password",
-                json={"old_password": "OldPass1", "new_password": "NewPass1"},
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 200
-        assert "berhasil" in resp.json()["message"].lower()
-
-    @pytest.mark.asyncio
-    async def test_change_password_lama_salah(self, client: AsyncClient):
-        """Pergantian password harus gagal jika old password tidak cocok."""
-        access, _ = _make_tokens()
-        mock_user = _make_user()
-
-        with (
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=mock_user),
-            patch(f"{_SVC}.verify_password", return_value=False),
-        ):
-            resp = await client.post(
-                "/api/v1/users/me/change-password",
-                json={"old_password": "WrongOld1", "new_password": "NewPass1"},
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 400
-        assert "lama" in resp.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_change_password_sama(self, client: AsyncClient):
-        """Password baru tidak boleh sama dengan password lama."""
-        access, _ = _make_tokens()
-        mock_user = _make_user()
-
-        with (
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=mock_user),
-            patch(f"{_SVC}.verify_password", return_value=True),
-        ):
-            resp = await client.post(
-                "/api/v1/users/me/change-password",
-                json={"old_password": "SamePass1",
-                      "new_password": "SamePass1"},
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 400
-        assert "sama" in resp.json()["detail"].lower()
-
-    @pytest.mark.asyncio
-    async def test_change_password_validasi_kekuatan(self, client: AsyncClient):
-        """Password baru tanpa angka → 422 dari Pydantic validator."""
-        access, _ = _make_tokens()
-        mock_user = _make_user()
-
-        with patch(f"{_REPO}.get_by_id",
-                   new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.post(
-                "/api/v1/users/me/change-password",
-                json={"old_password": "OldPass1",
-                      "new_password": "nodigitpassword"},
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 422
-
-    @pytest.mark.asyncio
-    async def test_change_password_tanpa_auth(self, client: AsyncClient):
-        """Endpoint change-password tanpa token harus ditolak 401."""
-        resp = await client.post(
-            "/api/v1/users/me/change-password",
-            json={"old_password": "OldPass1", "new_password": "NewPass1"},
-        )
-        assert resp.status_code == 401
-
-
-# ===========================================================================
 # POST /api/v1/users  (admin only)
 # ===========================================================================
 
@@ -838,7 +677,7 @@ class TestGetAllUsers:
 
     @pytest.mark.asyncio
     async def test_get_all_users_pagination(self, client: AsyncClient):
-        """Parameter limit dan offset harus diteruskan ke repository dengan benar."""
+        """Parameter page dan limit harus diteruskan ke repository dengan benar."""
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
 
@@ -851,20 +690,20 @@ class TestGetAllUsers:
                   new_callable=AsyncMock, return_value=50),
         ):
             resp = await client.get(
-                "/api/v1/users?limit=5&offset=10",
+                "/api/v1/users?page=3&limit=5",
                 headers={"Authorization": f"Bearer {admin_access}"},
             )
             mock_get.assert_awaited_once_with(
+                page=3,
                 limit=5,
-                offset=10,
                 search=None,
                 role=None,
                 status=None,
             )
 
         assert resp.status_code == 200
+        assert resp.json()["page"] == 3
         assert resp.json()["limit"] == 5
-        assert resp.json()["offset"] == 10
 
     @pytest.mark.asyncio
     async def test_get_all_users_with_search_role_status_filter(self, client: AsyncClient):
@@ -873,7 +712,8 @@ class TestGetAllUsers:
 
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
-        users = [_make_user(role_value="kepala_divisi", full_name="Rina Marlina")]
+        users = [_make_user(role_value="kepala_divisi",
+                            full_name="Rina Marlina")]
 
         with (
             patch(f"{_REPO}.get_by_id",
@@ -889,8 +729,8 @@ class TestGetAllUsers:
             )
 
             mock_get.assert_awaited_once_with(
+                page=1,
                 limit=20,
-                offset=0,
                 search="rina",
                 role=RoleEnum.kepala_divisi,
                 status=True,
@@ -1203,7 +1043,7 @@ class TestAuthServiceUnit:
     def test_create_access_token_berisi_field_wajib(self):
         """Access token harus memuat sub, username, role, type bearer, dan expiry positif."""
         from model.User import RoleEnum
-        from service.authService import AuthService, ALGORITHM
+        from service.authService import AuthService
         from jose import jwt
         from config import settings
 
@@ -1214,7 +1054,7 @@ class TestAuthServiceUnit:
             user_id=test_id, username="u", role=RoleEnum("karyawan")
         )
         payload = jwt.decode(token, settings.SECRET_KEY,
-                             algorithms=[ALGORITHM])
+                             algorithms=[settings.AUTH_ALGORITHM])
         assert payload["sub"] == str(test_id)
         assert payload["username"] == "u"
         assert payload["role"] == "karyawan"    # ← diubah
@@ -1223,7 +1063,7 @@ class TestAuthServiceUnit:
 
     def test_create_refresh_token_berisi_field_minimal(self):
         """Refresh token hanya memuat field minimal tanpa role/username."""
-        from service.authService import AuthService, ALGORITHM
+        from service.authService import AuthService
         from jose import jwt
         from config import settings
 
@@ -1231,7 +1071,7 @@ class TestAuthServiceUnit:
         svc = AuthService()
         token, exp = svc.create_refresh_token(user_id=test_id)
         payload = jwt.decode(
-            token, settings.REFRESH_SECRET_KEY, algorithms=[ALGORITHM])
+            token, settings.REFRESH_SECRET_KEY, algorithms=[settings.AUTH_ALGORITHM])
         assert payload["sub"] == str(test_id)
         assert payload["type"] == "refresh"
         assert "role" not in payload

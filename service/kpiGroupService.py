@@ -86,14 +86,14 @@ class KPIGroupService:
     async def list_groups(
         self,
         page:       int,
-        page_size:  int,
+        limit:  int,
         tahun:      int | None = None,
         group_type: str | None = None,
         search:     str | None = None,
     ) -> KPIGroupListResponse:
         rows, total = await self.repo.list_groups(
             page=page,
-            page_size=page_size,
+            limit=limit,
             tahun=tahun,
             group_type=group_type,
             search=search,
@@ -101,8 +101,8 @@ class KPIGroupService:
         return KPIGroupListResponse(
             total=total,
             page=page,
-            page_size=page_size,
-            total_pages=math.ceil(total / page_size) if total else 0,
+            limit=limit,
+            total_pages=math.ceil(total / limit) if total else 0,
             data=[self._build_response(r, include_records=False)
                   for r in rows],
         )

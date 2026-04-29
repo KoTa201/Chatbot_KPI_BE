@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from model.Base import Base
 
 if TYPE_CHECKING:
-    from model.User import UserORM
+    from model.User import User
 
 
 class ChatbotAuditLog(Base):
@@ -38,8 +38,8 @@ class ChatbotAuditLog(Base):
     )
 
     # Relationship
-    user: Mapped["UserORM"] = relationship(
-        "UserORM", back_populates="audit_logs", lazy="noload"
+    user: Mapped["User"] = relationship(
+        "User", back_populates="audit_logs", lazy="noload"
     )
 
     def __repr__(self) -> str:

@@ -74,8 +74,8 @@ class ChatbotRouter:
     async def list_chatbots(
         self,
         page: int = Query(default=1, ge=1, description="Nomor halaman"),
-        page_size: int = Query(default=10, ge=1, le=100,
-                               description="Jumlah item per halaman"),
+        limit: int = Query(default=10, ge=1, le=100,
+                           description="Jumlah item per halaman"),
         otoritas: Optional[AuthorityEnum] = Query(
             default=None, description="Filter berdasarkan otoritas"),
         search: Optional[str] = Query(
@@ -85,7 +85,7 @@ class ChatbotRouter:
         self.chatbot_controller = ChatbotController(db)
         return await self.chatbot_controller.list_chatbots(
             page=page,
-            page_size=page_size,
+            limit=limit,
             otoritas=otoritas,
             search=search,
         )

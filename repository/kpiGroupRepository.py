@@ -145,14 +145,15 @@ class KPIGroupRepository:
         return group
 
     async def get_master_groups(
-        self, skip: int = 0, limit: int = 100
+        self, page: int = 1, limit: int = 100
     ) -> list[KPIGroupORM]:
         """Ambil semua grup bertipe 'master', diurutkan dari terbaru."""
+        offset = (page - 1) * limit
         result = await self.db.execute(
             select(KPIGroupORM)
             .where(KPIGroupORM.group_type == "master")
             .order_by(KPIGroupORM.updated_at.desc())
-            .offset(skip)
+            .offset(offset)
             .limit(limit)
         )
         return result.scalars().all()
@@ -160,7 +161,7 @@ class KPIGroupRepository:
     async def list_groups(
         self,
         page:       int,
-        page_size:  int,
+        limit:  int,
         tahun:      int | None = None,
         group_type: str | None = None,
         search:     str | None = None,
@@ -190,12 +191,12 @@ class KPIGroupRepository:
         total = count_result.scalar_one()
 
         # Ambil halaman
-        offset = (page - 1) * page_size
+        offset = (page - 1) * limit
         rows_result = await self.db.execute(
             base_query
             .order_by(KPIGroupORM.updated_at.desc())
             .offset(offset)
-            .limit(page_size)
+            .limit(limit)
         )
         rows = rows_result.scalars().all()
 

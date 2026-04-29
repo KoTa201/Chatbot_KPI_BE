@@ -11,10 +11,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
 if TYPE_CHECKING:
-    from model.User import UserORM
+    from model.User import User
 
 
-class PasswordResetORM(Base):
+class PasswordReset(Base):
     __tablename__ = "password_resets"
 
     id: Mapped[int] = mapped_column(
@@ -30,5 +30,5 @@ class PasswordResetORM(Base):
     used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True)
 
-    user: Mapped["UserORM"] = relationship(
-        "UserORM", back_populates="password_resets")
+    user: Mapped["User"] = relationship(
+        "User", back_populates="password_resets")

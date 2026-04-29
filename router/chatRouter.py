@@ -10,7 +10,7 @@ from service.authService import get_current_user
 from controller.chatController import ChatController
 from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
 from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
-from model.User import UserORM
+from model.User import User
 
 
 class ChatRouter:
@@ -98,7 +98,7 @@ class ChatRouter:
     async def send_message(
         self,
         request: ChatRequest,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """
@@ -122,12 +122,12 @@ class ChatRouter:
     async def handle_clarification(
         self,
         request: ChatRequest,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """
         Endpoint untuk menangani response atas pertanyaan klarifikasi.
-        
+
         **Flow:**
         1. User menerima pertanyaan klarifikasi dari chatbot
         2. User mengirim jawaban (melalui chip pilihan atau teks bebas)
@@ -144,10 +144,11 @@ class ChatRouter:
 
     async def get_my_history(
         self,
-        skip: int = Query(default=0, ge=0, description="Offset untuk pagination"),
+        skip: int = Query(
+            default=0, ge=0, description="Offset untuk pagination"),
         limit: int = Query(default=20, ge=1, le=100,
                            description="Jumlah data per halaman"),
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """
@@ -162,7 +163,7 @@ class ChatRouter:
         self,
         skip: int = Query(default=0, ge=0),
         limit: int = Query(default=50, ge=1, le=100),
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """
@@ -173,10 +174,9 @@ class ChatRouter:
             skip=skip, limit=limit, current_user=current_user
         )
 
-
     async def get_sessions(
         self,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """Kembalikan semua session chatbot milik user yang sedang login."""
@@ -185,7 +185,7 @@ class ChatRouter:
     async def delete_session(
         self,
         session_id: str,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """
@@ -200,7 +200,7 @@ class ChatRouter:
         self,
         session_id: str,
         request: UpdateSessionTitleRequest,
-        current_user: UserORM = Depends(get_current_user),
+        current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
         """

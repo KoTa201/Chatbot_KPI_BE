@@ -91,9 +91,10 @@ class IngestionRouter:
 
     async def get_ingestion_logs(
         self,
-        limit: int = Query(default=20, le=100),
-        offset: int = Query(default=0, ge=0),
-        group_type: Optional[Literal["tracker", "master"]] = Query(default=None),
+        page: int = Query(default=1, ge=1),
+        limit: int = Query(default=20, ge=1, le=100),
+        group_type: Optional[Literal["tracker", "master"]
+                             ] = Query(default=None),
         source_type: Optional[Literal["kpi_tracker", "kpi_master"]] = Query(default=None),
         status: Optional[Literal["success", "failed", "partial"]] = Query(default=None),
         start_date: Optional[date] = Query(default=None, description="Filter dari tanggal (YYYY-MM-DD)"),
@@ -105,12 +106,7 @@ class IngestionRouter:
             effective_group_type = "tracker" if source_type == "kpi_tracker" else "master"
 
         return await self._get_log_controller(db).get_ingestion_logs(
-            limit=limit,
-            offset=offset,
-            group_type=effective_group_type,
-            status=status,
-            start_date=start_date,
-            end_date=end_date,
+            page=page, limit=limit, group_type=effective_group_type
         )
 
 

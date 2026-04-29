@@ -23,8 +23,8 @@ class IngestionLogService:
 
     async def get_ingestion_logs(
         self,
+        page: int,
         limit: int,
-        offset: int = 0,
         group_type: Optional[str] = None,
         status: Optional[str] = None,
         start_date: Optional[date] = None,
@@ -33,6 +33,7 @@ class IngestionLogService:
         from datetime import datetime, time as dt_time
 
         group_type_filter = self._normalize_group_type(group_type)
+        offset = (page - 1) * limit
 
         source_type_value = None
         if group_type_filter is not None:
