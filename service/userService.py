@@ -99,13 +99,13 @@ class UserService:
         }
 
     async def get_user_by_id(self, user_id: UUID) -> UserResponse:
-        self.user = await self.auth_service._get_user_or_404(user_id, repo=self.repo)
+        self.user = await self.auth_service._get_user_or_404(user_id)
         return UserResponse.model_validate(self.user)
 
     async def update_user(
         self, user_id: UUID, payload: UpdateUserRequest
     ) -> UserResponse:
-        self.user = await self.auth_service._get_user_or_404(user_id, repo=self.repo)
+        self.user = await self.auth_service._get_user_or_404(user_id)
 
         if payload.email and payload.email != self.user.email:
             if await self.repo.email_exists(payload.email):
@@ -131,6 +131,6 @@ class UserService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin tidak dapat menghapus akun sendiri.",
             )
-        self.user = await self.auth_service._get_user_or_404(user_id, repo=self.repo)
+        self.user = await self.auth_service._get_user_or_404(user_id)
         await self.repo.delete_user(self.user)
         return MessageResponse(message=f"User '{self.user.username}' berhasil dihapus.")
