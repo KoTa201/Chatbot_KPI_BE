@@ -35,26 +35,24 @@ class KPIGroupRepository:
     # ─── Get or Create (upsert) ───────────────────────────────────────────────
 
     async def get_active_scheduled_tracker(self) -> list[KPIGroupORM]:
-        """Ambil semua KPI Group type=tracker yang aktif dan terjadwal (untuk scheduler)."""
+        """Ambil semua KPI Group type=tracker yang aktif (untuk scheduler dan batch)."""
         result = await self.db.execute(
             select(KPIGroupORM)
             .where(KPIGroupORM.group_type == "tracker")
             .where(KPIGroupORM.is_active == True)
-            .where(KPIGroupORM.is_scheduled == True)
             .order_by(KPIGroupORM.created_at)
         )
         return list(result.scalars().all())
 
     async def get_or_create(
         self,
-        sheet_id:     str,
-        group_type:   str,
-        sheet_url:    str,
-        sheet_name:   str | None,
-        nama_grup:    str,
-        tahun:        int | None = None,
-        is_scheduled: bool = True,
-        is_active:    bool = True,
+        sheet_id:   str,
+        group_type: str,
+        sheet_url:  str,
+        sheet_name: str | None,
+        nama_grup:  str,
+        tahun:      int | None = None,
+        is_active:  bool = True,
     ) -> KPIGroupORM:
         """
         Upsert KPIGroup by (sheet_id, group_type).
@@ -88,7 +86,6 @@ class KPIGroupRepository:
                     sheet_name=sheet_name,
                     nama_grup=nama_grup,
                     tahun=tahun,
-                    is_scheduled=is_scheduled,
                     is_active=is_active,
                 )
                 .on_conflict_do_update(

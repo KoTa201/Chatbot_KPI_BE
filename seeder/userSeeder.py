@@ -72,6 +72,7 @@ SEED_USERS = [
     {
         "username": "kadiv_sari",
         "email": "sari.kadiv@kpiapp.id",
+        
         "full_name": "Sari Dewi",
         "password": "Kadiv123",
         "role": RoleEnum.kepala_divisi,
