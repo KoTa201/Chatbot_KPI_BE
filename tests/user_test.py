@@ -96,17 +96,6 @@ def _make_admin(**kw):
     )
 
 
-def _make_hrd(**kw):
-    return _make_user(
-        id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
-        username="hrd_rina",
-        email="rina.hrd@kpiapp.id",
-        full_name="Rina Marlina",
-        role_value="hrd",
-        **kw,
-    )
-
-
 def _make_kepala_divisi(**kw):
     return _make_user(
         id=uuid.UUID("00000000-0000-0000-0000-000000000011"),
@@ -154,13 +143,6 @@ def _make_tokens(user_id: uuid.UUID = USER_ID, role: str = "karyawan"):
 
 def _make_admin_tokens():
     return _make_tokens(user_id=ADMIN_ID, role="admin")
-
-
-def _make_hrd_tokens():
-    return _make_tokens(
-        user_id=uuid.UUID("00000000-0000-0000-0000-000000000010"),
-        role="hrd",
-    )
 
 
 def _make_kepala_divisi_tokens():
@@ -531,22 +513,6 @@ class TestGetMe:
         assert resp.json()["username"] == "testuser"
 
     @pytest.mark.asyncio
-    async def test_get_me_sebagai_hrd(self, client: AsyncClient):
-        """HRD juga bisa akses /users/me."""
-        access, _ = _make_hrd_tokens()
-        mock_user = _make_hrd()
-
-        with patch(f"{_REPO}.get_by_id",
-                   new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.get(
-                "/api/v1/users/me",
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 200
-        assert resp.json()["username"] == "hrd_rina"
-
-    @pytest.mark.asyncio
     async def test_get_me_sebagai_kepala_divisi(self, client: AsyncClient):
         """Kepala divisi juga bisa akses /users/me."""
         access, _ = _make_kepala_divisi_tokens()
@@ -781,27 +747,8 @@ class TestCreateUser:
         assert "email" in resp.json()["detail"].lower()
 
     @pytest.mark.asyncio
-    async def test_create_user_forbidden_sebagai_hrd(self, client: AsyncClient):
-        """HRD tidak boleh membuat user baru (POST /users hanya admin)."""
-        access, _ = _make_hrd_tokens()
-        mock_user = _make_hrd()
-
-        with patch(f"{_REPO}.get_by_id",
-                   new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.post(
-                "/api/v1/users",
-                json={
-                    "username": "x", "email": "x@x.com",
-                    "full_name": "X", "password": "Secure123",
-                },
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 403
-
-    @pytest.mark.asyncio
     async def test_create_user_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):
-        """Kepala divisi tidak boleh membuat user baru."""
+        """Kepala divisi tidak boleh membuat user baru (POST /users hanya admin)."""
         access, _ = _make_kepala_divisi_tokens()
         mock_user = _make_kepala_divisi()
 
@@ -926,7 +873,7 @@ class TestGetAllUsers:
 
         admin_access, _ = _make_admin_tokens()
         admin_user = _make_admin()
-        users = [_make_user(role_value="hrd", full_name="Rina Marlina")]
+        users = [_make_user(role_value="kepala_divisi", full_name="Rina Marlina")]
 
         with (
             patch(f"{_REPO}.get_by_id",
@@ -937,7 +884,7 @@ class TestGetAllUsers:
                   new_callable=AsyncMock, return_value=1) as mock_count,
         ):
             resp = await client.get(
-                "/api/v1/users?search=rina&role=hrd&status=active",
+                "/api/v1/users?search=rina&role=kepala_divisi&status=active",
                 headers={"Authorization": f"Bearer {admin_access}"},
             )
 
@@ -945,12 +892,12 @@ class TestGetAllUsers:
                 limit=20,
                 offset=0,
                 search="rina",
-                role=RoleEnum.hrd,
+                role=RoleEnum.kepala_divisi,
                 status=True,
             )
             mock_count.assert_awaited_once_with(
                 search="rina",
-                role=RoleEnum.hrd,
+                role=RoleEnum.kepala_divisi,
                 status=True,
             )
 
@@ -959,10 +906,10 @@ class TestGetAllUsers:
         assert len(resp.json()["users"]) == 1
 
     @pytest.mark.asyncio
-    async def test_get_all_users_forbidden_sebagai_hrd(self, client: AsyncClient):
-        """HRD tidak boleh akses list semua user."""
-        access, _ = _make_hrd_tokens()
-        mock_user = _make_hrd()
+    async def test_get_all_users_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):
+        """Kepala divisi tidak boleh akses list semua user."""
+        access, _ = _make_kepala_divisi_tokens()
+        mock_user = _make_kepala_divisi()
 
         with patch(f"{_REPO}.get_by_id",
                    new_callable=AsyncMock, return_value=mock_user):
@@ -1048,10 +995,10 @@ class TestGetUserById:
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_get_user_by_id_forbidden_sebagai_hrd(self, client: AsyncClient):
-        """HRD tidak boleh akses GET /users/{id}."""
-        access, _ = _make_hrd_tokens()
-        mock_user = _make_hrd()
+    async def test_get_user_by_id_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):
+        """Kepala divisi tidak boleh akses GET /users/{id}."""
+        access, _ = _make_kepala_divisi_tokens()
+        mock_user = _make_kepala_divisi()
 
         with patch(f"{_REPO}.get_by_id",
                    new_callable=AsyncMock, return_value=mock_user):
@@ -1207,21 +1154,6 @@ class TestDeleteUser:
             )
 
         assert resp.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_delete_user_forbidden_sebagai_hrd(self, client: AsyncClient):
-        """HRD tidak boleh menghapus user."""
-        access, _ = _make_hrd_tokens()
-        mock_user = _make_hrd()
-
-        with patch(f"{_REPO}.get_by_id",
-                   new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.delete(
-                f"/api/v1/users/{OTHER_ID}",
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 403
 
     @pytest.mark.asyncio
     async def test_delete_user_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):

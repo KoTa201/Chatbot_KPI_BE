@@ -146,14 +146,14 @@ class ChatController:
         current_user: UserORM = Depends(get_current_user),
     ) -> list[AuditLogResponse]:
         """
-        Handle GET /chat/audit — hanya untuk Admin/HRD.
+        Handle GET /chat/audit — hanya untuk Admin/Kepala Divisi.
         Ambil semua audit log yang gagal validasi SQLWireguard.
         """
         role_value = self._extract_role_value(current_user)
-        if role_value not in ("admin", "hrd"):
+        if role_value not in ("admin", "kepala_divisi"):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Akses ditolak. Hanya Admin dan HRD yang dapat melihat audit log.",
+                detail="Akses ditolak. Hanya Admin dan Kepala Divisi yang dapat melihat audit log.",
             )
 
         logs = await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
@@ -202,7 +202,6 @@ class ChatController:
     def _to_chat_role(role_value: str) -> str:
         role_map = {
             "admin": "Admin",
-            "hrd": "HRD",
             "kepala_divisi": "Kepala Divisi",
             "karyawan": "Karyawan",
         }

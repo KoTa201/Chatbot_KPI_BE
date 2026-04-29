@@ -15,7 +15,6 @@ from schema.authSchema import (
     UserCreateRequest,
     UserResponse,
 )
-from service.authService import AuthService
 from service.userService import UserService
 
 

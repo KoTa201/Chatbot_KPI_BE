@@ -12,7 +12,6 @@ class Base(DeclarativeBase):
 
 class RoleEnum(str, enum.Enum):
     admin = "admin"
-    hrd = "hrd"
     kepala_divisi = "kepala_divisi"
     karyawan = "karyawan"
 

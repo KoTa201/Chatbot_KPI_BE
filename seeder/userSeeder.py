@@ -2,8 +2,7 @@
 seeders/user_seeder.py
 Seeder untuk mengisi tabel users dengan data awal.
 - 1 admin
-- 1 hrd
-- 2 kepala_divisi
+- 3 kepala_divisi
 - 3 karyawan
 
 Jalankan:
@@ -51,16 +50,15 @@ SEED_USERS = [
         "role": RoleEnum.admin,
         "is_active": True,
     },
-    # ── HRD ────────────────────────────────────────────────────────
+    # ── Kepala Divisi ───────────────────────────────────────────────
     {
-        "username": "hrd_rina",
-        "email": "rina.hrd@kpiapp.id",
+        "username": "kadiv_rina",
+        "email": "rina.kadiv@kpiapp.id",
         "full_name": "Rina Marlina",
         "password": "Hrd12345",
-        "role": RoleEnum.hrd,
+        "role": RoleEnum.kepala_divisi,
         "is_active": True,
     },
-    # ── Kepala Divisi ───────────────────────────────────────────────
     {
         "username": "kadiv_budi",
         "email": "budi.kadiv@kpiapp.id",
