@@ -83,7 +83,7 @@ class ChatbotListResponse(BaseModel):
     data: list[ChatbotResponse]
     total: int
     page: int
-    page_size: int
+    limit: int
     total_pages: int
 
 

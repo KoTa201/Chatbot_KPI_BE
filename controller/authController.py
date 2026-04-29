@@ -8,7 +8,6 @@ Aturan utama:
 - Login terbuka untuk semua user aktif, mengembalikan access + refresh token.
 - Refresh token dipakai untuk mendapatkan pasangan token baru (rotation).
 - Logout merevoke refresh token aktif.
-- Ganti password hanya untuk diri sendiri.
 - Update & delete user hanya bisa dilakukan oleh admin.
 """
 
@@ -16,21 +15,15 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from model.User import UserORM
-from repository.userRepository import AuthRepository
+from repository.userRepository import UserRepository
 from schema.authSchema import (
-    ChangePasswordRequest,
     LoginRequest,
     MessageResponse,
     RefreshRequest,         # ← schema baru
     TokenResponse,
-    UpdateUserRequest,
-    UserCreateRequest,
     UserResponse,
 )
 from service.authService import AuthService
-from service.userService import UserService
 # Tambahkan import schema baru
 from schema.authSchema import (
     ForgotPasswordRequest,
@@ -44,9 +37,8 @@ class AuthController:
 
     def __init__(self, db: AsyncSession):
         self.db: AsyncSession = db
-        self.repo: AuthRepository = AuthRepository(db)
+        self.repo: UserRepository = UserRepository(db)
         self.svc: AuthService = AuthService()
-        self.user_svc: UserService = UserService(db)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/login                                                    #
@@ -113,7 +105,7 @@ class AuthController:
             )
 
         # -- delegasi --
-        result = await self.svc.request_password_reset(email=payload.email.strip(), repo=self.repo)
+        result = await self.svc.request_password_reset(email=payload.email.strip())
 
         # -- mapping output --
         return MessageResponse.model_validate(result)
@@ -132,7 +124,6 @@ class AuthController:
         result = await self.svc.verify_reset_pin(
             email=payload.email,
             pin=payload.pin,
-            repo=self.repo,
         )
 
         # -- mapping output --
@@ -157,7 +148,6 @@ class AuthController:
         result = await self.svc.reset_password(
             reset_token=payload.reset_token.strip(),
             new_password=payload.new_password,
-            repo=self.repo,
         )
 
         # -- mapping output --
@@ -174,34 +164,5 @@ class AuthController:
         """
         await self.svc.revoke_refresh_token(
             refresh_token=payload.refresh_token,
-            repo=self.repo,
         )
         return MessageResponse(message="Logout berhasil. Refresh token telah dicabut.")
-
-    async def get_me(self, current_user: UserORM) -> UserResponse:
-        """
-        Lihat profil user sendiri.
-        Endpoint ini memerlukan autentikasi (access token).
-        """
-        return UserResponse.model_validate(current_user)
-
-    async def change_password(self, payload: ChangePasswordRequest, current_user: UserORM) -> MessageResponse:
-        """
-        Ganti password diri sendiri.
-        Endpoint ini memerlukan autentikasi (access token).
-        """
-        # -- validasi input --
-        if len(payload.new_password) < 8:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Password baru minimal 8 karakter.",
-            )
-
-        # -- delegasi --
-        result = await self.svc.change_password(
-            payload=payload,
-            current_user=current_user,
-        )
-
-        # -- mapping output --
-        return result

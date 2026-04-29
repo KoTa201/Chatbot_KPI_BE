@@ -6,9 +6,8 @@ from uuid import UUID
 from controller.authController import AuthController
 from controller.userController import UserController
 from databaseConfig import get_db
-from model.User import RoleEnum, UserORM
+from model.User import RoleEnum, User
 from schema.authSchema import (
-    ChangePasswordRequest,
     LoginRequest,
     MessageResponse,
     RefreshRequest,
@@ -21,7 +20,7 @@ from schema.authSchema import (
     ResetTokenResponse,
     VerifyResetPinRequest,
 )
-from service.authService import get_current_user, require_admin
+from service.authService import require_admin
 
 
 class UserRouter:
@@ -48,12 +47,6 @@ class UserRouter:
             "/reset-password", self.reset_password, methods=["POST"], response_model=MessageResponse)
         self.router.add_api_route("/logout", self.logout, methods=[
                                   "POST"], response_model=MessageResponse, summary="Logout dan cabut refresh token")
-
-        # Profile routes
-        self.router.add_api_route(
-            "/me", self.get_me, methods=["GET"], response_model=UserResponse, summary="Lihat profil user")
-        self.router.add_api_route("/me/change-password", self.change_password, methods=[
-                                  "POST"], response_model=MessageResponse, summary="Ganti password diri sendiri")
 
         # Admin user management routes
         self.router.add_api_route("", self.create_user, methods=[
@@ -97,27 +90,17 @@ class UserRouter:
         self.auth_controller = AuthController(db)
         return await self.auth_controller.logout(payload)
 
-    # ─── Profile endpoints ─────────────────────────────────────────────────────
-
-    async def get_me(self, current_user: UserORM = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
-        return await self.auth_controller.get_me(current_user)
-
-    async def change_password(self, payload: ChangePasswordRequest, current_user: UserORM = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
-        return await self.auth_controller.change_password(payload, current_user)
-
     # ─── Admin user management endpoints ───────────────────────────────────────
 
-    async def create_user(self, payload: UserCreateRequest, admin: UserORM = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def create_user(self, payload: UserCreateRequest, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
         return await self.user_controller.create_user(payload, admin)
 
     async def get_all_users(
         self,
+        page: int = Query(default=1, ge=1),
         limit: int = Query(default=20, ge=1, le=100),
-        offset: int = Query(default=0, ge=0),
         search: str | None = Query(
             default=None,
             description="Cari user berdasarkan username, full_name, atau email",
@@ -130,31 +113,31 @@ class UserRouter:
             default=None,
             description="Filter status user: active atau inactive",
         ),
-        admin: UserORM = Depends(require_admin),
+        admin: User = Depends(require_admin),
         db: AsyncSession = Depends(get_db),
     ):
         if not self.user_controller:
             self.user_controller = UserController(db)
         return await self.user_controller.get_all_users(
+            page=page,
             limit=limit,
-            offset=offset,
             admin=admin,
             search=search,
             role=role,
             user_status=status,
         )
 
-    async def get_user_by_id(self, user_id: UUID, admin: UserORM = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def get_user_by_id(self, user_id: UUID, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
         return await self.user_controller.get_user_by_id(user_id, admin)
 
-    async def update_user(self, user_id: UUID, payload: UpdateUserRequest, admin: UserORM = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def update_user(self, user_id: UUID, payload: UpdateUserRequest, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
         return await self.user_controller.update_user(user_id, payload, admin)
 
-    async def delete_user(self, user_id: UUID, admin: UserORM = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def delete_user(self, user_id: UUID, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
         return await self.user_controller.delete_user(user_id, admin)

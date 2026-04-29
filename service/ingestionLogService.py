@@ -22,11 +22,12 @@ class IngestionLogService:
 
     async def get_ingestion_logs(
         self,
+        page: int,
         limit: int,
-        offset: int = 0,
         group_type: Optional[str] = None,
     ) -> dict:
         group_type_filter = self._normalize_group_type(group_type)
+        offset = (page - 1) * limit
 
         count_query = select(func.count()).select_from(IngestionLogORM).join(
             KPIGroupORM,

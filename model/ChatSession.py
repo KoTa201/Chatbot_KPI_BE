@@ -7,7 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from model.Base import Base
 
 if TYPE_CHECKING:
-    from model.User import UserORM
+    from model.User import User
 
 
 class ChatSession(Base):
@@ -35,8 +35,8 @@ class ChatSession(Base):
         nullable=False,
     )
 
-    user: Mapped["UserORM"] = relationship(
-        "UserORM", back_populates="sessions", lazy="noload"
+    user: Mapped["User"] = relationship(
+        "User", back_populates="sessions", lazy="noload"
     )
 
     def __repr__(self) -> str:

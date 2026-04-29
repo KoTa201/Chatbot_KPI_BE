@@ -11,6 +11,7 @@ Perubahan dari versi sebelumnya:
 from typing import Optional
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
@@ -71,13 +72,23 @@ class KPIMasterController:
     async def list_master_groups(
         self,
         page: int = 1,
-        page_size: int = 10,
+        limit: int = 10,
     ) -> KPIGroupListResponse:
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'limit' harus antara 1 dan 100.",
+            )
+        if page < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'page' tidak boleh negatif dan minimal 1.",
+            )
         from service.kpiGroupService import KPIGroupService
 
         return await KPIGroupService(self.db).list_groups(
             page=page,
-            page_size=page_size,
+            limit=limit,
             group_type="master",
             search=None,
         )

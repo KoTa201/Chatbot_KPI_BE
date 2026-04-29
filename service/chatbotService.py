@@ -48,19 +48,18 @@ class ChatbotService:
     async def get_all(
         self,
         page: int = 1,
-        page_size: int = 10,
+        limit: int = 10,
         otoritas: Optional[AuthorityEnum] = None,
         search: Optional[str] = None,
     ) -> ChatbotListResponse:
-        skip = (page - 1) * page_size
-        chatbots, total = await self.repo.get_all(skip, page_size, otoritas, search)
-        total_pages = max(1, -(-total // page_size))  # ceiling division
+        chatbots, total = await self.repo.get_all(page, limit, otoritas, search)
+        total_pages = max(1, -(-total // limit))  # ceiling division
 
         return ChatbotListResponse(
             data=[ChatbotResponse.model_validate(c) for c in chatbots],
             total=total,
             page=page,
-            page_size=page_size,
+            limit=limit,
             total_pages=total_pages,
         )
 

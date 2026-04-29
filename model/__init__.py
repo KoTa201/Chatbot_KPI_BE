@@ -1,4 +1,4 @@
-from .User import UserORM
+from .User import User
 from .KPITracker import KPITrackerORM
 from .KPIGroup import KPIGroupORM
 from .IngestionLog import IngestionLogORM

@@ -16,8 +16,6 @@ from starlette.responses import Response
 
 from config import settings
 
-ALGORITHM = "HS256"
-
 # ------------------------------------------------------------------ #
 #  Role constants                                                      #
 # ------------------------------------------------------------------ #
@@ -66,7 +64,6 @@ ROLE_ROUTES: list[tuple[Optional[str], str, set[str]]] = [
     ("POST",  r"^/api/v1/users/refresh$",               ALL_ROLES),
     # Logout tetap boleh untuk semua role
     ("POST",  r"^/api/v1/users/logout$",                ALL_ROLES),
-    ("POST",  r"^/api/v1/users/me/change-password$",    ALL_ROLES),
     ("GET",   r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
     ("PATCH", r"^/api/v1/users/[\w-]+$",                ALL_ROLES),
     (None,    r"^/api/v1/users",                        {ADMIN}),
@@ -116,7 +113,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
 
 def _decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.AUTH_ALGORITHM])
     except JWTError:
         return None
 

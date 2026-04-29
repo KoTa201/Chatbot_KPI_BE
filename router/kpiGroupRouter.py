@@ -111,8 +111,8 @@ class KPIGroupRouter:
         self,
         page:       int = Query(default=1, ge=1,
                                 description="Nomor halaman"),
-        page_size:  int = Query(default=10, ge=1, le=100,
-                                description="Jumlah item per halaman"),
+        limit:  int = Query(default=10, ge=1, le=100,
+                            description="Jumlah item per halaman"),
         tahun: Optional[int] = Query(
             default=None,
             ge=2000,
@@ -132,7 +132,7 @@ class KPIGroupRouter:
         self.kpi_group_controller = KPIGroupController(db)
         return await self.kpi_group_controller.list_groups(
             page=page,
-            page_size=page_size,
+            limit=limit,
             tahun=tahun,
             group_type=group_type,
             search=search,

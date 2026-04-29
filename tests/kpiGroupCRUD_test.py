@@ -247,16 +247,16 @@ async def test_list_kpi_groups_all():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups, 3)
     ):
-        result = await service.list_groups(page=1, page_size=10)
+        result = await service.list_groups(page=1, limit=10)
 
         assert result.total == 3
         assert result.page == 1
-        assert result.page_size == 10
+        assert result.limit == 10
         assert len(result.data) == 3
         service.repo.list_groups.assert_called_once()
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["page"] == 1
-        assert call_kwargs["page_size"] == 10
+        assert call_kwargs["limit"] == 10
         assert call_kwargs["tahun"] is None
         assert call_kwargs["group_type"] is None
         assert call_kwargs["search"] is None
@@ -281,7 +281,7 @@ async def test_list_kpi_groups_with_filter():
     ):
         result = await service.list_groups(
             page=1,
-            page_size=10,
+            limit=10,
             group_type="master",
         )
 
@@ -310,7 +310,7 @@ async def test_list_kpi_groups_with_search():
     ):
         result = await service.list_groups(
             page=1,
-            page_size=10,
+            limit=10,
             search="KPI Master",
         )
 
@@ -339,7 +339,7 @@ async def test_list_kpi_groups_with_tahun_filter():
     ):
         result = await service.list_groups(
             page=1,
-            page_size=10,
+            limit=10,
             tahun=2025,
         )
 
@@ -360,7 +360,7 @@ async def test_list_kpi_groups_pagination():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups, 25)
     ):
-        result = await service.list_groups(page=1, page_size=5)
+        result = await service.list_groups(page=1, limit=5)
 
         assert result.total == 25
         assert result.total_pages == 5
@@ -757,7 +757,7 @@ async def test_create_list_get_delete_flow():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=([mock_group], 1)
     ):
-        listed = await service.list_groups(page=1, page_size=10)
+        listed = await service.list_groups(page=1, limit=10)
         assert listed.total == 1
 
     # GET

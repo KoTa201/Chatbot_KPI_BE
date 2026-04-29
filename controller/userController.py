@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model.User import RoleEnum, UserORM
+from model.User import RoleEnum, User
 from schema.authSchema import (
     MessageResponse,
     UpdateUserRequest,
@@ -31,7 +31,7 @@ class UserController:
     # ─── Admin user management endpoints ──────────────────────────────
 
     async def create_user(
-        self, payload: UserCreateRequest, admin: UserORM
+        self, payload: UserCreateRequest, admin: User
     ) -> UserResponse:
         """[Admin] Tambah user baru."""
         # -- validasi input --
@@ -54,9 +54,9 @@ class UserController:
 
     async def get_all_users(
         self,
+        page: int,
         limit: int,
-        offset: int,
-        admin: UserORM,
+        admin: User,
         search: str | None = None,
         role: RoleEnum | None = None,
         user_status: str | None = None,
@@ -68,10 +68,10 @@ class UserController:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'limit' harus antara 1 dan 100.",
             )
-        if offset < 0:
+        if page < 1:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'offset' tidak boleh negatif.",
+                detail="'page' tidak boleh negatif dan minimal 1.",
             )
         if user_status is not None and user_status.lower() not in {"active", "inactive"}:
             raise HTTPException(
@@ -85,8 +85,8 @@ class UserController:
 
         # -- delegasi --
         result = await self.user_svc.get_all_users(
+            page=page,
             limit=limit,
-            offset=offset,
             search=search,
             role=role,
             status=active_status_filter,
@@ -95,13 +95,13 @@ class UserController:
         # -- validasi & mapping output --
         return {
             "total": result["total"],
+            "page": result["page"],
             "limit": result["limit"],
-            "offset": result["offset"],
             "users": [UserResponse.model_validate(u) for u in result["users"]],
         }
 
     async def get_user_by_id(
-        self, user_id: UUID, admin: UserORM
+        self, user_id: UUID, admin: User
     ) -> UserResponse:
         """[Admin] Detail user."""
         # -- delegasi --
@@ -111,7 +111,7 @@ class UserController:
         return UserResponse.model_validate(result)
 
     async def update_user(
-        self, user_id: UUID, payload: UpdateUserRequest, admin: UserORM
+        self, user_id: UUID, payload: UpdateUserRequest, admin: User
     ) -> UserResponse:
         """[Admin] Update data user."""
         # -- validasi input --
@@ -129,7 +129,7 @@ class UserController:
         return UserResponse.model_validate(result)
 
     async def delete_user(
-        self, user_id: UUID, admin: UserORM
+        self, user_id: UUID, admin: User
     ) -> MessageResponse:
         """[Admin] Hapus user."""
         # -- delegasi --

@@ -17,6 +17,16 @@ class Settings:
     REFRESH_TOKEN_EXPIRE_DAYS = int(
         os.getenv("REFRESH_TOKEN_EXPIRE_DAYS") or 7)
     RESET_SECRET_KEY: str = os.getenv("RESET_SECRET_KEY")
+    AUTH_ALGORITHM: str = os.getenv("AUTH_ALGORITHM") or "HS256"
+    AUTH_TOKEN_TYPE: str = os.getenv("AUTH_TOKEN_TYPE") or "bearer"
+    AUTH_REFRESH_TOKEN_TYPE: str = os.getenv(
+        "AUTH_REFRESH_TOKEN_TYPE") or "refresh"
+    AUTH_RESET_TOKEN_TYPE: str = os.getenv(
+        "AUTH_RESET_TOKEN_TYPE") or "reset"
+    AUTH_PIN_EXPIRE_MINUTES: int = int(
+        os.getenv("AUTH_PIN_EXPIRE_MINUTES") or 15)
+    AUTH_RESET_TOKEN_EXPIRE_MINUTES: int = int(
+        os.getenv("AUTH_RESET_TOKEN_EXPIRE_MINUTES") or 10)
     SMTP_FROM: str = os.getenv("SMTP_FROM")
     SMTP_HOST: str = os.getenv("SMTP_HOST")
     SMTP_PORT: int = int(os.getenv("SMTP_PORT") or 587)

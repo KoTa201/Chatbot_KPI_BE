@@ -21,34 +21,19 @@ import random
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from model.PasswordReset import PasswordResetORM
+from model.PasswordReset import PasswordReset
 from schema.authSchema import (
-    ForgotPasswordRequest,   # sudah ada di import, tambahkan yang baru
-    ResetPasswordRequest,
     ResetTokenResponse,
-    VerifyResetPinRequest,
 )
 from service.emailService import EmailService
 
 from config import settings
 from databaseConfig import get_db
-from model.User import RoleEnum, UserORM
-from repository.userRepository import AuthRepository
+from model.User import RoleEnum, User
+from repository.userRepository import UserRepository
 from schema.authSchema import (
-    ChangePasswordRequest,
     MessageResponse
 )
-
-# ------------------------------------------------------------------ #
-#  Konfigurasi                                                         #
-# ------------------------------------------------------------------ #
-
-ALGORITHM = "HS256"
-TOKEN_TYPE = "bearer"
-REFRESH_TOKEN_TYPE = "refresh"
-RESET_TOKEN_TYPE = "reset"
-PIN_EXPIRE_MINUTES = 15
-RESET_TOKEN_EXPIRE_MINUTES = 10
 
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -56,14 +41,20 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 class AuthService:
 
     def __init__(self):
-        self.repo: AuthRepository = AuthRepository(Depends(get_db))
+        self.repo: UserRepository = UserRepository(Depends(get_db))
         self.secret_key: str = settings.SECRET_KEY
         self.refresh_secret_key: str = settings.REFRESH_SECRET_KEY
         self.reset_secret_key: str = settings.RESET_SECRET_KEY
         self.access_token_expire_minutes: int = settings.ACCESS_TOKEN_EXPIRE_MINUTES
         self.refresh_token_expire_days: int = settings.REFRESH_TOKEN_EXPIRE_DAYS
+        self.algorithm: str = settings.AUTH_ALGORITHM
+        self.token_type: str = settings.AUTH_TOKEN_TYPE
+        self.refresh_token_type: str = settings.AUTH_REFRESH_TOKEN_TYPE
+        self.reset_token_type: str = settings.AUTH_RESET_TOKEN_TYPE
+        self.pin_expire_minutes: int = settings.AUTH_PIN_EXPIRE_MINUTES
+        self.reset_token_expire_minutes: int = settings.AUTH_RESET_TOKEN_EXPIRE_MINUTES
 
-    async def _get_user_or_404(self, user_id: UUID) -> UserORM:
+    async def _get_user_or_404(self, user_id: UUID) -> User:
         user = await self.repo.get_by_id(user_id)
         if not user:
             raise HTTPException(
@@ -92,7 +83,7 @@ class AuthService:
 
     def create_access_token(
         self,
-        user_id: int,
+        user_id: UUID,
         username: str,
         role: RoleEnum,
         expires_delta: Optional[timedelta] = None,
@@ -115,10 +106,10 @@ class AuthService:
             "sub": str(user_id),
             "username": username,
             "role": role.value,
-            "type": TOKEN_TYPE,          # ← tandai sebagai access token
+            "type": self.token_type,          # ← tandai sebagai access token
             "exp": expire_at,
         }
-        token = jwt.encode(payload, self.secret_key, algorithm=ALGORITHM)
+        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
         return token, expire_seconds
 
     def decode_access_token(self, token: str) -> dict:
@@ -128,7 +119,7 @@ class AuthService:
         """
         try:
             payload = jwt.decode(token, self.secret_key,
-                                 algorithms=[ALGORITHM])
+                                 algorithms=[self.algorithm])
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -137,7 +128,7 @@ class AuthService:
             )
 
         # Tolak jika ternyata refresh token dikirim ke endpoint biasa
-        if payload.get("type") != TOKEN_TYPE:
+        if payload.get("type") != self.token_type:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token bukan access token.",
@@ -172,14 +163,14 @@ class AuthService:
 
         payload = {
             "sub": str(user_id),
-            "type": REFRESH_TOKEN_TYPE,  # ← tandai sebagai refresh token
+            "type": self.refresh_token_type,  # ← tandai sebagai refresh token
             "exp": expire_at,
             "jti": str(uuid.uuid4()),
         }
         # Gunakan secret terpisah agar refresh token tidak bisa
         # dipalsukan dengan secret yang bocor dari access token.
         token = jwt.encode(
-            payload, self.refresh_secret_key, algorithm=ALGORITHM
+            payload, self.refresh_secret_key, algorithm=self.algorithm
         )
         return token, expire_seconds
 
@@ -190,7 +181,7 @@ class AuthService:
         """
         try:
             payload = jwt.decode(
-                token, self.refresh_secret_key, algorithms=[ALGORITHM]
+                token, self.refresh_secret_key, algorithms=[self.algorithm]
             )
         except JWTError:
             raise HTTPException(
@@ -199,7 +190,7 @@ class AuthService:
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        if payload.get("type") != REFRESH_TOKEN_TYPE:
+        if payload.get("type") != self.refresh_token_type:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token bukan refresh token.",
@@ -214,7 +205,7 @@ class AuthService:
     async def rotate_tokens(
         self,
         refresh_token: str,
-        repo: AuthRepository,
+        repo: UserRepository,
     ) -> tuple[str, int, str, int]:
         """
         Implementasi Refresh Token Rotation:
@@ -272,7 +263,6 @@ class AuthService:
     async def revoke_refresh_token(
         self,
         refresh_token: str,
-        repo: AuthRepository,
     ) -> None:
         """
         Revoke refresh token secara eksplisit (dipakai saat logout).
@@ -280,7 +270,7 @@ class AuthService:
         """
         # Tetap decode untuk validasi signature & expiry
         self.decode_refresh_token(refresh_token)
-        await repo.revoke_token(refresh_token)
+        await self.repo.revoke_token(refresh_token)
 
     # ------------------------------------------------------------------ #
     #  User validation                                                     #
@@ -290,8 +280,8 @@ class AuthService:
         self,
         identifier: str,
         password: str,
-        repo: AuthRepository,
-    ) -> UserORM:
+        repo: UserRepository,
+    ) -> User:
         """
         Verifikasi credential. Field `identifier` bisa berupa username atau email.
         Raise HTTP 401 jika credential salah atau user tidak ditemukan.
@@ -312,25 +302,7 @@ class AuthService:
             )
         return user
 
-    async def change_password(
-        self, payload: ChangePasswordRequest, current_user: UserORM
-    ) -> MessageResponse:
-        if not self.verify_password(payload.old_password, current_user.hashed_password):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password lama tidak sesuai.",
-            )
-        if payload.old_password == payload.new_password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password baru tidak boleh sama dengan password lama.",
-            )
-
-        current_user.hashed_password = self.hash_password(payload.new_password)
-        await self.repo.save(current_user)
-        return MessageResponse(message="Password berhasil diubah.")
-
-    async def request_password_reset(self, email: str, repo: AuthRepository) -> MessageResponse:
+    async def request_password_reset(self, email: str) -> MessageResponse:
         """
         Buat PIN 6 digit, simpan hash-nya ke DB, kirim ke email user.
         Selalu kembalikan pesan sukses generik — jangan bocorkan
@@ -340,7 +312,7 @@ class AuthService:
             message="Jika email terdaftar, kode reset akan dikirim dalam beberapa saat."
         )
 
-        user = await repo.get_by_email(email)
+        user = await self.repo.get_by_username_or_email(email)
         if not user or not user.is_active:
             return _GENERIC_OK   # ← sengaja tidak raise 404
 
@@ -348,13 +320,13 @@ class AuthService:
         pin_hash = self.hash_password(pin)   # bcrypt — sama seperti password
 
         expires_at = datetime.now(timezone.utc) + \
-            timedelta(minutes=PIN_EXPIRE_MINUTES)
-        record = PasswordResetORM(
+            timedelta(minutes=self.pin_expire_minutes)
+        record = PasswordReset(
             user_id=user.id,
             pin_hash=pin_hash,
             expires_at=expires_at,
         )
-        await repo.create_reset_pin(record)
+        await self.repo.create_reset_pin(record)
 
         EmailService().send_reset_pin_background(
             to_email=user.email,
@@ -363,7 +335,7 @@ class AuthService:
         )
         return _GENERIC_OK
 
-    async def verify_reset_pin(self, email: str, pin: str, repo: AuthRepository) -> ResetTokenResponse:
+    async def verify_reset_pin(self, email: str, pin: str) -> ResetTokenResponse:
         """
         Verifikasi PIN. Jika valid, kembalikan reset_token (JWT pendek sekali pakai).
         PIN langsung ditandai used_at agar tidak bisa dipakai ulang.
@@ -373,11 +345,11 @@ class AuthService:
             detail="Kode tidak valid atau sudah kedaluwarsa.",
         )
 
-        user = await repo.get_by_email(email)
+        user = await self.repo.get_by_username_or_email(email)
         if not user:
             raise _INVALID
 
-        record = await repo.get_active_reset_pin(user.id)
+        record = await self.repo.get_active_reset_pin(user.id)
         if not record:
             raise _INVALID
 
@@ -385,24 +357,24 @@ class AuthService:
             raise _INVALID
 
         # Tandai PIN sudah dipakai — tidak bisa diverifikasi ulang
-        await repo.mark_reset_pin_used(record)
+        await self.repo.mark_reset_pin_used(record)
 
         # Terbitkan reset_token: JWT pendek, type khusus, payload minimal
-        expire_seconds = RESET_TOKEN_EXPIRE_MINUTES * 60
+        expire_seconds = self.reset_token_expire_minutes * 60
         expire_at = datetime.now(timezone.utc) + \
             timedelta(seconds=expire_seconds)
         payload = {
             "sub": str(user.id),
-            "type": RESET_TOKEN_TYPE,
+            "type": self.reset_token_type,
             "exp": expire_at,
             "jti": secrets.token_hex(16),   # cegah reuse
         }
         reset_token = jwt.encode(
-            payload, self.reset_secret_key, algorithm=ALGORITHM
+            payload, self.reset_secret_key, algorithm=self.algorithm
         )
         return ResetTokenResponse(reset_token=reset_token, expires_in=expire_seconds)
 
-    async def reset_password(self, reset_token: str, new_password: str, repo: AuthRepository) -> MessageResponse:
+    async def reset_password(self, reset_token: str, new_password: str) -> MessageResponse:
         """
         Verifikasi reset_token lalu simpan password baru.
         Token hanya berlaku sekali — setelah dipakai tidak ada mekanisme
@@ -410,7 +382,7 @@ class AuthService:
         """
         try:
             payload = jwt.decode(
-                reset_token, self.reset_secret_key, algorithms=[ALGORITHM]
+                reset_token, self.reset_secret_key, algorithms=[self.algorithm]
             )
         except JWTError:
             raise HTTPException(
@@ -418,13 +390,13 @@ class AuthService:
                 detail="Reset token tidak valid atau sudah kedaluwarsa.",
             )
 
-        if payload.get("type") != RESET_TOKEN_TYPE:
+        if payload.get("type") != self.reset_token_type:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token bukan reset token.",
             )
 
-        user = await repo.get_by_id(UUID(payload["sub"]))
+        user = await self.repo.get_by_id(UUID(payload["sub"]))
         if not user or not user.is_active:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -432,7 +404,7 @@ class AuthService:
             )
 
         user.hashed_password = self.hash_password(new_password)
-        await repo.save(user)
+        await self.repo.save(user)
         return MessageResponse(message="Password berhasil direset. Silakan login dengan password baru.")
 
 
@@ -445,7 +417,7 @@ _auth_service = AuthService()
 async def get_current_user(
     token: str = Depends(_oauth2_scheme),
     db: AsyncSession = Depends(get_db),
-) -> UserORM:
+) -> User:
     """
     Dependency: ekstrak & validasi JWT access token dari header Authorization.
     """
@@ -459,7 +431,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    repo = AuthRepository(db)
+    repo = UserRepository(db)
     user = await repo.get_by_id(UUID(user_id))
 
     if user is None:
@@ -477,8 +449,8 @@ async def get_current_user(
 
 
 async def require_admin(
-    current_user: UserORM = Depends(get_current_user),
-) -> UserORM:
+    current_user: User = Depends(get_current_user),
+) -> User:
     """
     Dependency: pastikan user yang sedang login memiliki role admin.
     """
