@@ -3,26 +3,18 @@ models/user_model.py
 SQLAlchemy ORM model untuk tabel users.
 """
 
-import enum
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from model.Base import Base
+from model.Base import Base, RoleEnum
 from model.PasswordReset import PasswordResetORM
 if TYPE_CHECKING:
     from model.ChatbotAuditLog import ChatbotAuditLog
     from model.PasswordReset import PasswordResetORM
     from model.ChatSession import ChatSession
-
-
-class RoleEnum(str, enum.Enum):
-    admin = "admin"
-    hrd = "hrd"
-    kepala_divisi = "kepala_divisi"
-    karyawan = "karyawan"
 
 
 class UserORM(Base):

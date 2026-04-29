@@ -26,7 +26,7 @@ users(
   id UUID PK,
   full_name VARCHAR,
   email VARCHAR,
-  role ENUM('admin','hrd','kepala_divisi','karyawan'),
+  role ENUM('admin','kepala_divisi','karyawan'),
   is_active BOOLEAN,
   created_at TIMESTAMP
 )
