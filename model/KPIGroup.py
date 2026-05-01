@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from model.KPITracker import KPITrackerORM
 
 
-class KPIGroupORM(Base):
+class KPIGroup(Base):
     __tablename__ = "kpi_groups"
 
     __table_args__ = (

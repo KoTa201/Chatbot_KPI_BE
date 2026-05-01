@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.Base import GroupTypeEnum
 from model.IngestionLog import IngestionLogORM
-from model.KPIGroup import KPIGroupORM
+from model.KPIGroup import KPIGroup
 
 
 class IngestionLogService:
@@ -41,16 +41,19 @@ class IngestionLogService:
 
         base_filters = []
         if source_type_value is not None:
-            base_filters.append(IngestionLogORM.source_type == source_type_value)
+            base_filters.append(
+                IngestionLogORM.source_type == source_type_value)
         if status is not None:
             base_filters.append(IngestionLogORM.status == status)
         if start_date is not None:
-            base_filters.append(IngestionLogORM.created_at >= datetime.combine(start_date, dt_time.min))
+            base_filters.append(IngestionLogORM.created_at >=
+                                datetime.combine(start_date, dt_time.min))
         if end_date is not None:
-            base_filters.append(IngestionLogORM.created_at <= datetime.combine(end_date, dt_time.max))
+            base_filters.append(IngestionLogORM.created_at <=
+                                datetime.combine(end_date, dt_time.max))
 
         count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
-            KPIGroupORM, KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+            KPIGroup, KPIGroup.id == IngestionLogORM.kpi_group_id,
         )
         for f in base_filters:
             count_query = count_query.where(f)
@@ -58,13 +61,14 @@ class IngestionLogService:
         total_result = await self.db.execute(count_query)
         total_count = int(total_result.scalar_one() or 0)
 
-        query = select(IngestionLogORM, KPIGroupORM).outerjoin(
-            KPIGroupORM, KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+        query = select(IngestionLogORM, KPIGroup).outerjoin(
+            KPIGroup, KPIGroup.id == IngestionLogORM.kpi_group_id,
         )
         for f in base_filters:
             query = query.where(f)
 
-        query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
+        query = query.order_by(IngestionLogORM.created_at.desc()).offset(
+            offset).limit(limit)
 
         result = await self.db.execute(query)
         rows = result.all()
@@ -79,11 +83,10 @@ class IngestionLogService:
             "logs": logs_payload,
         }
 
-
     def _format_log_response(
         self,
         log: IngestionLogORM,
-        group: KPIGroupORM | None = None,
+        group: KPIGroup | None = None,
     ) -> dict:
         sheet_name = group.nama_grup if group else (log.group_name or "—")
         nama_orang = None

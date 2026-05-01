@@ -18,8 +18,8 @@ class ChatbotBase(BaseModel):
     )
     otoritas: AuthorityEnum = Field(
         ...,
-        examples=[AuthorityEnum.HRD],
-        description="Otoritas akses: HRD atau Karyawan",
+        examples=[AuthorityEnum.KEPALA_DIVISI],
+        description="Otoritas akses: kepala_divisi atau Karyawan",
     )
     addon_prompt: Optional[str] = Field(
         default=None,
@@ -49,7 +49,7 @@ class ChatbotUpdate(BaseModel):
     )
     otoritas: Optional[AuthorityEnum] = Field(
         default=None,
-        description="Otoritas akses: HRD atau Karyawan",
+        description="Otoritas akses: Kepala Divisi atau Karyawan",
     )
     addon_prompt: Optional[str] = Field(
         default=None,

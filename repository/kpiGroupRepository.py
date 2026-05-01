@@ -14,17 +14,15 @@ Tambahan:
               memiliki kolom `deleted_at` / `is_active`.
 """
 
-import math
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from model.KPIGroup import KPIGroup
 
-from model.KPIGroup import KPIGroupORM
-from model.KPIMaster import KPIMasterORM
-from model.KPITracker import KPITrackerORM
+from model.KPIGroup import KPIGroup
 
 
 class KPIGroupRepository:
@@ -34,13 +32,13 @@ class KPIGroupRepository:
 
     # ─── Get or Create (upsert) ───────────────────────────────────────────────
 
-    async def get_active_scheduled_tracker(self) -> list[KPIGroupORM]:
+    async def get_active_scheduled_tracker(self) -> list[KPIGroup]:
         """Ambil semua KPI Group type=tracker yang aktif (untuk scheduler dan batch)."""
         result = await self.db.execute(
-            select(KPIGroupORM)
-            .where(KPIGroupORM.group_type == "tracker")
-            .where(KPIGroupORM.is_active == True)
-            .order_by(KPIGroupORM.created_at)
+            select(KPIGroup)
+            .where(KPIGroup.group_type == "tracker")
+            .where(KPIGroup.is_active == True)
+            .order_by(KPIGroup.created_at)
         )
         return list(result.scalars().all())
 
@@ -53,7 +51,7 @@ class KPIGroupRepository:
         nama_grup:  str,
         tahun:      int | None = None,
         is_active:  bool = True,
-    ) -> KPIGroupORM:
+    ) -> KPIGroup:
         """
         Upsert KPIGroup by (sheet_id, group_type).
 
@@ -63,7 +61,7 @@ class KPIGroupRepository:
           data grup selalu sinkron dengan kondisi terbaru sheet.
 
         Returns:
-            KPIGroupORM — grup yang sudah ada atau baru dibuat.
+            KPIGroup — grup yang sudah ada atau baru dibuat.
         """
         try:
             update_set = {
@@ -78,7 +76,7 @@ class KPIGroupRepository:
                 update_set["tahun"] = tahun
 
             stmt = (
-                insert(KPIGroupORM)
+                insert(KPIGroup)
                 .values(
                     sheet_id=sheet_id,
                     group_type=group_type,
@@ -92,14 +90,14 @@ class KPIGroupRepository:
                     constraint="uq_kpigroup_sheet_type",
                     set_=update_set,
                 )
-                .returning(KPIGroupORM.id)
+                .returning(KPIGroup.id)
             )
 
             result = await self.db.execute(stmt)
             group_id = result.scalar_one()
             await self.db.flush()
 
-            group = await self.db.get(KPIGroupORM, group_id)
+            group = await self.db.get(KPIGroup, group_id)
             return group
 
         except Exception as e:
@@ -111,7 +109,7 @@ class KPIGroupRepository:
 
     # ─── Read ─────────────────────────────────────────────────────────────────
 
-    async def get_by_id(self, group_id: UUID) -> KPIGroupORM | None:
+    async def get_by_id(self, group_id: UUID) -> KPIGroup | None:
         """
         Fetch KPIGroup beserta relasi yang relevan berdasarkan group_type.
 
@@ -122,11 +120,11 @@ class KPIGroupRepository:
                       'tracker' → tracker_records (list[KPITrackerORM])
 
         Returns:
-            KPIGroupORM dengan relasi ter-load, atau None jika tidak ada.
+            KPIGroup dengan relasi ter-load, atau None jika tidak ada.
         """
         # ── Query 1: ambil metadata grup (ringan, tanpa relationship) ─────────
         result = await self.db.execute(
-            select(KPIGroupORM).where(KPIGroupORM.id == group_id)
+            select(KPIGroup).where(KPIGroup.id == group_id)
         )
         group = result.scalars().first()
 
@@ -146,13 +144,13 @@ class KPIGroupRepository:
 
     async def get_master_groups(
         self, page: int = 1, limit: int = 100
-    ) -> list[KPIGroupORM]:
+    ) -> list[KPIGroup]:
         """Ambil semua grup bertipe 'master', diurutkan dari terbaru."""
         offset = (page - 1) * limit
         result = await self.db.execute(
-            select(KPIGroupORM)
-            .where(KPIGroupORM.group_type == "master")
-            .order_by(KPIGroupORM.updated_at.desc())
+            select(KPIGroup)
+            .where(KPIGroup.group_type == "master")
+            .order_by(KPIGroup.updated_at.desc())
             .offset(offset)
             .limit(limit)
         )
@@ -165,24 +163,24 @@ class KPIGroupRepository:
         tahun:      int | None = None,
         group_type: str | None = None,
         search:     str | None = None,
-    ) -> tuple[list[KPIGroupORM], int]:
+    ) -> tuple[list[KPIGroup], int]:
         """
         List KPI Groups dengan pagination, filter tipe/tahun, dan pencarian nama grup.
 
         Returns:
             (rows, total_count)
         """
-        base_query = select(KPIGroupORM)
+        base_query = select(KPIGroup)
 
         if group_type:
-            base_query = base_query.where(KPIGroupORM.group_type == group_type)
+            base_query = base_query.where(KPIGroup.group_type == group_type)
 
         if tahun is not None:
-            base_query = base_query.where(KPIGroupORM.tahun == tahun)
+            base_query = base_query.where(KPIGroup.tahun == tahun)
 
         if search:
             pattern = f"%{search}%"
-            base_query = base_query.where(KPIGroupORM.nama_grup.ilike(pattern))
+            base_query = base_query.where(KPIGroup.nama_grup.ilike(pattern))
 
         # Hitung total sebelum pagination
         count_result = await self.db.execute(
@@ -194,7 +192,7 @@ class KPIGroupRepository:
         offset = (page - 1) * limit
         rows_result = await self.db.execute(
             base_query
-            .order_by(KPIGroupORM.updated_at.desc())
+            .order_by(KPIGroup.updated_at.desc())
             .offset(offset)
             .limit(limit)
         )
@@ -207,35 +205,21 @@ class KPIGroupRepository:
     async def update(
         self,
         group_id: UUID,
-        fields:   dict,
-    ) -> KPIGroupORM:
-        """
-        Partial update KPIGroup berdasarkan dict `fields` yang diberikan.
-
-        Hanya kolom yang ada dalam `fields` yang akan diupdate —
-        kolom lain tidak tersentuh. `updated_at` diupdate otomatis
-        oleh `onupdate` di model.
-
-        Args:
-            group_id: UUID grup yang akan diupdate.
-            fields:   Dict berisi kolom → nilai baru. Kolom yang tidak
-                      ada dalam dict tidak akan diubah.
-
-        Returns:
-            KPIGroupORM yang sudah diupdate.
-
-        Raises:
-            HTTPException 404 jika grup tidak ditemukan.
-            HTTPException 500 jika terjadi error database.
-        """
-        group = await self.get_by_id(group_id)
-        if not group:
-            raise HTTPException(
-                status_code=404,
-                detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
-            )
-
+        fields: dict,
+    ) -> KPIGroup:
         try:
+            # Fetch dulu dari DB agar object terhubung ke session
+            result = await self.db.execute(
+                select(KPIGroup).where(KPIGroup.id == group_id)
+            )
+            group = result.scalar_one_or_none()
+
+            if not group:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
+                )
+
             for column, value in fields.items():
                 if hasattr(group, column):
                     setattr(group, column, value)
@@ -244,6 +228,8 @@ class KPIGroupRepository:
             await self.db.refresh(group)
             return group
 
+        except HTTPException:
+            raise
         except Exception as e:
             await self.db.rollback()
             raise HTTPException(
@@ -257,12 +243,6 @@ class KPIGroupRepository:
         """
         Hard delete KPIGroup beserta seluruh master_records dan tracker_records
         yang berelasi (cascade="all, delete-orphan" sudah dikonfigurasi di model).
-
-        Catatan desain:
-          Soft-delete tidak diimplementasikan karena model KPIGroupORM tidak
-          memiliki kolom `deleted_at` atau `is_active`. Jika soft-delete
-          dibutuhkan di masa depan, tambahkan kolom tersebut ke model dan
-          buat migrasi Alembic.
 
         Args:
             group_id: UUID grup yang akan dihapus.

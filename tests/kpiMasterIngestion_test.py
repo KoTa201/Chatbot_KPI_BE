@@ -65,7 +65,7 @@ def make_kpi_group(
     tahun: int = TAHUN,
     is_active: bool = True,
 ):
-    """Create mock KPIGroupORM."""
+    """Create mock KPIGroup."""
     group = MagicMock()
     group.id = id
     group.sheet_id = sheet_id

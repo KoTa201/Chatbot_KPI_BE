@@ -8,22 +8,19 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model.KPIGroup import KPIGroupORM
+from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from schema.kpiGroupSchema import (
     KPIGroupCreate,
     KPIGroupUpdate,
-    KPIGroupListResponse,
-    KPIGroupResponse,
-    KPIGroupMasterRecord,   # nama baru — tidak bentrok dengan kpiMasterSchema
-    KPIGroupTrackerRecord,  # nama baru — tidak bentrok dengan kpiTrackerSchema
 )
 from service.googleSheetService import GoogleSheetService
 from service.kpiMasterIngestionService import KPIMasterIngestionService
 from service.kpiMasterService import KPIMasterService
 from service.TrackeringestionService import TrackerIngestionService
+from repository.kpiTrackerRepository import KPITrackerRepository
 
 
 class KPIGroupService:
@@ -32,65 +29,17 @@ class KPIGroupService:
         self.db: AsyncSession = db
         self.repo: KPIGroupRepository = KPIGroupRepository(db)
 
-    # ─── Helper: ORM → KPIGroupResponse ──────────────────────────────────────
-
-    def _build_response(
-        self,
-        group: KPIGroupORM,
-        *,
-        include_records: bool = False,
-    ) -> KPIGroupResponse:
-        """
-        Konversi KPIGroupORM → KPIGroupResponse secara eksplisit.
-
-        Tidak menggunakan model_validate(group) langsung karena Pydantic
-        akan mengakses semua field termasuk relasi lazy yang belum di-load,
-        yang memicu MissingGreenlet error di async SQLAlchemy.
-
-        include_records=True  → konversi relasi yang sudah di-refresh oleh repo.
-        include_records=False → list records kosong (untuk list & create/update response).
-        """
-        master_records:  list[KPIGroupMasterRecord] = []
-        tracker_records: list[KPIGroupTrackerRecord] = []
-
-        if include_records:
-            if group.group_type == "master":
-                master_records = [
-                    KPIGroupMasterRecord.model_validate(r)
-                    for r in group.master_records
-                ]
-
-            elif group.group_type == "tracker":
-                tracker_records = [
-                    KPIGroupTrackerRecord.model_validate(r)
-                    for r in group.tracker_records
-                ]
-
-        return KPIGroupResponse(
-            id=group.id,
-            nama_grup=group.nama_grup,
-            group_type=group.group_type,
-            sheet_url=group.sheet_url,          # type: ignore[arg-type]
-            sheet_id=group.sheet_id,
-            sheet_name=group.sheet_name,
-            tahun=group.tahun,
-            is_active=group.is_active,
-            created_at=group.created_at,
-            updated_at=group.updated_at,
-            master_records=master_records,
-            tracker_records=tracker_records,
-        )
-
     # ─── List ─────────────────────────────────────────────────────────────────
 
     async def list_groups(
         self,
         page:       int,
-        limit:  int,
+        limit:      int,
         tahun:      int | None = None,
         group_type: str | None = None,
         search:     str | None = None,
-    ) -> KPIGroupListResponse:
+    ) -> tuple[list[KPIGroup], int]:
+        """Kembalikan (rows, total) — formatting ada di controller."""
         rows, total = await self.repo.list_groups(
             page=page,
             limit=limit,
@@ -98,36 +47,22 @@ class KPIGroupService:
             group_type=group_type,
             search=search,
         )
-        return KPIGroupListResponse(
-            total=total,
-            page=page,
-            limit=limit,
-            total_pages=math.ceil(total / limit) if total else 0,
-            data=[self._build_response(r, include_records=False)
-                  for r in rows],
-        )
+        return rows, total
 
     # ─── Get one ──────────────────────────────────────────────────────────────
 
-    async def get_group(self, group_id: UUID) -> KPIGroupResponse:
+    async def get_group(self, group_id: UUID) -> KPIGroup:
         """
         Fetch satu grup lengkap dengan records yang relevan.
         Repository sudah menangani conditional refresh berdasarkan group_type.
         """
-        group = await self.repo.get_by_id(group_id)
-        if not group:
-            raise HTTPException(
-                status_code=404,
-                detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
-            )
-        return self._build_response(group, include_records=True)
+        return await self._get_or_404(group_id)
 
     # ─── Create ───────────────────────────────────────────────────────────────
 
-    async def create_group(self, payload: KPIGroupCreate) -> KPIGroupResponse:
+    async def create_group(self, payload: KPIGroupCreate) -> KPIGroup:
         sheet_url_str = str(payload.sheet_url)
 
-        # Auto-fetch nama dan sheet_id dari Google Sheets jika tidak disertakan
         google_svc = GoogleSheetService()
         nama_grup = payload.nama_grup
         sheet_id = payload.sheet_id
@@ -137,7 +72,6 @@ class KPIGroupService:
                 if not nama_grup:
                     nama_grup = google_svc.get_spreadsheet_title(sheet_url_str)
                 if not sheet_id:
-                    # Ekstrak sheet_id dari URL
                     import re
                     match = re.search(
                         r"/spreadsheets/d/([a-zA-Z0-9_-]+)", sheet_url_str)
@@ -157,7 +91,7 @@ class KPIGroupService:
         )
         await self.db.commit()
         await self.db.refresh(group)
-        return self._build_response(group, include_records=False)
+        return group
 
     # ─── Update ───────────────────────────────────────────────────────────────
 
@@ -165,21 +99,10 @@ class KPIGroupService:
         self,
         group_id: UUID,
         payload:  KPIGroupUpdate,
-    ) -> KPIGroupResponse:
-        """
-        Partial update. Jika sheet_url atau tahun berubah pada KPI Master,
-        jalankan ulang ingestion setelah perubahan tersimpan ke DB.
-        Response tidak menyertakan records — GET /{id} untuk data terbaru.
-        """
-        existing = await self.repo.get_by_id(group_id)
-        if not existing:
-            raise HTTPException(
-                status_code=404,
-                detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
-            )
+    ) -> KPIGroup:
+        existing = await self._get_or_404(group_id)
 
         update_fields = payload.model_dump(exclude_none=True)
-
         update_fields.pop("is_scheduled", None)
 
         if "sheet_url" in update_fields:
@@ -194,19 +117,6 @@ class KPIGroupService:
             and "tahun" in update_fields
             and update_fields["tahun"] != existing.tahun
         )
-
-        if sheet_url_changed and existing.group_type == "master" and not payload.tahun:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Field `tahun` wajib disertakan saat mengubah sheet_url "
-                    "pada KPI Group bertipe 'master'."
-                ),
-            )
-
-        group = await self.repo.update(group_id=group_id, fields=update_fields)
-        await self.db.commit()
-        await self.db.refresh(group)
 
         if sheet_url_changed or tahun_changed:
             if existing.group_type == "master":
@@ -223,21 +133,35 @@ class KPIGroupService:
                     group_id=group_id,
                     sheet_url=update_fields["sheet_url"] if sheet_url_changed else None,
                     tahun=payload.tahun,
+                    group=existing,
                 )
             elif existing.group_type == "tracker":
-                new_url = update_fields["sheet_url"]
-                svc = TrackerIngestionService(self.db)
+                kpi_repo = KPITrackerRepository(self.db)
+                log_repo = IngestionLogRepository(self.db)
+                svc = TrackerIngestionService(
+                    self.db, group_repo=self.repo, log_repo=log_repo, tracker_repo=kpi_repo)
                 await svc.ingest_all_sheets(
-                    sheet_url=new_url,
+                    sheet_url=update_fields["sheet_url"],
                     tahun=payload.tahun or 2026,
                     skip_on_error=True,
+                    existing_group_id=existing.id,
                 )
+        group = await self.repo.get_by_id(group_id)
 
-        return self._build_response(group, include_records=False)
+        return group
 
     # ─── Delete ───────────────────────────────────────────────────────────────
 
-    async def delete_group(self, group_id: UUID) -> dict:
+    async def delete_group(self, group_id: UUID) -> None:
+        await self._get_or_404(group_id)
         await self.repo.delete(group_id)
         await self.db.commit()
-        return {"message": f"KPI Group '{group_id}' berhasil dihapus."}
+
+    async def _get_or_404(self, group_id: UUID) -> KPIGroup:
+        group = await self.repo.get_by_id(group_id)
+        if not group:
+            raise HTTPException(
+                status_code=404,
+                detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
+            )
+        return group

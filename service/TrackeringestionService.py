@@ -78,6 +78,7 @@ class TrackerIngestionService:
         nama_orang_override: str = None,
         tahun: int = 2026,
         skip_on_error: bool = True,
+        existing_group_id: Optional[UUID] = None,
     ) -> BulkIngestionResponse:
         """
         Ingest semua tab dalam satu spreadsheet.
@@ -93,7 +94,7 @@ class TrackerIngestionService:
         try:
             all_sheets = self._fetch_all_sheets(sheet_url, skip_on_error)
             spreadsheet_id = self._extract_spreadsheet_id(all_sheets)
-            group = await self._ensure_tracker_group(sheet_url, spreadsheet_id, tahun)
+            group = await self._ensure_tracker_group(sheet_url, spreadsheet_id, tahun, existing_group_id)
 
             if group:
                 run_log = await self.log_repo.create(
@@ -310,20 +311,43 @@ class TrackerIngestionService:
             None,
         )
 
-    async def _ensure_tracker_group(self, sheet_url: str, spreadsheet_id: Optional[str], tahun: int):
+    async def _ensure_tracker_group(
+        self,
+        sheet_url: str,
+        spreadsheet_id: Optional[str],
+        tahun: int,
+        existing_group_id: Optional[UUID] = None,  # ← tambah parameter
+    ):
         if not spreadsheet_id:
             return None
-
-        self.logger.info(
-            "[TrackerIngestion] Upserting KPIGroup for spreadsheet_id=%s",
-            spreadsheet_id,
-        )
 
         try:
             nama_grup = self.google_svc.get_spreadsheet_title(sheet_url)
         except Exception:
             nama_grup = "KPI Tracker " + (str(tahun) or "")
 
+        # ── Update mode: update group lama, bukan buat baru ──────────────
+        if existing_group_id:
+            self.logger.info(
+                "[TrackerIngestion] Updating existing KPIGroup id=%s", existing_group_id
+            )
+            group = await self.group_repo.update(
+                group_id=existing_group_id,
+                fields={
+                    "sheet_id": spreadsheet_id,
+                    "sheet_url": sheet_url,
+                    "nama_grup": nama_grup,
+                    "tahun": tahun,
+                },
+            )
+            await self.db.commit()
+            await self.db.refresh(group)
+            return group
+
+        # ── Create mode: seperti sebelumnya ──────────────────────────────
+        self.logger.info(
+            "[TrackerIngestion] Upserting KPIGroup for spreadsheet_id=%s", spreadsheet_id
+        )
         group = await self.group_repo.get_or_create(
             sheet_id=spreadsheet_id,
             group_type="tracker",
@@ -332,7 +356,6 @@ class TrackerIngestionService:
             nama_grup=nama_grup,
             tahun=tahun,
         )
-
         self.logger.info(
             "[TrackerIngestion] KPIGroup ready: group_id=%s", group.id)
         return group
