@@ -14,7 +14,7 @@ import re
 from schema.clarificationSchema import AmbiguityAssessmentResult
 from service.llmService import LLMService
 from template.promptTemplate import build_ambiguity_assessment_prompt
-from config import get_settings
+from configCredidential import get_settings
 
 settings = get_settings()
 

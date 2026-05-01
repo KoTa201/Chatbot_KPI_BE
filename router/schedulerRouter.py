@@ -3,19 +3,17 @@ router/schedulerRouter.py
 Class-based router untuk scheduler endpoints.
 """
 
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter
 
 from controller.schedulerController import SchedulerController
-from databaseConfig import get_db
-from schema.schedulerSchema import SchedulerConfigCreate, SchedulerConfigUpdate
+from schema.schedulerSchema import SchedulerConfigUpdate
 
 
 class SchedulerRouter:
     """Router untuk endpoints scheduler configuration."""
 
     def __init__(self):
-        self.router = APIRouter(prefix="/scheduler", tags=["Scheduler"])
+        self.router = APIRouter(tags=["Scheduler"])
         self.scheduler_controller: SchedulerController | None = None
         self.setup_routes()
 
@@ -23,34 +21,24 @@ class SchedulerRouter:
         """Register all scheduler routes."""
         self.router.add_api_route("", self.get_config, methods=[
                                   "GET"], summary="Get scheduler config")
-        self.router.add_api_route("", self.create_config, methods=[
-                                  "POST"], summary="Create scheduler config")
         self.router.add_api_route("", self.update_config, methods=[
                                   "PATCH"], summary="Update scheduler config")
         self.router.add_api_route("/trigger", self.trigger_scheduler,
                                   methods=["POST"], summary="Manually trigger one ingestion run")
 
-    async def get_config(self, db: AsyncSession = Depends(get_db)):
+    async def get_config(self):
         """Get current scheduler configuration."""
-        self.scheduler_controller = SchedulerController(db)
+        self.scheduler_controller = SchedulerController()
         return await self.scheduler_controller.get_config()
 
-    async def create_config(self, body: SchedulerConfigCreate, db: AsyncSession = Depends(get_db)):
-        """Create new scheduler configuration."""
-        self.scheduler_controller = SchedulerController(db)
-        return await self.scheduler_controller.create_config(
-            interval_value=body.interval_value,
-            is_enabled=body.is_enabled,
-        )
-
-    async def update_config(self, body: SchedulerConfigUpdate, db: AsyncSession = Depends(get_db)):
+    async def update_config(self, body: SchedulerConfigUpdate):
         """Update existing scheduler configuration."""
-        self.scheduler_controller = SchedulerController(db)
-        return await self.scheduler_controller.update_config(body.model_dump(exclude_unset=True))
+        self.scheduler_controller = SchedulerController()
+        return await self.scheduler_controller.update_config(payload=body)
 
-    async def trigger_scheduler(self, db: AsyncSession = Depends(get_db)):
+    async def trigger_scheduler(self):
         """Manually trigger ingestion job."""
-        self.scheduler_controller = SchedulerController(db)
+        self.scheduler_controller = SchedulerController()
         return await self.scheduler_controller.trigger_now()
 
 

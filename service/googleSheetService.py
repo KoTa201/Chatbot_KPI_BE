@@ -17,7 +17,7 @@ import pandas as pd
 from fastapi import HTTPException
 from google.oauth2.service_account import Credentials
 
-from config import settings
+from configCredidential import settings
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",

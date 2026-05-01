@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, APIStatusError
-from config import get_settings
+from configCredidential import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)

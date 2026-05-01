@@ -27,7 +27,7 @@ from schema.authSchema import (
 )
 from service.emailService import EmailService
 
-from config import settings
+from configCredidential import settings
 from databaseConfig import get_db
 from model.User import RoleEnum, User
 from repository.userRepository import UserRepository

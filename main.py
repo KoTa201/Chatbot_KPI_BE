@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import model
 from databaseConfig import create_tables
-from config import settings
+from configCredidential import settings
 from router import (
     kpiTrackerRouter as ingestion,
     userRouter as users,

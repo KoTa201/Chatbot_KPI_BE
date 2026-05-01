@@ -74,7 +74,7 @@ def pytest_sessionfinish(session, exitstatus):
 
     try:
         if not os.path.exists(html_path):
-            print(f"\n⚠️  File HTML tidak ditemukan di: {html_path}")
+            print(f"\n[WARN] File HTML tidak ditemukan di: {html_path}")
             return
 
         report_is_fresh = _wait_for_fresh_html_report(
@@ -83,9 +83,9 @@ def pytest_sessionfinish(session, exitstatus):
         )
         if not report_is_fresh:
             print(
-                "\n⚠️  Report HTML belum terdeteksi sebagai file terbaru; lanjut konversi dengan file yang ada.")
+                "\n[WARN] Report HTML belum terdeteksi sebagai file terbaru; lanjut konversi dengan file yang ada.")
 
-        print("\n🔄 Mengkonversi laporan HTML ke PDF via Playwright...")
+        print("\n[INFO] Mengkonversi laporan HTML ke PDF via Playwright...")
 
         from playwright.sync_api import sync_playwright
 
@@ -111,7 +111,7 @@ def pytest_sessionfinish(session, exitstatus):
             )
             browser.close()
 
-        print(f"✅ Laporan PDF berhasil disimpan di: {pdf_path}")
+        print(f"[SUCCESS] Laporan PDF berhasil disimpan di: {pdf_path}")
 
     except Exception as e:
-        print(f"\n❌ Gagal konversi PDF. Error: {e}")
+        print(f"\n[ERROR] Gagal konversi PDF. Error: {e}")

@@ -14,7 +14,7 @@ from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from config import settings
+from configCredidential import settings
 
 # ------------------------------------------------------------------ #
 #  Role constants                                                      #

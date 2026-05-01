@@ -4,54 +4,29 @@ repository/schedulerRepository.py
 from datetime import datetime
 from typing import Optional
 
-from fastapi import HTTPException
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from model.SchedulerConfig import SchedulerConfigORM
+from config.schedulerConfigManager import SchedulerConfigManager
+from model.SchedulerConfig import SchedulerConfigModel
 
 
 class SchedulerRepository:
+    def __init__(self):
+        self.config: Optional[SchedulerConfigModel] = None
 
-    def __init__(self, db: AsyncSession):
-        self.db = db
-        self.config: SchedulerConfigORM = None
-
-    async def get_config(self) -> Optional[SchedulerConfigORM]:
-        result = await self.db.execute(select(SchedulerConfigORM).limit(1))
-        self.config = result.scalar_one_or_none()
+    async def get_config(self) -> SchedulerConfigModel:
+        self.config = await SchedulerConfigManager.get_config()
         return self.config
 
-    async def create_config(
-        self,
-        interval_value: datetime,
-        is_enabled: bool,
-    ) -> SchedulerConfigORM:
-        self.config = SchedulerConfigORM(
-            interval_value=interval_value,
-            is_enabled=is_enabled,
-        )
-        self.db.add(self.config)
-        try:
-            await self.db.commit()
-            await self.db.refresh(self.config)
-            return self.config
-        except Exception as e:
-            await self.db.rollback()
-            raise HTTPException(
-                status_code=500, detail=f"Gagal simpan scheduler config: {str(e)}"
-            )
-
-    async def update_config(self, updates: dict) -> Optional[SchedulerConfigORM]:
+    async def update_config(self, updates: dict) -> SchedulerConfigModel:
         if not self.config:
             self.config = await self.get_config()
-        if not self.config:
-            return None
+
+        # Update attributes
         for key, val in updates.items():
-            if val is not None:
+            if val is not None and hasattr(self.config, key):
                 setattr(self.config, key, val)
-        await self.db.commit()
-        await self.db.refresh(self.config)
+
+        self.config.updated_at = datetime.now()
+        await SchedulerConfigManager.save_config(self.config)
         return self.config
 
     async def update_run_times(
@@ -61,10 +36,10 @@ class SchedulerRepository:
     ) -> None:
         if not self.config:
             self.config = await self.get_config()
-        if not self.config:
-            return
+
         if last_run_at:
             self.config.last_run_at = last_run_at
         if next_run_at:
             self.config.next_run_at = next_run_at
-        await self.db.commit()
+
+        await SchedulerConfigManager.save_config(self.config)

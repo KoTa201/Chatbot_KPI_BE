@@ -14,7 +14,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
 
-from config import settings
+from configCredidential import settings
 
 
 logger = logging.getLogger(__name__)
