@@ -19,7 +19,7 @@ from typing import AsyncGenerator
 from databaseConfig import Base
 from databaseConfig import get_db
 from model.Chatbot import Chatbot, AuthorityEnum  # noqa: F401
-from model.User import UserORM, RoleEnum
+from model.User import User, RoleEnum
 from service.authService import AuthService
 from main import app
 
@@ -75,7 +75,7 @@ async def clean_db():
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
     auth_service = AuthService()
-    admin = UserORM(
+    admin = User(
         username=f"admin_{uuid4().hex[:8]}",
         email=f"admin_{uuid4().hex[:8]}@example.com",
         full_name="Admin Test",
@@ -119,7 +119,7 @@ async def role_tokens(db_session: AsyncSession) -> dict[str, str]:
 
     for role in (RoleEnum.admin, RoleEnum.kepala_divisi, RoleEnum.karyawan):
         suffix = uuid4().hex[:8]
-        user = UserORM(
+        user = User(
             username=f"{role.value}_{suffix}",
             email=f"{role.value}_{suffix}@example.com",
             full_name=f"{role.value.title()} Test",
@@ -261,7 +261,8 @@ class TestCreateChatbot:
         result = await db_session.execute(
             select(Chatbot).where(Chatbot.otoritas == AuthorityEnum.HRD)
         )
-        status_by_id = {str(chatbot.id): chatbot.is_active for chatbot in result.scalars().all()}
+        status_by_id = {
+            str(chatbot.id): chatbot.is_active for chatbot in result.scalars().all()}
 
         assert status_by_id[first_id] is False
         assert status_by_id[second_id] is True
@@ -351,12 +352,12 @@ class TestListChatbot:
         names = {item["nama_chatbot"] for item in body["data"]}
         assert names == {"Aktif Bot", "Nonaktif Bot"}
 
-    async def test_list_pagination_page_size(self, client: AsyncClient, db_session: AsyncSession):
-        """page_size membatasi jumlah item per halaman."""
+    async def test_list_pagination_limit(self, client: AsyncClient, db_session: AsyncSession):
+        """limit membatasi jumlah item per halaman."""
         for i in range(5):
             await seed_chatbot(db_session, nama_chatbot=f"Bot {i}")
 
-        res = await client.get("/api/v1/chatbots/?page=1&page_size=2")
+        res = await client.get("/api/v1/chatbots/?page=1&limit=2")
 
         body = res.json()
         assert len(body["data"]) == 2
@@ -368,8 +369,8 @@ class TestListChatbot:
         for i in range(4):
             await seed_chatbot(db_session, nama_chatbot=f"Bot {i}")
 
-        res1 = await client.get("/api/v1/chatbots/?page=1&page_size=2")
-        res2 = await client.get("/api/v1/chatbots/?page=2&page_size=2")
+        res1 = await client.get("/api/v1/chatbots/?page=1&limit=2")
+        res2 = await client.get("/api/v1/chatbots/?page=2&limit=2")
 
         ids_page1 = {c["id"] for c in res1.json()["data"]}
         ids_page2 = {c["id"] for c in res2.json()["data"]}
@@ -575,12 +576,14 @@ class TestUpdateChatbot:
         assert res.json()["is_active"] is True
 
         result = await db_session.execute(
-            select(Chatbot).where(Chatbot.id.in_([old_active.id, to_activate.id]))
+            select(Chatbot).where(Chatbot.id.in_(
+                [old_active.id, to_activate.id]))
         )
         chatbots = result.scalars().all()
         for chatbot in chatbots:
             await db_session.refresh(chatbot)
-        status_by_id = {str(chatbot.id): chatbot.is_active for chatbot in chatbots}
+        status_by_id = {
+            str(chatbot.id): chatbot.is_active for chatbot in chatbots}
 
         assert status_by_id[str(old_active.id)] is False
         assert status_by_id[str(to_activate.id)] is True
@@ -617,7 +620,8 @@ class TestUpdateChatbot:
         chatbots = result.scalars().all()
         for chatbot in chatbots:
             await db_session.refresh(chatbot)
-        status_by_id = {str(chatbot.id): chatbot.is_active for chatbot in chatbots}
+        status_by_id = {
+            str(chatbot.id): chatbot.is_active for chatbot in chatbots}
 
         assert status_by_id[str(target_active.id)] is False
         assert status_by_id[str(mover.id)] is True

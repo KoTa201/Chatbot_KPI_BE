@@ -14,6 +14,7 @@ Pola ini konsisten dengan ChatbotController agar mudah di-maintain.
 
 from uuid import UUID
 
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from schema.kpiGroupSchema import (
@@ -37,14 +38,24 @@ class KPIGroupController:
     async def list_groups(
         self,
         page:       int,
-        page_size:  int,
+        limit:  int,
         tahun:      int | None,
         group_type: str | None,
         search:     str | None,
     ) -> KPIGroupListResponse:
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'limit' harus antara 1 dan 100.",
+            )
+        if page < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="'page' tidak boleh negatif dan minimal 1.",
+            )
         return await self.service.list_groups(
             page=page,
-            page_size=page_size,
+            limit=limit,
             tahun=tahun,
             group_type=group_type,
             search=search,

@@ -1,7 +1,6 @@
 
 import logging
 from uuid import UUID
-from model.User import RoleEnum
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,8 +11,8 @@ from schema.authSchema import (
     UserCreateRequest,
     UserResponse,
 )
-from repository.userRepository import AuthRepository
-from model.User import UserORM
+from repository.userRepository import UserRepository
+from model.User import RoleEnum, User
 from service.emailService import EmailService
 from service.authService import AuthService, require_admin
 
@@ -23,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 class UserService:
     def __init__(self, db: AsyncSession):
-        self.repo = AuthRepository(db)
-        self.auth_service = AuthService(db)
-        self.email_service = EmailService()
+        self.repo: UserRepository = UserRepository(db)
+        self.auth_service: AuthService = AuthService()
+        self.email_service: EmailService = EmailService()
         # Akan di-set di Depends(require_admin) pada router
-        self.user: UserORM = None
+        self.user: User = None
 
         # ------------------------------------------------------------------ #
     #  User management                                                     #
@@ -45,7 +44,7 @@ class UserService:
                 detail=f"Email '{payload.email}' sudah terdaftar.",
             )
 
-        self.user = UserORM(
+        self.user = User(
             username=payload.username,
             email=payload.email,
             full_name=payload.full_name,
@@ -74,15 +73,15 @@ class UserService:
 
     async def get_all_users(
         self,
+        page: int,
         limit: int,
-        offset: int,
         search: str | None = None,
         role: RoleEnum | None = None,
         status: bool | None = None,
     ) -> dict:
         users = await self.repo.get_all_users(
+            page=page,
             limit=limit,
-            offset=offset,
             search=search,
             role=role,
             status=status,
@@ -94,19 +93,19 @@ class UserService:
         )
         return {
             "total": total,
+            "page": page,
             "limit": limit,
-            "offset": offset,
             "users": [UserResponse.model_validate(u) for u in users],
         }
 
     async def get_user_by_id(self, user_id: UUID) -> UserResponse:
-        self.user = await self.auth_service._get_user_or_404(user_id, repo=self.repo)
+        self.user = await self.auth_service._get_user_or_404(user_id)
         return UserResponse.model_validate(self.user)
 
     async def update_user(
         self, user_id: UUID, payload: UpdateUserRequest
     ) -> UserResponse:
-        self.user = await self.auth_service._get_user_or_404(user_id, repo=self.repo)
+        self.user = await self.auth_service._get_user_or_404(user_id)
 
         if payload.email and payload.email != self.user.email:
             if await self.repo.email_exists(payload.email):
@@ -132,6 +131,6 @@ class UserService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin tidak dapat menghapus akun sendiri.",
             )
-        self.user = await self.auth_service._get_user_or_404(user_id, repo=self.repo)
+        self.user = await self.auth_service._get_user_or_404(user_id)
         await self.repo.delete_user(self.user)
         return MessageResponse(message=f"User '{self.user.username}' berhasil dihapus.")

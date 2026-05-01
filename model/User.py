@@ -10,14 +10,14 @@ from uuid import uuid4
 from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from model.Base import Base, RoleEnum
-from model.PasswordReset import PasswordResetORM
+from model.PasswordReset import PasswordReset
 if TYPE_CHECKING:
     from model.ChatbotAuditLog import ChatbotAuditLog
-    from model.PasswordReset import PasswordResetORM
+    from model.PasswordReset import PasswordReset
     from model.ChatSession import ChatSession
 
 
-class UserORM(Base):
+class User(Base):
     __tablename__ = "users"
 
     id: Mapped[UUID] = mapped_column(
@@ -44,8 +44,8 @@ class UserORM(Base):
         nullable=False,
     )
 
-    password_resets: Mapped[list["PasswordResetORM"]] = relationship(
-        "PasswordResetORM", back_populates="user", cascade="all, delete-orphan"
+    password_resets: Mapped[list["PasswordReset"]] = relationship(
+        "PasswordReset", back_populates="user", cascade="all, delete-orphan"
     )
 
     audit_logs: Mapped[list["ChatbotAuditLog"]] = relationship(

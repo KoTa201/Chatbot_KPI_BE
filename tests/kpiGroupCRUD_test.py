@@ -247,16 +247,16 @@ async def test_list_kpi_groups_all():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups, 3)
     ):
-        result = await service.list_groups(page=1, page_size=10)
+        result = await service.list_groups(page=1, limit=10)
 
         assert result.total == 3
         assert result.page == 1
-        assert result.page_size == 10
+        assert result.limit == 10
         assert len(result.data) == 3
         service.repo.list_groups.assert_called_once()
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["page"] == 1
-        assert call_kwargs["page_size"] == 10
+        assert call_kwargs["limit"] == 10
         assert call_kwargs["tahun"] is None
         assert call_kwargs["group_type"] is None
         assert call_kwargs["search"] is None
@@ -281,7 +281,7 @@ async def test_list_kpi_groups_with_filter():
     ):
         result = await service.list_groups(
             page=1,
-            page_size=10,
+            limit=10,
             group_type="master",
         )
 
@@ -310,7 +310,7 @@ async def test_list_kpi_groups_with_search():
     ):
         result = await service.list_groups(
             page=1,
-            page_size=10,
+            limit=10,
             search="KPI Master",
         )
 
@@ -339,7 +339,7 @@ async def test_list_kpi_groups_with_tahun_filter():
     ):
         result = await service.list_groups(
             page=1,
-            page_size=10,
+            limit=10,
             tahun=2025,
         )
 
@@ -360,7 +360,7 @@ async def test_list_kpi_groups_pagination():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups, 25)
     ):
-        result = await service.list_groups(page=1, page_size=5)
+        result = await service.list_groups(page=1, limit=5)
 
         assert result.total == 25
         assert result.total_pages == 5
@@ -525,6 +525,50 @@ async def test_update_kpi_group_sheet_url_triggers_re_ingestion_master():
 
         # Verify re-ingestion triggered
         assert str(result.sheet_url) == new_sheet_url
+        mock_ingest_svc.update_and_reingest.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_update_kpi_group_tahun_triggers_re_ingestion_master():
+    """Update tahun pada master group triggers KPI Master re-ingestion."""
+    db = make_db()
+    service = KPIGroupService(db)
+
+    original_group = make_kpi_group(
+        group_type="master",
+        sheet_url=SHEET_URL,
+        tahun=TAHUN,
+    )
+    updated_group = make_kpi_group(
+        group_type="master",
+        sheet_url=SHEET_URL,
+        tahun=2026,
+    )
+
+    payload = KPIGroupUpdate(
+        tahun=2026,
+    )
+
+    with (
+        patch.object(
+            service.repo, "get_by_id",
+            new_callable=AsyncMock, return_value=original_group
+        ),
+        patch.object(
+            service.repo, "update",
+            new_callable=AsyncMock, return_value=updated_group
+        ),
+        patch(
+            "service.kpiGroupService.KPIMasterIngestionService"
+        ) as mock_ingest_class,
+    ):
+        mock_ingest_svc = AsyncMock()
+        mock_ingest_class.return_value = mock_ingest_svc
+
+        result = await service.update_group(GROUP_ID, payload)
+
+        assert result.tahun == 2026
+        mock_ingest_svc.update_and_reingest.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -719,7 +763,6 @@ async def test_build_response_fields_match_orm():
     assert str(response.sheet_url) == SHEET_URL
     assert response.sheet_id == SPREADSHEET_ID
     assert response.tahun == TAHUN
-    assert response.is_scheduled is True
     assert response.is_active is False
 
 
@@ -757,7 +800,7 @@ async def test_create_list_get_delete_flow():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=([mock_group], 1)
     ):
-        listed = await service.list_groups(page=1, page_size=10)
+        listed = await service.list_groups(page=1, limit=10)
         assert listed.total == 1
 
     # GET

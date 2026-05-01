@@ -30,18 +30,21 @@ class IngestionLogRepository:
     async def create(
         self,
         kpi_group_id: UUID,
-        scheduler_id: Optional[UUID] = None,
+        source_type: Optional[str] = None,
+        group_name: Optional[str] = None,
     ) -> IngestionLogORM:
         """
         Buat IngestionLog baru dengan status awal 'failed'.
 
         kpi_group_id : grup (sheet) yang sedang diproses — wajib diisi.
-        scheduler_id : diisi hanya jika ingestion dipicu oleh scheduler.
+        source_type  : 'master' atau 'tracker' — disimpan agar filter tetap
+                       bekerja meski group dihapus di kemudian hari.
         """
         try:
             log = IngestionLogORM(
                 kpi_group_id=kpi_group_id,
-                scheduler_id=scheduler_id,
+                source_type=source_type,
+                group_name=group_name,
                 status="failed",
             )
             self.db.add(log)

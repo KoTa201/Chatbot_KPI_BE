@@ -16,8 +16,6 @@ from starlette.responses import Response
 
 from config import settings
 
-ALGORITHM = "HS256"
-
 # ------------------------------------------------------------------ #
 #  Role constants                                                      #
 # ------------------------------------------------------------------ #
@@ -117,7 +115,7 @@ def _extract_token(authorization: Optional[str]) -> Optional[str]:
 
 def _decode_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.AUTH_ALGORITHM])
     except JWTError:
         return None
 

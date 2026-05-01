@@ -31,8 +31,9 @@ class ChatbotRepository:
         self.chatbot = result.scalars().first()
         return self.chatbot
 
-    async def get_all(self, skip, limit, otoritas=None, search=None):
+    async def get_all(self, page, limit, otoritas=None, search=None):
         query = select(Chatbot)
+        offset = (page - 1) * limit
 
         if otoritas:
             query = query.where(Chatbot.otoritas == otoritas)
@@ -49,7 +50,7 @@ class ChatbotRepository:
 
         result = await self.db.execute(
             query.order_by(Chatbot.created_at.desc())
-            .offset(skip)
+            .offset(offset)
             .limit(limit)
             .execution_options(populate_existing=True)
         )

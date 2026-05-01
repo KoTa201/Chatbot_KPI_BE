@@ -12,6 +12,11 @@ Seeder bersifat idempoten: user yang sudah ada (by username) dilewati,
 tidak akan duplikat meskipun dijalankan berkali-kali.
 """
 
+from model.User import RoleEnum, User
+from databaseConfig import get_db
+from sqlalchemy import select
+import bcrypt
+import asyncio
 import sys
 from pathlib import Path
 import asyncio
@@ -120,7 +125,7 @@ async def run_seeder() -> None:
         for data in SEED_USERS:
             # Cek apakah username sudah ada (idempoten)
             result = await db.execute(
-                select(UserORM).where(UserORM.username == data["username"])
+                select(User).where(User.username == data["username"])
             )
             existing = result.scalar_one_or_none()
 
@@ -129,7 +134,7 @@ async def run_seeder() -> None:
                 skipped += 1
                 continue
 
-            user = UserORM(
+            user = User(
                 username=data["username"],
                 email=data["email"],
                 full_name=data["full_name"],

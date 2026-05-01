@@ -9,10 +9,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from model.Base import Base
 
 if TYPE_CHECKING:
-    from model.User import UserORM
+    from model.User import User
 
 
-class RevokedTokenORM(Base):
+class RevokedToken(Base):
     __tablename__ = "revoked_tokens"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -29,4 +29,4 @@ class RevokedTokenORM(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    user: Mapped["UserORM"] = relationship("UserORM")
+    user: Mapped["User"] = relationship("User")

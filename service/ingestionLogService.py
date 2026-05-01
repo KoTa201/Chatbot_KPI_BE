@@ -4,6 +4,7 @@ Service untuk menangani logika bisnis ingestion logs.
 """
 
 import re
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import func, select
@@ -22,30 +23,46 @@ class IngestionLogService:
 
     async def get_ingestion_logs(
         self,
+        page: int,
         limit: int,
-        offset: int = 0,
         group_type: Optional[str] = None,
+        status: Optional[str] = None,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
     ) -> dict:
+        from datetime import datetime, time as dt_time
+
         group_type_filter = self._normalize_group_type(group_type)
+        offset = (page - 1) * limit
 
-        count_query = select(func.count()).select_from(IngestionLogORM).join(
-            KPIGroupORM,
-            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
-        )
-
+        source_type_value = None
         if group_type_filter is not None:
-            count_query = count_query.where(KPIGroupORM.group_type == group_type_filter)
+            source_type_value = "master" if group_type_filter == GroupTypeEnum.MASTER else "tracker"
+
+        base_filters = []
+        if source_type_value is not None:
+            base_filters.append(IngestionLogORM.source_type == source_type_value)
+        if status is not None:
+            base_filters.append(IngestionLogORM.status == status)
+        if start_date is not None:
+            base_filters.append(IngestionLogORM.created_at >= datetime.combine(start_date, dt_time.min))
+        if end_date is not None:
+            base_filters.append(IngestionLogORM.created_at <= datetime.combine(end_date, dt_time.max))
+
+        count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
+            KPIGroupORM, KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+        )
+        for f in base_filters:
+            count_query = count_query.where(f)
 
         total_result = await self.db.execute(count_query)
         total_count = int(total_result.scalar_one() or 0)
 
-        query = select(IngestionLogORM, KPIGroupORM).join(
-            KPIGroupORM,
-            KPIGroupORM.id == IngestionLogORM.kpi_group_id,
+        query = select(IngestionLogORM, KPIGroupORM).outerjoin(
+            KPIGroupORM, KPIGroupORM.id == IngestionLogORM.kpi_group_id,
         )
-
-        if group_type_filter is not None:
-            query = query.where(KPIGroupORM.group_type == group_type_filter)
+        for f in base_filters:
+            query = query.where(f)
 
         query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
 
@@ -68,18 +85,22 @@ class IngestionLogService:
         log: IngestionLogORM,
         group: KPIGroupORM | None = None,
     ) -> dict:
-        sheet_name = group.nama_grup if group else str(log.kpi_group_id)
+        sheet_name = group.nama_grup if group else (log.group_name or "—")
         nama_orang = None
 
         if group and group.group_type == GroupTypeEnum.TRACKER:
             nama_orang = self._extract_nama_orang(group.nama_grup)
+        elif not group and log.source_type == "tracker":
+            nama_orang = self._extract_nama_orang(log.group_name)
 
-        source_type = None
         if group:
-            if group.group_type == GroupTypeEnum.MASTER:
-                source_type = "kpi_master"
-            elif group.group_type == GroupTypeEnum.TRACKER:
-                source_type = "kpi_tracker"
+            source_type = "kpi_master" if group.group_type == GroupTypeEnum.MASTER else "kpi_tracker"
+        elif log.source_type == "master":
+            source_type = "kpi_master"
+        elif log.source_type == "tracker":
+            source_type = "kpi_tracker"
+        else:
+            source_type = None
 
         return {
             "id": log.id,

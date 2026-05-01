@@ -1,5 +1,5 @@
 """
-repository/authRepository.py
+repository/UserRepository.py
 Semua operasi CRUD ke tabel users + revoked token denylist.
 Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
 """
@@ -9,25 +9,25 @@ from uuid import UUID
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from model.PasswordReset import PasswordResetORM
+from model.PasswordReset import PasswordReset
 from datetime import datetime, timezone
 
-from model.User import RoleEnum, UserORM
-from model.RevokedToken import RevokedTokenORM          # ← model baru
+from model.User import RoleEnum, User
+from model.RevokedToken import RevokedToken          # ← model baru
 
 
-class AuthRepository:
+class UserRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.user: UserORM = None
-        self.token: RevokedTokenORM = None
+        self.user: User = None
+        self.token: RevokedToken = None
 
     # ------------------------------------------------------------------ #
     #  Create                                                              #
     # ------------------------------------------------------------------ #
 
-    async def create_user(self, user: UserORM) -> UserORM:
+    async def create_user(self, user: User) -> User:
         """Insert user baru. Kembalikan instance yang sudah ter-refresh (id terisi)."""
         self.user = user
         self.db.add(self.user)
@@ -39,62 +39,57 @@ class AuthRepository:
     #  Read                                                                #
     # ------------------------------------------------------------------ #
 
-    async def get_by_id(self, user_id: UUID) -> Optional[UserORM]:
+    async def get_by_id(self, user_id: UUID) -> Optional[User]:
         result = await self.db.execute(
-            select(UserORM).where(UserORM.id == user_id)
+            select(User).where(User.id == user_id)
         )
         self.user = result.scalar_one_or_none()
         return self.user
 
-    async def get_by_username_or_email(self, identifier: str) -> Optional[UserORM]:
+    async def get_by_username_or_email(self, identifier: str) -> Optional[User]:
         if "@" in identifier:
             result = await self.db.execute(
-                select(UserORM).where(UserORM.email == identifier)
+                select(User).where(User.email == identifier)
             )
         else:
             result = await self.db.execute(
-                select(UserORM).where(UserORM.username == identifier)
+                select(User).where(User.username == identifier)
             )
         return result.scalar_one_or_none()
 
-    async def get_by_username(self, username: str) -> Optional[UserORM]:
+    async def get_by_username(self, username: str) -> Optional[User]:
         result = await self.db.execute(
-            select(UserORM).where(UserORM.username == username)
-        )
-        return result.scalar_one_or_none()
-
-    async def get_by_email(self, email: str) -> Optional[UserORM]:
-        result = await self.db.execute(
-            select(UserORM).where(UserORM.email == email)
+            select(User).where(User.username == username)
         )
         return result.scalar_one_or_none()
 
     async def get_all_users(
         self,
+        page: int = 1,
         limit: int = 20,
-        offset: int = 0,
         search: str | None = None,
         role: RoleEnum | None = None,
         status: bool | None = None,
-    ) -> list[UserORM]:
-        query = select(UserORM)
+    ) -> list[User]:
+        offset = (page - 1) * limit
+        query = select(User)
         if search:
             pattern = f"%{search.strip()}%"
             query = query.where(
                 or_(
-                    UserORM.username.ilike(pattern),
-                    UserORM.full_name.ilike(pattern),
-                    UserORM.email.ilike(pattern),
+                    User.username.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                    User.email.ilike(pattern),
                 )
             )
         if role is not None:
-            query = query.where(UserORM.role == role)
+            query = query.where(User.role == role)
         if status is not None:
-            query = query.where(UserORM.is_active == status)
+            query = query.where(User.is_active == status)
 
         result = await self.db.execute(
             query
-            .order_by(UserORM.created_at.desc())
+            .order_by(User.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -106,20 +101,20 @@ class AuthRepository:
         role: RoleEnum | None = None,
         status: bool | None = None,
     ) -> int:
-        query = select(func.count()).select_from(UserORM)
+        query = select(func.count()).select_from(User)
         if search:
             pattern = f"%{search.strip()}%"
             query = query.where(
                 or_(
-                    UserORM.username.ilike(pattern),
-                    UserORM.full_name.ilike(pattern),
-                    UserORM.email.ilike(pattern),
+                    User.username.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                    User.email.ilike(pattern),
                 )
             )
         if role is not None:
-            query = query.where(UserORM.role == role)
+            query = query.where(User.role == role)
         if status is not None:
-            query = query.where(UserORM.is_active == status)
+            query = query.where(User.is_active == status)
 
         result = await self.db.execute(query)
         return result.scalar_one()
@@ -128,7 +123,7 @@ class AuthRepository:
     #  Update                                                              #
     # ------------------------------------------------------------------ #
 
-    async def save(self, user: UserORM) -> UserORM:
+    async def save(self, user: User) -> User:
         self.user = user
         self.db.add(self.user)
         await self.db.commit()
@@ -139,7 +134,7 @@ class AuthRepository:
     #  Delete                                                              #
     # ------------------------------------------------------------------ #
 
-    async def delete_user(self, user: UserORM) -> None:
+    async def delete_user(self, user: User) -> None:
         self.user = user
         await self.db.delete(self.user)
         await self.db.commit()
@@ -151,13 +146,13 @@ class AuthRepository:
 
     async def username_exists(self, username: str) -> bool:
         result = await self.db.execute(
-            select(UserORM.id).where(UserORM.username == username)
+            select(User.id).where(User.username == username)
         )
         return result.scalar_one_or_none() is not None
 
     async def email_exists(self, email: str) -> bool:
         result = await self.db.execute(
-            select(UserORM.id).where(UserORM.email == email)
+            select(User.id).where(User.email == email)
         )
         return result.scalar_one_or_none() is not None
 
@@ -173,7 +168,7 @@ class AuthRepository:
         """
         already_revoked = await self.is_token_revoked(token)
         if not already_revoked:
-            self.token = RevokedTokenORM(token=token)
+            self.token = RevokedToken(token=token)
             self.db.add(self.token)
             await self.db.commit()
 
@@ -183,43 +178,37 @@ class AuthRepository:
         Return True jika sudah direvoke, False jika masih valid.
         """
         result = await self.db.execute(
-            select(RevokedTokenORM.id).where(RevokedTokenORM.token == token)
+            select(RevokedToken.id).where(RevokedToken.token == token)
         )
         return result.scalar_one_or_none() is not None
 
-    async def get_active_reset_pin(self, user_id: int) -> PasswordResetORM | None:
+    async def get_active_reset_pin(self, user_id: int) -> PasswordReset | None:
         """Ambil PIN reset aktif (belum dipakai, belum expired)."""
         now = datetime.now(timezone.utc)
         result = await self.db.execute(
-            select(PasswordResetORM)
+            select(PasswordReset)
             .where(
-                PasswordResetORM.user_id == user_id,
-                PasswordResetORM.expires_at > now,
-                PasswordResetORM.used_at.is_(None),
+                PasswordReset.user_id == user_id,
+                PasswordReset.expires_at > now,
+                PasswordReset.used_at.is_(None),
             )
-            .order_by(PasswordResetORM.expires_at.desc())
+            .order_by(PasswordReset.expires_at.desc())
             .limit(1)
         )
         return result.scalar_one_or_none()
 
-    async def create_reset_pin(self, record: PasswordResetORM) -> PasswordResetORM:
+    async def create_reset_pin(self, record: PasswordReset) -> PasswordReset:
         """Hapus PIN lama user (jika ada) lalu simpan yang baru."""
         await self.db.execute(
-            delete(PasswordResetORM).where(
-                PasswordResetORM.user_id == record.user_id)
+            delete(PasswordReset).where(
+                PasswordReset.user_id == record.user_id)
         )
         self.db.add(record)
         await self.db.commit()
         await self.db.refresh(record)
         return record
 
-    async def mark_reset_pin_used(self, record: PasswordResetORM) -> None:
+    async def mark_reset_pin_used(self, record: PasswordReset) -> None:
         """Tandai PIN sebagai sudah dipakai."""
         record.used_at = datetime.now(timezone.utc)
         await self.db.commit()
-
-    async def get_by_email(self, email: str) -> UserORM | None:
-        result = await self.db.execute(
-            select(UserORM).where(UserORM.email == email)
-        )
-        return result.scalar_one_or_none()
