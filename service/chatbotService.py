@@ -55,31 +55,24 @@ class ChatbotService:
         chatbots, total = await self.repo.get_all(page, limit, otoritas, search)
         total_pages = max(1, -(-total // limit))  # ceiling division
 
-        return ChatbotListResponse(
-            data=[ChatbotResponse.model_validate(c) for c in chatbots],
-            total=total,
-            page=page,
-            limit=limit,
-            total_pages=total_pages,
-        )
+        return {
+            "data": [ChatbotResponse.model_validate(c) for c in chatbots],
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": total_pages,
+        }
 
     async def get_by_id(self, chatbot_id: UUID) -> ChatbotResponse:
-        chatbot = await self._get_or_404(chatbot_id)
-        return ChatbotResponse.model_validate(chatbot)
+        return await self._get_or_404(chatbot_id)
 
     async def create(self, payload: ChatbotCreate) -> ChatbotResponse:
         await self._check_nama_unique(payload.nama_chatbot)
         await self._enforce_single_active_per_otoritas(payload.otoritas)
-        chatbot = await self.repo.create(payload)
-        return ChatbotResponse.model_validate(chatbot)
+        return await self.repo.create(payload)
 
     async def update(self, chatbot_id: UUID, payload: ChatbotUpdate) -> ChatbotResponse:
-        existing = await self.repo.get_by_id(chatbot_id)
-        if not existing:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Chatbot id={chatbot_id} tidak ditemukan."
-            )
+        existing = await self._get_or_404(chatbot_id)
         if payload.nama_chatbot:
             await self._check_nama_unique(payload.nama_chatbot, exclude_id=chatbot_id)
 
@@ -91,10 +84,7 @@ class ChatbotService:
                 exclude_id=chatbot_id,
             )
 
-        self.repo.chatbot = existing
-
-        updated = await self.repo.update(payload)
-        return ChatbotResponse.model_validate(updated)
+        return await self.repo.update(payload)
 
     async def delete(self, chatbot_id: UUID, hard: bool = False) -> dict:
         await self._get_or_404(chatbot_id)

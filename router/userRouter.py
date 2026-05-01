@@ -92,10 +92,10 @@ class UserRouter:
 
     # ─── Admin user management endpoints ───────────────────────────────────────
 
-    async def create_user(self, payload: UserCreateRequest, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def create_user(self, payload: UserCreateRequest, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
-        return await self.user_controller.create_user(payload, admin)
+        return await self.user_controller.create_user(payload)
 
     async def get_all_users(
         self,
@@ -113,7 +113,6 @@ class UserRouter:
             default=None,
             description="Filter status user: active atau inactive",
         ),
-        admin: User = Depends(require_admin),
         db: AsyncSession = Depends(get_db),
     ):
         if not self.user_controller:
@@ -121,26 +120,25 @@ class UserRouter:
         return await self.user_controller.get_all_users(
             page=page,
             limit=limit,
-            admin=admin,
             search=search,
             role=role,
             user_status=status,
         )
 
-    async def get_user_by_id(self, user_id: UUID, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def get_user_by_id(self, user_id: UUID, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
-        return await self.user_controller.get_user_by_id(user_id, admin)
+        return await self.user_controller.get_user_by_id(user_id)
 
-    async def update_user(self, user_id: UUID, payload: UpdateUserRequest, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def update_user(self, user_id: UUID, payload: UpdateUserRequest, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
-        return await self.user_controller.update_user(user_id, payload, admin)
+        return await self.user_controller.update_user(user_id, payload)
 
-    async def delete_user(self, user_id: UUID, admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    async def delete_user(self, user_id: UUID, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
             self.user_controller = UserController(db)
-        return await self.user_controller.delete_user(user_id, admin)
+        return await self.user_controller.delete_user(user_id)
 
 
 # ─── Router instance ─────────────────────────────────────────────────────

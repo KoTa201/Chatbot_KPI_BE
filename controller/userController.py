@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.User import RoleEnum, User
+from model.Base import UserStatusEnum
 from schema.authSchema import (
     MessageResponse,
     UpdateUserRequest,
@@ -31,20 +32,9 @@ class UserController:
     # ─── Admin user management endpoints ──────────────────────────────
 
     async def create_user(
-        self, payload: UserCreateRequest, admin: User
+        self, payload: UserCreateRequest
     ) -> UserResponse:
         """[Admin] Tambah user baru."""
-        # -- validasi input --
-        if not payload.username or not payload.username.strip():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Field 'username' tidak boleh kosong.",
-            )
-        if not payload.email or not payload.email.strip():
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Field 'email' tidak boleh kosong.",
-            )
 
         # -- delegasi --
         result = await self.user_svc.create_user(payload=payload)
@@ -56,10 +46,9 @@ class UserController:
         self,
         page: int,
         limit: int,
-        admin: User,
         search: str | None = None,
         role: RoleEnum | None = None,
-        user_status: str | None = None,
+        user_status: UserStatusEnum | None = None,
     ) -> dict:
         """[Admin] Daftar semua user."""
         # -- validasi input --
@@ -73,15 +62,10 @@ class UserController:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'page' tidak boleh negatif dan minimal 1.",
             )
-        if user_status is not None and user_status.lower() not in {"active", "inactive"}:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'status' harus 'active' atau 'inactive'.",
-            )
 
         active_status_filter = None
         if user_status is not None:
-            active_status_filter = user_status.lower() == "active"
+            active_status_filter = user_status == UserStatusEnum.ACTIVE
 
         # -- delegasi --
         result = await self.user_svc.get_all_users(
@@ -101,7 +85,7 @@ class UserController:
         }
 
     async def get_user_by_id(
-        self, user_id: UUID, admin: User
+        self, user_id: UUID
     ) -> UserResponse:
         """[Admin] Detail user."""
         # -- delegasi --
@@ -111,7 +95,7 @@ class UserController:
         return UserResponse.model_validate(result)
 
     async def update_user(
-        self, user_id: UUID, payload: UpdateUserRequest, admin: User
+        self, user_id: UUID, payload: UpdateUserRequest
     ) -> UserResponse:
         """[Admin] Update data user."""
         # -- validasi input --
@@ -129,13 +113,12 @@ class UserController:
         return UserResponse.model_validate(result)
 
     async def delete_user(
-        self, user_id: UUID, admin: User
+        self, user_id: UUID
     ) -> MessageResponse:
         """[Admin] Hapus user."""
         # -- delegasi --
         result = await self.user_svc.delete_user(
             user_id=user_id,
-            admin_id=admin.id,
         )
 
         # -- validasi & mapping output --

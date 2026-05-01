@@ -18,7 +18,7 @@ class RoleEnum(str, enum.Enum):
 
 class AuthorityEnum(str, enum.Enum):
     """Otoritas target audience chatbot — subset dari RoleEnum."""
-    HRD = "HRD"
+    KEPALA_DIVISI = "Kepala Divisi"
     KARYAWAN = "Karyawan"
 
 
@@ -26,3 +26,8 @@ class GroupTypeEnum(str, enum.Enum):
     """Tipe KPIGroup: sheet master KPI atau sheet tracker realisasi."""
     MASTER = "master"
     TRACKER = "tracker"
+
+
+class UserStatusEnum(str, enum.Enum):
+    ACTIVE = "active"
+    INACTIVE = "inactive"
