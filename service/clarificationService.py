@@ -19,7 +19,7 @@ from service.clarificationQuestionGeneratorService import (
 from service.llmService import LLMService
 from repository.clarificationRepository import ClarificationRepository
 from template.promptTemplate import build_query_disambiguation_prompt
-from config import get_settings
+from configCredidential import get_settings
 
 logger = logging.getLogger(__name__)
 

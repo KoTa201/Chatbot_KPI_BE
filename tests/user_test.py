@@ -1045,7 +1045,7 @@ class TestAuthServiceUnit:
         from model.User import RoleEnum
         from service.authService import AuthService
         from jose import jwt
-        from config import settings
+        from configCredidential import settings
 
         test_id = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000001")
         svc = AuthService()
@@ -1065,7 +1065,7 @@ class TestAuthServiceUnit:
         """Refresh token hanya memuat field minimal tanpa role/username."""
         from service.authService import AuthService
         from jose import jwt
-        from config import settings
+        from configCredidential import settings
 
         test_id = uuid.UUID("bbbbbbbb-0000-0000-0000-000000000002")
         svc = AuthService()

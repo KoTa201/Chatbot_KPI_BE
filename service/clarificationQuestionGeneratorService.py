@@ -10,7 +10,7 @@ from typing import Optional
 from schema.clarificationSchema import ClarifyingQuestionData
 from service.llmService import LLMService
 from template.promptTemplate import build_clarifying_question_prompt
-from config import get_settings
+from configCredidential import get_settings
 
 settings = get_settings()
 

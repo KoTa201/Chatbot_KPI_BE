@@ -6,7 +6,7 @@ Mengimplementasikan Rules W-01 s/d W-08 dari PRD Section 8.2.
 
 import re
 
-from config import get_settings
+from configCredidential import get_settings
 from schema.wireguardSchema import ValidationResult
 
 settings = get_settings()
