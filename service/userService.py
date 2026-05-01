@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class UserService:
     def __init__(self, db: AsyncSession):
         self.repo: UserRepository = UserRepository(db)
-        self.auth_service: AuthService = AuthService()
+        self.auth_service: AuthService = AuthService(self.repo)
         self.email_service: EmailService = EmailService()
 
     async def create_user(self, payload: UserCreateRequest) -> User:

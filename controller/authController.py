@@ -38,7 +38,7 @@ class AuthController:
     def __init__(self, db: AsyncSession):
         self.db: AsyncSession = db
         self.repo: UserRepository = UserRepository(db)
-        self.svc: AuthService = AuthService()
+        self.svc: AuthService = AuthService(self.repo)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/login                                                    #

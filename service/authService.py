@@ -39,9 +39,8 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 class AuthService:
-
-    def __init__(self):
-        self.repo: UserRepository = UserRepository(Depends(get_db))
+    def __init__(self, repo: UserRepository):
+        self.repo = repo
         self.secret_key: str = settings.SECRET_KEY
         self.refresh_secret_key: str = settings.REFRESH_SECRET_KEY
         self.reset_secret_key: str = settings.RESET_SECRET_KEY
@@ -53,20 +52,6 @@ class AuthService:
         self.reset_token_type: str = settings.AUTH_RESET_TOKEN_TYPE
         self.pin_expire_minutes: int = settings.AUTH_PIN_EXPIRE_MINUTES
         self.reset_token_expire_minutes: int = settings.AUTH_RESET_TOKEN_EXPIRE_MINUTES
-
-    async def _get_user_or_404(
-        self,
-        user_id: UUID,
-        repo: UserRepository | None = None,
-    ) -> User:
-        active_repo = repo or self.repo
-        user = await active_repo.get_by_id(user_id)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User dengan ID {user_id} tidak ditemukan.",
-            )
-        return user
 
     # ------------------------------------------------------------------ #
     #  Password                                                            #
