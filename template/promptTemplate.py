@@ -78,7 +78,7 @@ SAMPLE_DATA = """
 kpi_master_records:
 kpi_name                    | category    | tahun | target
 Peningkatan Penjualan       | KPI Sales   | 2025  | 500
-Rekrutmen Karyawan Baru     | KPI HRD     | 2025  | 10
+Rekrutmen Karyawan Baru     | KPI kepala_divisi     | 2025  | 10
 
 kpi_tracker_records:
 nama_orang   | kpi_master_id | tahun | bulan_num | realisasi
@@ -140,7 +140,7 @@ def build_nl_to_sql_prompt(
     # Tentukan scope akses berdasarkan role
     if user_role == "Karyawan":
         data_access_scope = "Prioritaskan data milik user yang sedang login."
-    elif user_role == "HRD":
+    elif user_role == "kepala_divisi":
         data_access_scope = "Semua karyawan (semua divisi)"
     elif user_role == "Owner":
         data_access_scope = "Semua karyawan dan semua divisi (akses penuh read-only)"

@@ -151,8 +151,8 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 def make_payload(
     nama: str = "HR Assistant",
-    otoritas: str = "HRD",
-    addon_prompt: str | None = "Kamu adalah asisten HRD yang ramah.",
+    otoritas: str = "kepala_divisi",
+    addon_prompt: str | None = "Kamu adalah asisten kepala_divisi yang ramah.",
 ) -> dict:
     return {"nama_chatbot": nama, "otoritas": otoritas, "addon_prompt": addon_prompt}
 
@@ -161,7 +161,7 @@ async def seed_chatbot(session: AsyncSession, **kwargs) -> Chatbot:
     """Insert chatbot langsung ke DB tanpa melalui API."""
     defaults = {
         "nama_chatbot": "Seed Bot",
-        "otoritas": AuthorityEnum.HRD,
+        "otoritas": AuthorityEnum.kepala_divisi,
         "addon_prompt": "Prompt awal.",
         "is_active": True,
     }
@@ -217,14 +217,14 @@ class TestChatbotRBAC:
 class TestCreateChatbot:
 
     async def test_create_kepala_divisi_success(self, client: AsyncClient):
-        """POST chatbot HRD dengan semua field lengkap harus return 201."""
+        """POST chatbot kepala_divisi dengan semua field lengkap harus return 201."""
         res = await client.post("/api/v1/chatbots/", json=make_payload())
 
         assert res.status_code == 201
         data = res.json()
         assert data["nama_chatbot"] == "HR Assistant"
         assert data["otoritas"] == "kepala_divisi"
-        assert data["addon_prompt"] == "Kamu adalah asisten HRD yang ramah."
+        assert data["addon_prompt"] == "Kamu adalah asisten kepala_divisi yang ramah."
         assert data["is_active"] is True
         assert "id" in data
         assert "created_at" in data
@@ -250,8 +250,8 @@ class TestCreateChatbot:
         db_session: AsyncSession,
     ):
         """Create chatbot aktif baru dengan otoritas sama harus nonaktifkan chatbot aktif lama."""
-        first = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Lama", otoritas="HRD"))
-        second = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Baru", otoritas="HRD"))
+        first = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Lama", otoritas="kepala_divisi"))
+        second = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Baru", otoritas="kepala_divisi"))
 
         assert first.status_code == 201
         assert second.status_code == 201
@@ -259,7 +259,8 @@ class TestCreateChatbot:
         first_id = first.json()["id"]
         second_id = second.json()["id"]
         result = await db_session.execute(
-            select(Chatbot).where(Chatbot.otoritas == AuthorityEnum.HRD)
+            select(Chatbot).where(Chatbot.otoritas ==
+                                  AuthorityEnum.kepala_divisi)
         )
         status_by_id = {
             str(chatbot.id): chatbot.is_active for chatbot in result.scalars().all()}
@@ -285,7 +286,7 @@ class TestCreateChatbot:
 
     async def test_create_missing_nama_returns_422(self, client: AsyncClient):
         """nama_chatbot wajib — jika tidak ada harus return 422."""
-        res = await client.post("/api/v1/chatbots/", json={"otoritas": "HRD"})
+        res = await client.post("/api/v1/chatbots/", json={"otoritas": "kepala_divisi"})
 
         assert res.status_code == 422
 
@@ -296,7 +297,7 @@ class TestCreateChatbot:
         assert res.status_code == 422
 
     async def test_create_invalid_otoritas_returns_422(self, client: AsyncClient):
-        """otoritas hanya boleh 'HRD' atau 'Karyawan'."""
+        """otoritas hanya boleh 'kepala_divisi' atau 'Karyawan'."""
         res = await client.post("/api/v1/chatbots/", json=make_payload(otoritas="MANAGER"))
 
         assert res.status_code == 422
@@ -391,11 +392,11 @@ class TestListChatbot:
 
         body = res.json()
         assert body["total"] == 1
-        assert body["data"][0]["otoritas"] == "HRD"
+        assert body["data"][0]["otoritas"] == "kepala_divisi"
 
     async def test_list_filter_karyawan(self, client: AsyncClient, db_session: AsyncSession):
         """Filter otoritas=Karyawan hanya return chatbot Karyawan."""
-        await seed_chatbot(db_session, nama_chatbot="HRD Bot", otoritas=AuthorityEnum.KEPALA_DIVISI)
+        await seed_chatbot(db_session, nama_chatbot="kepala_divisi Bot", otoritas=AuthorityEnum.KEPALA_DIVISI)
         await seed_chatbot(db_session, nama_chatbot="Kar Bot", otoritas=AuthorityEnum.KARYAWAN)
 
         res = await client.get("/api/v1/chatbots/?otoritas=Karyawan")
@@ -455,7 +456,7 @@ class TestGetChatbotById:
         data = res.json()
         assert data["id"] == str(chatbot.id)
         assert data["nama_chatbot"] == "Detail Bot"
-        assert data["otoritas"] == "HRD"
+        assert data["otoritas"] == "kepala_divisi"
 
     async def test_get_by_id_not_found(self, client: AsyncClient):
         """GET dengan ID yang tidak ada harus return 404."""
@@ -495,7 +496,7 @@ class TestUpdateChatbot:
         assert res.status_code == 200
         data = res.json()
         assert data["nama_chatbot"] == "Baru Bot"
-        assert data["otoritas"] == "HRD"  # tidak berubah
+        assert data["otoritas"] == "kepala_divisi"  # tidak berubah
 
     async def test_update_otoritas_only(self, client: AsyncClient, db_session: AsyncSession):
         """Update hanya otoritas — nama tidak berubah."""
@@ -560,13 +561,13 @@ class TestUpdateChatbot:
         old_active = await seed_chatbot(
             db_session,
             nama_chatbot="HR Active Lama",
-            otoritas=AuthorityEnum.HRD,
+            otoritas=AuthorityEnum.kepala_divisi,
             is_active=True,
         )
         to_activate = await seed_chatbot(
             db_session,
             nama_chatbot="HR Active Baru",
-            otoritas=AuthorityEnum.HRD,
+            otoritas=AuthorityEnum.kepala_divisi,
             is_active=True,
         )
 
@@ -602,8 +603,8 @@ class TestUpdateChatbot:
         )
         mover = await seed_chatbot(
             db_session,
-            nama_chatbot="HRD Pindah",
-            otoritas=AuthorityEnum.HRD,
+            nama_chatbot="kepala_divisi Pindah",
+            otoritas=AuthorityEnum.kepala_divisi,
             is_active=True,
         )
 
@@ -772,7 +773,7 @@ class TestHardDeleteChatbot:
         chatbot = await seed_chatbot(db_session, nama_chatbot="Reusable Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}?hard=true")
-        res = await client.post("/api/v1/chatbots/", json={"nama_chatbot": "Reusable Bot", "otoritas": "HRD"})
+        res = await client.post("/api/v1/chatbots/", json={"nama_chatbot": "Reusable Bot", "otoritas": "kepala_divisi"})
 
         assert res.status_code == 201
 

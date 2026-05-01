@@ -63,7 +63,7 @@ class ChatRouter:
             methods=["GET"],
             response_model=list[AuditLogResponse],
             status_code=status.HTTP_200_OK,
-            summary="[Admin/HRD] Daftar query yang ditolak SQLWireguard",
+            summary="[Admin/kepala_divisi] Daftar query yang ditolak SQLWireguard",
         )
 
         # ── Sessions ────────────────────────────────────────────────── #
@@ -112,7 +112,7 @@ class ChatRouter:
 
         **Role access:**
         - `Karyawan`: Hanya melihat data KPI milik sendiri (RLS enforced).
-        - `HRD` / `Owner`: Melihat semua data karyawan.
+        - `kepala_divisi` / `Owner`: Melihat semua data karyawan.
         - `Admin`: Akses penuh read-only.
 
         **Optional:** Set `show_sql: true` untuk melihat SQL yang dieksekusi (transparansi).
@@ -168,7 +168,7 @@ class ChatRouter:
     ):
         """
         Mengembalikan semua query yang gagal melewati validasi SQLWireguard.
-        Hanya dapat diakses oleh role **Admin** dan **HRD** untuk keperluan monitoring keamanan.
+        Hanya dapat diakses oleh role **Admin** dan **kepala_divisi** untuk keperluan monitoring keamanan.
         """
         return await controller.handle_get_audit_all(
             skip=skip, limit=limit, current_user=current_user

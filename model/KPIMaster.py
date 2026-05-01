@@ -24,7 +24,7 @@ from sqlalchemy.sql import func
 from model.Base import Base
 
 if TYPE_CHECKING:
-    from model.KPIGroup import KPIGroupORM
+    from model.KPIGroup import KPIGroup
     from model.KPITracker import KPITrackerORM
 
 
@@ -72,8 +72,8 @@ class KPIMasterORM(Base):
     )
 
     # Relationships
-    group: Mapped["KPIGroupORM"] = relationship(
-        "KPIGroupORM", back_populates="master_records"
+    group: Mapped["KPIGroup"] = relationship(
+        "KPIGroup", back_populates="master_records"
     )
     tracker_records: Mapped[list["KPITrackerORM"]] = relationship(
         "KPITrackerORM",

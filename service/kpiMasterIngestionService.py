@@ -32,6 +32,7 @@ from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from service.kpiMasterService import KPIMasterService
+from model.KPIGroup import KPIGroup
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +184,7 @@ class KPIMasterIngestionService:
         group_id: UUID,
         sheet_url: Optional[str] = None,
         tahun: Optional[int] = None,
+        group: KPIGroup = None,
     ) -> dict:
         """
         Update KPIGroup (sheet_url/tahun), hapus seluruh master lama,
@@ -191,14 +193,9 @@ class KPIMasterIngestionService:
         log_id = None
 
         try:
-            group = await self.group_repo.get_by_id(group_id)
-            if not group:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"KPI Group {group_id} tidak ditemukan.",
-                )
 
-            effective_sheet_url = sheet_url if sheet_url is not None else str(group.sheet_url)
+            effective_sheet_url = sheet_url if sheet_url is not None else str(
+                group.sheet_url)
             effective_tahun = tahun if tahun is not None else group.tahun
             if effective_tahun is None:
                 raise HTTPException(
@@ -209,7 +206,8 @@ class KPIMasterIngestionService:
             logger.info(
                 f"[update_and_reingest] Fetching sheet for group_id={group_id}: {effective_sheet_url}"
             )
-            df, spreadsheet_id, sheet_name = self._fetch_sheet(effective_sheet_url)
+            df, spreadsheet_id, sheet_name = self._fetch_sheet(
+                effective_sheet_url)
 
             await self.group_repo.update(
                 group_id=group_id,

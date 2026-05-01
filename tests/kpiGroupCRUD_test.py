@@ -75,7 +75,7 @@ def make_kpi_group(
     master_records: list = None,
     tracker_records: list = None,
 ):
-    """Create mock KPIGroupORM."""
+    """Create mock KPIGroup."""
     group = MagicMock()
     group.id = id
     group.sheet_id = sheet_id

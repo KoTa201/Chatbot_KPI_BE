@@ -72,7 +72,7 @@ class AmbiguityDetectorService:
 
         Args:
             user_query: Pertanyaan dari pengguna
-            user_role: Role pengguna (Owner, HRD, Karyawan)
+            user_role: Role pengguna (Owner, kepala_divisi, Karyawan)
 
         Returns:
             AmbiguityAssessmentResult dengan score, tipe, dan interpretasi
@@ -123,7 +123,7 @@ class AmbiguityDetectorService:
 
         Args:
             user_query: Pertanyaan dari pengguna
-            user_role: Role pengguna (Owner, HRD, Karyawan)
+            user_role: Role pengguna (Owner, kepala_divisi, Karyawan)
 
         Returns:
             AmbiguityAssessmentResult dengan semua field dari LLM

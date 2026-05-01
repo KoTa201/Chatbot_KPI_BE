@@ -19,7 +19,7 @@ class RoleEnum(str, enum.Enum):
 class AuthorityEnum(str, enum.Enum):
     """Otoritas target audience chatbot — subset dari RoleEnum."""
     KEPALA_DIVISI = "kepala_divisi"
-    KARYAWAN = "Karyawan"
+    KARYAWAN = "karyawan"
 
 
 class GroupTypeEnum(str, enum.Enum):

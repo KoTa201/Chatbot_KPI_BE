@@ -1,29 +1,23 @@
 """
 controller/kpiGroupController.py
-
-Jembatan antara router (HTTP layer) dan service (business logic).
-
-Tanggung jawab controller:
-  - Meneruskan parameter dari router ke KPIGroupService.
-  - Tidak mengandung logika bisnis — semua ada di service.
-  - Memastikan setiap request mendapat instance service yang fresh
-    dengan db session yang benar.
-
-Pola ini konsisten dengan ChatbotController agar mudah di-maintain.
 """
 
+import math
 from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from model.KPIGroup import KPIGroup
 from schema.kpiGroupSchema import (
     KPIGroupCreate,
     KPIGroupUpdate,
     KPIGroupListResponse,
     KPIGroupResponse,
+    KPIGroupMasterRecord,
+    KPIGroupTrackerRecord,
     MessageResponse,
-    GroupTypeEnum
+    GroupTypeEnum,
 )
 from service.kpiGroupService import KPIGroupService
 
@@ -39,7 +33,7 @@ class KPIGroupController:
     async def list_groups(
         self,
         page:       int,
-        limit:  int,
+        limit:      int,
         tahun:      int | None,
         group_type: GroupTypeEnum | None,
         search:     str | None,
@@ -54,23 +48,34 @@ class KPIGroupController:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'page' tidak boleh negatif dan minimal 1.",
             )
-        return await self.service.list_groups(
+
+        rows, total = await self.service.list_groups(
             page=page,
             limit=limit,
             tahun=tahun,
             group_type=group_type,
             search=search,
         )
+        return KPIGroupListResponse(
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=math.ceil(total / limit) if total else 0,
+            data=[self._build_response(r, include_records=False)
+                  for r in rows],
+        )
 
     # ─── Get one ──────────────────────────────────────────────────────────────
 
     async def get_group(self, group_id: UUID) -> KPIGroupResponse:
-        return await self.service.get_group(group_id=group_id)
+        group = await self.service.get_group(group_id=group_id)
+        return self._build_response(group, include_records=True)
 
     # ─── Create ───────────────────────────────────────────────────────────────
 
     async def create_group(self, payload: KPIGroupCreate) -> KPIGroupResponse:
-        return await self.service.create_group(payload=payload)
+        group = await self.service.create_group(payload=payload)
+        return self._build_response(group, include_records=False)
 
     # ─── Update ───────────────────────────────────────────────────────────────
 
@@ -79,13 +84,59 @@ class KPIGroupController:
         group_id: UUID,
         payload:  KPIGroupUpdate,
     ) -> KPIGroupResponse:
-        return await self.service.update_group(
-            group_id=group_id,
-            payload=payload,
-        )
+        group = await self.service.update_group(group_id=group_id, payload=payload)
+        return self._build_response(group, include_records=False)
 
     # ─── Delete ───────────────────────────────────────────────────────────────
 
     async def delete_group(self, group_id: UUID) -> MessageResponse:
-        result = await self.service.delete_group(group_id=group_id)
-        return MessageResponse(message=result["message"])
+        await self.service.delete_group(group_id=group_id)
+        return MessageResponse(message=f"KPI Group '{group_id}' berhasil dihapus.")
+
+     # ─── Helper: ORM → KPIGroupResponse ──────────────────────────────────────
+
+    @staticmethod
+    def _build_response(
+        group: KPIGroup,
+        *,
+        include_records: bool = False,
+    ) -> KPIGroupResponse:
+        """
+        Konversi KPIGroup → KPIGroupResponse secara eksplisit.
+
+        Tidak menggunakan model_validate(group) langsung karena Pydantic
+        akan mengakses semua field termasuk relasi lazy yang belum di-load,
+        yang memicu MissingGreenlet error di async SQLAlchemy.
+
+        include_records=True  → konversi relasi yang sudah di-refresh oleh repo.
+        include_records=False → list records kosong (untuk list & create/update response).
+        """
+        master_records:  list[KPIGroupMasterRecord] = []
+        tracker_records: list[KPIGroupTrackerRecord] = []
+
+        if include_records:
+            if group.group_type == "master":
+                master_records = [
+                    KPIGroupMasterRecord.model_validate(r)
+                    for r in group.master_records
+                ]
+            elif group.group_type == "tracker":
+                tracker_records = [
+                    KPIGroupTrackerRecord.model_validate(r)
+                    for r in group.tracker_records
+                ]
+
+        return KPIGroupResponse(
+            id=group.id,
+            nama_grup=group.nama_grup,
+            group_type=group.group_type,
+            sheet_url=group.sheet_url,
+            sheet_id=group.sheet_id,
+            sheet_name=group.sheet_name,
+            tahun=group.tahun,
+            is_active=group.is_active,
+            created_at=group.created_at,
+            updated_at=group.updated_at,
+            master_records=master_records,
+            tracker_records=tracker_records,
+        )

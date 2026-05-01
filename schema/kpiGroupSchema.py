@@ -29,7 +29,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
-
+from enum import Enum
 from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 
 
@@ -37,6 +37,11 @@ from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 GROUP_TYPE_MASTER = "master"
 GROUP_TYPE_TRACKER = "tracker"
 VALID_GROUP_TYPES = {GROUP_TYPE_MASTER, GROUP_TYPE_TRACKER}
+
+
+class GroupTypeEnum(str, Enum):
+    master = "master"
+    tracker = "tracker"
 
 
 # ─── Nested: KPI Master record (bersarang di dalam KPIGroupResponse) ──────────
@@ -78,8 +83,6 @@ class KPIGroupTrackerRecord(BaseModel):
     realisasi:     Optional[str] = None
     nama_orang:    Optional[str] = None
     keterangan:    Optional[str] = None
-    document_text: Optional[str] = None
-    source_row:    Optional[int] = None
     created_at:    datetime
     updated_at:    datetime
 
@@ -107,8 +110,9 @@ class KPIGroupBase(BaseModel):
 # ─── Create ───────────────────────────────────────────────────────────────────
 class KPIGroupCreate(KPIGroupBase):
     # Kolom khusus tracker
-    tahun:     Optional[int] = Field(None, ge=2000, le=2100)
-    is_active: bool          = Field(True)
+    tahun:        Optional[int] = Field(None, ge=2000, le=2100)
+    is_scheduled: bool = Field(True)
+    is_active:    bool = Field(True)
 
 
 # ─── Update ───────────────────────────────────────────────────────────────────
@@ -117,12 +121,13 @@ class KPIGroupUpdate(BaseModel):
     Partial update. Jika sheet_url berubah → service jalankan ulang ingestion.
     Untuk grup 'master', `tahun` wajib disertakan jika sheet_url diubah.
     """
-    nama_grup:  Optional[str]       = Field(None, max_length=255)
-    sheet_url:  Optional[AnyHttpUrl] = Field(None)
-    sheet_id:   Optional[str]       = Field(None, max_length=255)
-    sheet_name: Optional[str]       = Field(None, max_length=255)
-    tahun:      Optional[int]       = Field(None, ge=2000, le=2100)
-    is_active:  Optional[bool]      = None
+    nama_grup:    Optional[str] = Field(None, max_length=255)
+    sheet_url:    Optional[AnyHttpUrl] = Field(None)
+    sheet_id:     Optional[str] = Field(None, max_length=255)
+    sheet_name:   Optional[str] = Field(None, max_length=255)
+    tahun:        Optional[int] = Field(None, ge=2000, le=2100)
+    is_scheduled: Optional[bool] = None
+    is_active:    Optional[bool] = None
 
 
 # ─── Response ─────────────────────────────────────────────────────────────────
@@ -140,8 +145,9 @@ class KPIGroupResponse(BaseModel):
     sheet_url:       AnyHttpUrl
     sheet_id:        Optional[str] = None
     sheet_name:      Optional[str] = None
-    tahun:     Optional[int] = None
-    is_active: bool          = True
+    tahun:           Optional[int] = None
+    is_scheduled:    bool = True
+    is_active:       bool = True
     created_at:      datetime
     updated_at:      datetime
     master_records:  list[KPIGroupMasterRecord] = Field(default_factory=list)
@@ -155,7 +161,7 @@ class KPIGroupListResponse(BaseModel):
     """List endpoint tidak menyertakan records — hanya metadata grup."""
     total:       int
     page:        int
-    limit:   int
+    page_size:   int
     total_pages: int
     data:        list[KPIGroupResponse]
 
