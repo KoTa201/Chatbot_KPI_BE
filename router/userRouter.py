@@ -20,7 +20,6 @@ from schema.authSchema import (
     ResetTokenResponse,
     VerifyResetPinRequest,
 )
-from service.authService import require_admin
 
 
 class UserRouter:

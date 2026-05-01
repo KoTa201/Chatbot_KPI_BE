@@ -401,7 +401,8 @@ class AuthService:
 # ------------------------------------------------------------------ #
 #  FastAPI Dependencies                                                #
 # ------------------------------------------------------------------ #
-_auth_service = AuthService()
+# instance global untuk dependency
+_auth_service = AuthService(UserRepository(Depends(get_db)))
 
 
 async def get_current_user(
@@ -436,17 +437,3 @@ async def get_current_user(
             detail="Akun tidak aktif.",
         )
     return user
-
-
-async def require_admin(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    """
-    Dependency: pastikan user yang sedang login memiliki role admin.
-    """
-    if current_user.role != RoleEnum.admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Akses ditolak. Hanya admin yang dapat melakukan aksi ini.",
-        )
-    return current_user
