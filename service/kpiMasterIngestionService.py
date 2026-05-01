@@ -264,14 +264,6 @@ class KPIMasterIngestionService:
                 errors=error_summary,
             )
 
-            return {
-                "status": status,
-                "count": ingested_count,
-                "message": f"Berhasil re-ingest {ingested_count} dari {total_rows} KPI Master records.",
-                "group_id": str(group_id),
-                "log_id": str(log_id),
-            }
-
         except HTTPException:
             if log_id:
                 await self._mark_log_failed(
