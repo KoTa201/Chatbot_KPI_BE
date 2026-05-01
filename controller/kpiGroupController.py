@@ -90,8 +90,8 @@ class KPIGroupController:
     # ─── Delete ───────────────────────────────────────────────────────────────
 
     async def delete_group(self, group_id: UUID) -> MessageResponse:
-        await self.service.delete_group(group_id=group_id)
-        return MessageResponse(message=f"KPI Group '{group_id}' berhasil dihapus.")
+        response = await self.service.delete_group(group_id=group_id)
+        return MessageResponse(message=response["message"])
 
      # ─── Helper: ORM → KPIGroupResponse ──────────────────────────────────────
 
