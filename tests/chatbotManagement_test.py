@@ -216,14 +216,14 @@ class TestChatbotRBAC:
 
 class TestCreateChatbot:
 
-    async def test_create_hrd_success(self, client: AsyncClient):
+    async def test_create_kepala_divisi_success(self, client: AsyncClient):
         """POST chatbot HRD dengan semua field lengkap harus return 201."""
         res = await client.post("/api/v1/chatbots/", json=make_payload())
 
         assert res.status_code == 201
         data = res.json()
         assert data["nama_chatbot"] == "HR Assistant"
-        assert data["otoritas"] == "HRD"
+        assert data["otoritas"] == "kepala_divisi"
         assert data["addon_prompt"] == "Kamu adalah asisten HRD yang ramah."
         assert data["is_active"] is True
         assert "id" in data
@@ -382,12 +382,12 @@ class TestListChatbot:
 
         assert res.status_code == 422
 
-    async def test_list_filter_hrd(self, client: AsyncClient, db_session: AsyncSession):
-        """Filter otoritas=HRD hanya return chatbot HRD."""
-        await seed_chatbot(db_session, nama_chatbot="HRD Bot", otoritas=AuthorityEnum.HRD)
-        await seed_chatbot(db_session, nama_chatbot="Kar Bot", otoritas=AuthorityEnum.KARYAWAN)
+    async def test_list_filter_kepala_divisi(self, client: AsyncClient, db_session: AsyncSession):
+        """Filter otoritas=Kepala Divisi hanya return chatbot Kepala Divisi."""
+        await seed_chatbot(db_session, nama_chatbot="Kepala Divisi Bot", otoritas=AuthorityEnum.KEPALA_DIVISI)
+        await seed_chatbot(db_session, nama_chatbot="Karyawan Bot", otoritas=AuthorityEnum.KARYAWAN)
 
-        res = await client.get("/api/v1/chatbots/?otoritas=HRD")
+        res = await client.get("/api/v1/chatbots/?otoritas=kepala divisi")
 
         body = res.json()
         assert body["total"] == 1
@@ -395,7 +395,7 @@ class TestListChatbot:
 
     async def test_list_filter_karyawan(self, client: AsyncClient, db_session: AsyncSession):
         """Filter otoritas=Karyawan hanya return chatbot Karyawan."""
-        await seed_chatbot(db_session, nama_chatbot="HRD Bot", otoritas=AuthorityEnum.HRD)
+        await seed_chatbot(db_session, nama_chatbot="HRD Bot", otoritas=AuthorityEnum.KEPALA_DIVISI)
         await seed_chatbot(db_session, nama_chatbot="Kar Bot", otoritas=AuthorityEnum.KARYAWAN)
 
         res = await client.get("/api/v1/chatbots/?otoritas=Karyawan")

@@ -23,6 +23,7 @@ from schema.kpiGroupSchema import (
     KPIGroupListResponse,
     KPIGroupResponse,
     MessageResponse,
+    GroupTypeEnum
 )
 from service.kpiGroupService import KPIGroupService
 
@@ -40,7 +41,7 @@ class KPIGroupController:
         page:       int,
         limit:  int,
         tahun:      int | None,
-        group_type: str | None,
+        group_type: GroupTypeEnum | None,
         search:     str | None,
     ) -> KPIGroupListResponse:
         if limit < 1 or limit > 100:

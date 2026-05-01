@@ -47,20 +47,31 @@ class ChatbotController:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'page' tidak boleh negatif dan minimal 1.",
             )
-        return await self.service.get_all(page, limit, otoritas, search)
+        chatbots = await self.service.get_all(page, limit, otoritas, search)
+
+        return ChatbotListResponse(
+            data=chatbots["data"],
+            total=chatbots["total"],
+            page=chatbots["page"],
+            limit=chatbots["limit"],
+            total_pages=chatbots["total_pages"],
+        )
 
     async def get_chatbot(self, chatbot_id: UUID) -> ChatbotResponse:
-        return await self.service.get_by_id(chatbot_id)
+        chatbot = await self.service.get_by_id(chatbot_id)
+        return ChatbotResponse.model_validate(chatbot)
 
     async def create_chatbot(self, payload: ChatbotCreate) -> ChatbotResponse:
-        return await self.service.create(payload)
+        chatbot = await self.service.create(payload)
+        return ChatbotResponse.model_validate(chatbot)
 
     async def update_chatbot(
         self,
         chatbot_id: UUID,
         payload: ChatbotUpdate,
     ) -> ChatbotResponse:
-        return await self.service.update(chatbot_id, payload)
+        chatbot = await self.service.update(chatbot_id, payload)
+        return ChatbotResponse.model_validate(chatbot)
 
     async def delete_chatbot(
         self,
