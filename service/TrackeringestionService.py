@@ -35,12 +35,9 @@ from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import (
-    BatchTrackerIngestionResponse,
-    BulkIngestionResponse,
     SheetIngestionResult,
     SheetMeta,
     TrackerSourceItem,
-    UrlIngestionResult,
 )
 from service.googleSheetService import GoogleSheetService
 from utils.parser import parse_dataframe
@@ -79,7 +76,7 @@ class TrackerIngestionService:
         tahun: int = 2026,
         skip_on_error: bool = True,
         existing_group_id: Optional[UUID] = None,
-    ) -> BulkIngestionResponse:
+    ) -> dict:
         """
         Ingest semua tab dalam satu spreadsheet.
 
@@ -88,7 +85,7 @@ class TrackerIngestionService:
           - IngestionLog dibuat dan diupdate per tab
 
         Returns:
-            BulkIngestionResponse dengan agregasi per-tab + grand total.
+            dict dengan agregasi per-tab + grand total (di-format oleh controller).
         """
         run_log_id: UUID | None = None
         try:
@@ -140,15 +137,15 @@ class TrackerIngestionService:
                 totals.grand_total_rows,
             )
 
-            return BulkIngestionResponse(
-                spreadsheet_url=sheet_url,
-                total_sheets_processed=len(sheets_result),
-                grand_total_rows=totals.grand_total_rows,
-                grand_ingested=totals.grand_ingested,
-                grand_failed=totals.grand_failed,
-                overall_status=overall_status,
-                sheets=sheets_result,
-            )
+            return {
+                "spreadsheet_url": sheet_url,
+                "total_sheets_processed": len(sheets_result),
+                "grand_total_rows": totals.grand_total_rows,
+                "grand_ingested": totals.grand_ingested,
+                "grand_failed": totals.grand_failed,
+                "overall_status": overall_status,
+                "sheets": sheets_result,
+            }
 
         except HTTPException:
             if run_log_id:
@@ -177,7 +174,7 @@ class TrackerIngestionService:
         sources: list[TrackerSourceItem],
         skip_on_error: bool = True,
         delay_between_sources: float = 0.0,
-    ) -> BatchTrackerIngestionResponse:
+    ) -> dict:
         """
         Ingest beberapa spreadsheet sekaligus.
         Setiap source membawa sheet_url + tahun masing-masing.
@@ -187,8 +184,11 @@ class TrackerIngestionService:
             delay_between_sources: Jeda (detik) antar ingest spreadsheet.
                 Berguna untuk menghindari rate limit Google Sheets API (maks 6 req/menit).
                 Contoh: delay_between_sources=10.0 -> jeda 10 detik antar spreadsheet.
+
+        Returns:
+            dict hasil batch ingestion (di-format oleh controller).
         """
-        results: list[UrlIngestionResult] = []
+        results: list[dict] = []
         grand_total_rows = 0
         grand_ingested = 0
         grand_failed = 0
@@ -210,46 +210,42 @@ class TrackerIngestionService:
                     tahun=tahun,
                     skip_on_error=skip_on_error,
                 )
-                results.append(
-                    UrlIngestionResult(
-                        sheet_url=url,
-                        status=bulk.overall_status,
-                        total_sheets_processed=bulk.total_sheets_processed,
-                        grand_total_rows=bulk.grand_total_rows,
-                        grand_ingested=bulk.grand_ingested,
-                        grand_failed=bulk.grand_failed,
-                        sheets=bulk.sheets,
-                    )
-                )
-                grand_total_rows += bulk.grand_total_rows
-                grand_ingested += bulk.grand_ingested
-                grand_failed += bulk.grand_failed
+                results.append({
+                    "sheet_url": url,
+                    "status": bulk["overall_status"],
+                    "total_sheets_processed": bulk["total_sheets_processed"],
+                    "grand_total_rows": bulk["grand_total_rows"],
+                    "grand_ingested": bulk["grand_ingested"],
+                    "grand_failed": bulk["grand_failed"],
+                    "sheets": bulk["sheets"],
+                })
+                grand_total_rows += bulk["grand_total_rows"]
+                grand_ingested += bulk["grand_ingested"]
+                grand_failed += bulk["grand_failed"]
             except Exception as exc:
                 self.logger.warning(
                     "[TrackerIngestion] Batch: failed for url=%r: %s",
                     url,
                     exc,
                 )
-                results.append(
-                    UrlIngestionResult(
-                        sheet_url=url,
-                        status="error",
-                        error=str(exc),
-                    )
-                )
+                results.append({
+                    "sheet_url": url,
+                    "status": "error",
+                    "error": str(exc),
+                })
 
-        succeeded = sum(1 for r in results if r.status == "success")
+        succeeded = sum(1 for r in results if r["status"] == "success")
         total_urls = len(sources)
 
-        return BatchTrackerIngestionResponse(
-            total_urls=total_urls,
-            succeeded=succeeded,
-            failed=total_urls - succeeded,
-            grand_total_rows=grand_total_rows,
-            grand_ingested=grand_ingested,
-            grand_failed=grand_failed,
-            results=results,
-        )
+        return {
+            "total_urls": total_urls,
+            "succeeded": succeeded,
+            "failed": total_urls - succeeded,
+            "grand_total_rows": grand_total_rows,
+            "grand_ingested": grand_ingested,
+            "grand_failed": grand_failed,
+            "results": results,
+        }
 
     # ================================================================ #
     #  PRIVATE: Bulk helpers                                           #

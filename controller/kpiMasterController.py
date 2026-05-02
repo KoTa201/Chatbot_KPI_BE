@@ -62,4 +62,5 @@ class KPIMasterController:
             status=result["status"],
             count=result["count"],
             message=result["message"],
+            record=result["data"],
         )

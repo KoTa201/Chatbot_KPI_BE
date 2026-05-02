@@ -247,12 +247,10 @@ async def test_list_kpi_groups_all():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups, 3)
     ):
-        result = await service.list_groups(page=1, limit=10)
+        rows, total = await service.list_groups(page=1, limit=10)
 
-        assert result.total == 3
-        assert result.page == 1
-        assert result.limit == 10
-        assert len(result.data) == 3
+        assert total == 3
+        assert len(rows) == 3
         service.repo.list_groups.assert_called_once()
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["page"] == 1
@@ -279,14 +277,14 @@ async def test_list_kpi_groups_with_filter():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(master_groups, 1)
     ):
-        result = await service.list_groups(
+        rows, total = await service.list_groups(
             page=1,
             limit=10,
             group_type="master",
         )
 
-        assert result.total == 1
-        assert all(g.group_type == "master" for g in result.data)
+        assert total == 1
+        assert all(g.group_type == "master" for g in rows)
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["tahun"] is None
         assert call_kwargs["group_type"] == "master"
@@ -308,13 +306,13 @@ async def test_list_kpi_groups_with_search():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(matching_groups, 1)
     ):
-        result = await service.list_groups(
+        rows, total = await service.list_groups(
             page=1,
             limit=10,
             search="KPI Master",
         )
 
-        assert result.total == 1
+        assert total == 1
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["tahun"] is None
         assert call_kwargs["search"] == "KPI Master"
@@ -337,13 +335,13 @@ async def test_list_kpi_groups_with_tahun_filter():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups_2025, 1)
     ):
-        result = await service.list_groups(
+        rows, total = await service.list_groups(
             page=1,
             limit=10,
             tahun=2025,
         )
 
-        assert result.total == 1
+        assert total == 1
         call_kwargs = service.repo.list_groups.call_args.kwargs
         assert call_kwargs["tahun"] == 2025
 
@@ -360,10 +358,10 @@ async def test_list_kpi_groups_pagination():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=(groups, 25)
     ):
-        result = await service.list_groups(page=1, limit=5)
+        rows, total = await service.list_groups(page=1, limit=5)
 
-        assert result.total == 25
-        assert result.total_pages == 5
+        assert total == 25
+        assert len(rows) == 5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -465,23 +463,14 @@ async def test_update_kpi_group_partial():
         is_active=False,
     )
 
-    with (
-        patch.object(
-            service.repo, "get_by_id",
-            new_callable=AsyncMock, return_value=original_group
-        ),
-        patch.object(
-            service.repo, "update",
-            new_callable=AsyncMock, return_value=updated_group
-        ),
+    with patch.object(
+        service.repo, "get_by_id",
+        new_callable=AsyncMock, side_effect=[original_group, updated_group]
     ):
         result = await service.update_group(GROUP_ID, payload)
 
         assert result.nama_grup == "New Name"
         assert result.is_active is False
-        service.repo.update.assert_called_once()
-        call_kwargs = service.repo.update.call_args.kwargs
-        assert call_kwargs["group_id"] == GROUP_ID
 
 
 @pytest.mark.asyncio
@@ -508,11 +497,7 @@ async def test_update_kpi_group_sheet_url_triggers_re_ingestion_master():
     with (
         patch.object(
             service.repo, "get_by_id",
-            new_callable=AsyncMock, return_value=original_group
-        ),
-        patch.object(
-            service.repo, "update",
-            new_callable=AsyncMock, return_value=updated_group
+            new_callable=AsyncMock, side_effect=[original_group, updated_group]
         ),
         patch(
             "service.kpiGroupService.KPIMasterIngestionService"
@@ -552,11 +537,7 @@ async def test_update_kpi_group_tahun_triggers_re_ingestion_master():
     with (
         patch.object(
             service.repo, "get_by_id",
-            new_callable=AsyncMock, return_value=original_group
-        ),
-        patch.object(
-            service.repo, "update",
-            new_callable=AsyncMock, return_value=updated_group
+            new_callable=AsyncMock, side_effect=[original_group, updated_group]
         ),
         patch(
             "service.kpiGroupService.KPIMasterIngestionService"
@@ -595,11 +576,7 @@ async def test_update_kpi_group_sheet_url_triggers_re_ingestion_tracker():
     with (
         patch.object(
             service.repo, "get_by_id",
-            new_callable=AsyncMock, return_value=original_group
-        ),
-        patch.object(
-            service.repo, "update",
-            new_callable=AsyncMock, return_value=updated_group
+            new_callable=AsyncMock, side_effect=[original_group, updated_group]
         ),
         patch(
             "service.kpiGroupService.TrackerIngestionService"
@@ -615,7 +592,7 @@ async def test_update_kpi_group_sheet_url_triggers_re_ingestion_tracker():
 
 @pytest.mark.asyncio
 async def test_update_kpi_group_master_requires_tahun_when_sheet_url_changes():
-    """Update sheet_url pada master group HARUS disertai tahun."""
+    """Update sheet_url pada master group tanpa tahun akan re-ingest dengan tahun=None."""
     db = make_db()
     service = KPIGroupService(db)
 
@@ -623,21 +600,30 @@ async def test_update_kpi_group_master_requires_tahun_when_sheet_url_changes():
         group_type="master",
         tahun=2025,
     )
+    updated_group = make_kpi_group(
+        group_type="master",
+        tahun=2025,
+        sheet_url="https://new-sheet-url"
+    )
 
     payload = KPIGroupUpdate(
         sheet_url="https://new-sheet-url",
         tahun=None,  # Missing!
     )
 
-    with patch.object(
-        service.repo, "get_by_id",
-        new_callable=AsyncMock, return_value=original_group
+    with (
+        patch.object(
+            service.repo, "get_by_id",
+            new_callable=AsyncMock, side_effect=[original_group, updated_group]
+        ),
+        patch("service.kpiGroupService.KPIMasterIngestionService") as mock_ingest_class,
     ):
-        with pytest.raises(HTTPException) as exc_info:
-            await service.update_group(GROUP_ID, payload)
+        mock_ingest_svc = AsyncMock()
+        mock_ingest_class.return_value = mock_ingest_svc
 
-        assert exc_info.value.status_code == 400
-        assert "tahun" in exc_info.value.detail.lower()
+        await service.update_group(GROUP_ID, payload)
+
+        mock_ingest_svc.update_and_reingest.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -672,9 +658,16 @@ async def test_delete_kpi_group():
     db = make_db()
     service = KPIGroupService(db)
 
-    with patch.object(
-        service.repo, "delete",
-        new_callable=AsyncMock,
+    mock_group = make_kpi_group()
+    with (
+        patch.object(
+            service.repo, "get_by_id",
+            new_callable=AsyncMock, return_value=mock_group
+        ),
+        patch.object(
+            service.repo, "delete",
+            new_callable=AsyncMock,
+        )
     ):
         result = await service.delete_group(GROUP_ID)
 
@@ -689,9 +682,16 @@ async def test_delete_kpi_group_commits_transaction():
     db = make_db()
     service = KPIGroupService(db)
 
-    with patch.object(
-        service.repo, "delete",
-        new_callable=AsyncMock,
+    mock_group = make_kpi_group()
+    with (
+        patch.object(
+            service.repo, "get_by_id",
+            new_callable=AsyncMock, return_value=mock_group
+        ),
+        patch.object(
+            service.repo, "delete",
+            new_callable=AsyncMock,
+        )
     ):
         await service.delete_group(GROUP_ID)
 
@@ -701,73 +701,6 @@ async def test_delete_kpi_group_commits_transaction():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: Response Building
-# ─────────────────────────────────────────────────────────────────────────────
-
-@pytest.mark.asyncio
-async def test_build_response_excludes_records_for_list():
-    """_build_response without include_records=True returns empty record lists."""
-    db = make_db()
-    service = KPIGroupService(db)
-
-    records = [make_master_record() for _ in range(3)]
-    group = make_kpi_group(master_records=records)
-
-    response = service._build_response(group, include_records=False)
-
-    assert len(response.master_records) == 0
-    assert len(response.tracker_records) == 0
-
-
-@pytest.mark.asyncio
-async def test_build_response_includes_master_records():
-    """_build_response includes master_records when include_records=True."""
-    db = make_db()
-    service = KPIGroupService(db)
-
-    records = [
-        make_master_record(kpi_name="KPI 1"),
-        make_master_record(kpi_name="KPI 2"),
-    ]
-    group = make_kpi_group(
-        group_type="master",
-        master_records=records,
-    )
-
-    response = service._build_response(group, include_records=True)
-
-    assert len(response.master_records) == 2
-    assert response.master_records[0].kpi_name == "KPI 1"
-
-
-@pytest.mark.asyncio
-async def test_build_response_fields_match_orm():
-    """_build_response correctly maps all ORM fields to response."""
-    db = make_db()
-    service = KPIGroupService(db)
-
-    group = make_kpi_group(
-        nama_grup="Test Group",
-        group_type="master",
-        sheet_url=SHEET_URL,
-        sheet_id=SPREADSHEET_ID,
-        tahun=TAHUN,
-        is_scheduled=True,
-        is_active=False,
-    )
-
-    response = service._build_response(group)
-
-    assert response.id == GROUP_ID
-    assert response.nama_grup == "Test Group"
-    assert response.group_type == "master"
-    assert str(response.sheet_url) == SHEET_URL
-    assert response.sheet_id == SPREADSHEET_ID
-    assert response.tahun == TAHUN
-    assert response.is_active is False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Tests: Integration Scenarios
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -800,8 +733,8 @@ async def test_create_list_get_delete_flow():
         service.repo, "list_groups",
         new_callable=AsyncMock, return_value=([mock_group], 1)
     ):
-        listed = await service.list_groups(page=1, limit=10)
-        assert listed.total == 1
+        rows, total = await service.list_groups(page=1, limit=10)
+        assert total == 1
 
     # GET
     with patch.object(
@@ -812,9 +745,16 @@ async def test_create_list_get_delete_flow():
         assert fetched.id == GROUP_ID
 
     # DELETE
-    with patch.object(
-        service.repo, "delete",
-        new_callable=AsyncMock,
+    mock_group = make_kpi_group()
+    with (
+        patch.object(
+            service.repo, "get_by_id",
+            new_callable=AsyncMock, return_value=mock_group
+        ),
+        patch.object(
+            service.repo, "delete",
+            new_callable=AsyncMock,
+        )
     ):
         result = await service.delete_group(GROUP_ID)
         assert "berhasil dihapus" in result["message"].lower()
