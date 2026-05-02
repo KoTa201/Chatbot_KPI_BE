@@ -3,6 +3,7 @@ schemas/kpiMasterSchema.py
 Pydantic models untuk request/response endpoint KPI Master management.
 """
 
+from numpy import record
 from typing import Optional, List, Any
 from datetime import datetime
 from uuid import UUID
@@ -89,6 +90,7 @@ class IngestionResponse(BaseModel):
     count: int = Field(..., ge=0,
                        description="Jumlah records berhasil di-ingest")
     message: str
+    record: List[Any]
 
 
 class DeleteMastersResponse(BaseModel):

@@ -160,7 +160,7 @@ class UserRepository:
     #  Refresh token denylist                                              #
     # ------------------------------------------------------------------ #
 
-    async def revoke_token(self, token: str) -> None:
+    async def revoke_token(self, token: str, user_id: UUID) -> None:
         """
         Simpan refresh token ke denylist agar tidak bisa dipakai ulang.
         Dipanggil saat rotate (token lama) maupun logout (token aktif).
@@ -168,7 +168,7 @@ class UserRepository:
         """
         already_revoked = await self.is_token_revoked(token)
         if not already_revoked:
-            self.token = RevokedToken(token=token)
+            self.token = RevokedToken(token=token, user_id=user_id)
             self.db.add(self.token)
             await self.db.commit()
 

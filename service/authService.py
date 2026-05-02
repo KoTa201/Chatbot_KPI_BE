@@ -67,10 +67,10 @@ class AuthService:
         hashed_bytes = hashed_password.encode("utf-8")
         return bcrypt.checkpw(password_bytes, hashed_bytes)
 
-    # ------------------------------------------------------------------ #
-    #  JWT — Access Token                                                  #
-    # ------------------------------------------------------------------ #
 
+    # ------------------------------------------------------------------ #
+    #  JWT — Refresh Token                                                 #
+    # ------------------------------------------------------------------ #
     def create_access_token(
         self,
         user_id: UUID,
@@ -79,56 +79,77 @@ class AuthService:
         expires_delta: Optional[timedelta] = None,
     ) -> tuple[str, int]:
         """
-        Buat JWT access token berumur pendek.
-
-        Returns:
-            (token_string, expires_in_seconds)
+        Buat JWT access token dengan payload lengkap:
+        - sub: user_id (UUID)
+        - username: username
+        - role: role
+        - type: "access"
+        - exp: waktu kadaluarsa
+        - jti: random token id
         """
         expire_seconds = (
             int(expires_delta.total_seconds())
             if expires_delta
             else self.access_token_expire_minutes * 60
         )
-        expire_at = datetime.now(timezone.utc) + \
-            timedelta(seconds=expire_seconds)
+        expire_at = datetime.now(timezone.utc) + timedelta(seconds=expire_seconds)
 
         payload = {
             "sub": str(user_id),
             "username": username,
-            "role": role.value,
-            "type": self.token_type,          # ← tandai sebagai access token
+            "role": role.value,          # disimpan sebagai string
+            "type": "access",
             "exp": expire_at,
+            "jti": str(uuid.uuid4()),
         }
-        token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+
+        token = jwt.encode(
+            payload, self.secret_key, algorithm=self.algorithm
+        )
         return token, expire_seconds
 
     def decode_access_token(self, token: str) -> dict:
         """
-        Decode dan validasi JWT access token.
-        Raise HTTP 401 jika token tidak valid, kadaluarsa, atau bukan access token.
+        Decode dan validasi access token.
+
+        Menolak token yang:        
+        - signature tidak valid
+        - expiry sudah lewat
+        - type bukan "access"
+        - jti tidak ada
         """
         try:
-            payload = jwt.decode(token, self.secret_key,
-                                 algorithms=[self.algorithm])
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
         except JWTError:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token tidak valid atau sudah kadaluarsa.",
+                detail="Access token tidak valid atau sudah kadaluarsa.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Tolak jika ternyata refresh token dikirim ke endpoint biasa
-        if payload.get("type") != self.token_type:
+        if payload.get("type") != "access":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token bukan access token.",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return payload
 
-    # ------------------------------------------------------------------ #
-    #  JWT — Refresh Token                                                 #
-    # ------------------------------------------------------------------ #
+        if "jti" not in payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token tidak memiliki ID unik.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Pastikan exp ada dan valid (walaupun jwt.decode sudah mengecek expiry)
+        if "exp" not in payload:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token tidak memiliki expiry timestamp.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return payload
 
     def create_refresh_token(
         self,
@@ -259,8 +280,11 @@ class AuthService:
         Token yang sudah ada di denylist diabaikan tanpa error.
         """
         # Tetap decode untuk validasi signature & expiry
-        self.decode_refresh_token(refresh_token)
-        await self.repo.revoke_token(refresh_token)
+        payload = self.decode_refresh_token(refresh_token)
+        user_id = UUID(payload["sub"])
+        await self.repo.revoke_token(refresh_token, user_id)
+
+
 
     # ------------------------------------------------------------------ #
     #  User validation                                                     #

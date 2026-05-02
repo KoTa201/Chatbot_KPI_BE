@@ -161,6 +161,7 @@ class KPIMasterIngestionService:
                 "message":  f"Berhasil ingest {ingested_count} dari {total_rows} KPI Master records.",
                 "group_id": str(group_id),
                 "log_id":   str(log_id),
+                "data":     records,
             }
 
         except HTTPException:
