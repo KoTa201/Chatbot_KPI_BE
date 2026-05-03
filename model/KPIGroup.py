@@ -33,8 +33,8 @@ from model.Base import Base
 from model.Base import GroupTypeEnum
 
 if TYPE_CHECKING:
-    from model.KPIMaster import KPIMasterORM
-    from model.KPITracker import KPITrackerORM
+    from model.KPIMaster import KPIMaster
+    from model.KPITracker import KPITracker
 
 
 class KPIGroup(Base):
@@ -80,14 +80,14 @@ class KPIGroup(Base):
     )
 
     # Relationships
-    master_records: Mapped[list["KPIMasterORM"]] = relationship(
-        "KPIMasterORM",
+    master_records: Mapped[list["KPIMaster"]] = relationship(
+        "KPIMaster",
         back_populates="group",
         cascade="all, delete-orphan",
         lazy="select",
     )
-    tracker_records: Mapped[list["KPITrackerORM"]] = relationship(
-        "KPITrackerORM",
+    tracker_records: Mapped[list["KPITracker"]] = relationship(
+        "KPITracker",
         back_populates="group",
         cascade="all, delete-orphan",
         lazy="select",
