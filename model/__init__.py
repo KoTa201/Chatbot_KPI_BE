@@ -6,3 +6,7 @@ from .Chatbot import Chatbot
 from .ChatbotAuditLog import ChatbotAuditLog
 from .KPIMaster import KPIMasterORM
 from .ChatSession import ChatSession
+from .ClarificationLog import ClarificationLogORM
+from .PasswordReset import PasswordReset
+from .RevokedToken import RevokedToken
+from .SchedulerConfig import SchedulerConfigModel

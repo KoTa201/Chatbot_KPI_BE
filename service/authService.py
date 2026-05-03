@@ -240,7 +240,7 @@ class AuthService:
             )
 
         # Revoke token lama sebelum menerbitkan yang baru
-        await repo.revoke_token(refresh_token)
+        await repo.revoke_token(refresh_token, user_id)
 
         # Ambil user terbaru (role bisa berubah sejak token dibuat)
         user = await repo.get_by_id(user_id)
@@ -273,12 +273,10 @@ class AuthService:
         Revoke refresh token secara eksplisit (dipakai saat logout).
         Token yang sudah ada di denylist diabaikan tanpa error.
         """
-        # Tetap decode untuk validasi signature & expiry
+        # Tetap decode untuk validasi signature & expiry, ambil user_id
         payload = self.decode_refresh_token(refresh_token)
         user_id = UUID(payload["sub"])
         await self.repo.revoke_token(refresh_token, user_id)
-
-
 
     # ------------------------------------------------------------------ #
     #  User validation                                                     #

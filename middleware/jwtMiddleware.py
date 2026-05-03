@@ -5,6 +5,7 @@ Mendukung role: admin, kepala_divisi, karyawan
 """
 
 import json
+import logging
 import re
 from typing import Optional
 from uuid import UUID
@@ -13,6 +14,8 @@ from fastapi import Request, status
 from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+
+logger = logging.getLogger(__name__)
 
 from configCredidential import settings
 
@@ -193,4 +196,15 @@ class JWTMiddleware(BaseHTTPMiddleware):
         request.state.username = payload.get("username", "")
         request.state.role = role
 
-        return await call_next(request)
+        try:
+            return await call_next(request)
+        except Exception as exc:
+            # Catch unhandled exceptions so they don't bypass CORSMiddleware.
+            # Without this, exceptions escape BaseHTTPMiddleware and reach
+            # ServerErrorMiddleware (which is outside CORS), producing a
+            # response with no CORS headers → browser CORS block + ERR_FAILED.
+            logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+            return _json_response(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                f"Internal server error: {type(exc).__name__}",
+            )

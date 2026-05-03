@@ -107,7 +107,7 @@ class UserService:
     async def delete_user(self, user_id: UUID) -> str:
         user = await self._get_user_or_404(user_id)
 
-        if user.role == RoleEnum.ADMIN:
+        if user.role == RoleEnum.admin:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Admin tidak dapat menghapus dirinya sendiri.",

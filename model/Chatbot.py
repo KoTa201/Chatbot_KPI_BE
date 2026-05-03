@@ -14,7 +14,8 @@ class Chatbot(Base):
     nama_chatbot: Mapped[str] = mapped_column(
         String(255), nullable=False, index=True)
     otoritas: Mapped[AuthorityEnum] = mapped_column(
-        Enum(AuthorityEnum), nullable=False)
+        Enum(AuthorityEnum, values_callable=lambda e: [x.value for x in e]),
+        nullable=False)
     addon_prompt: Mapped[str] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False)

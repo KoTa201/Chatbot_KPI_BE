@@ -1,5 +1,5 @@
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
@@ -47,6 +47,10 @@ class UserRouter:
         self.router.add_api_route("/logout", self.logout, methods=[
                                   "POST"], response_model=MessageResponse, summary="Logout dan cabut refresh token")
 
+        # Current user route — must be registered before /{user_id} to avoid UUID clash
+        self.router.add_api_route("/me", self.get_current_user, methods=[
+                                  "GET"], response_model=UserResponse, summary="Profil user yang sedang login")
+
         # Admin user management routes
         self.router.add_api_route("", self.create_user, methods=[
                                   "POST"], response_model=UserResponse, status_code=201, summary="[Admin] Tambah user baru")
@@ -88,6 +92,14 @@ class UserRouter:
     async def logout(self, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
         self.auth_controller = AuthController(db)
         return await self.auth_controller.logout(payload)
+
+    # ─── Current user endpoint ─────────────────────────────────────────────────
+
+    async def get_current_user(self, request: Request, db: AsyncSession = Depends(get_db)):
+        user_id: UUID = request.state.user_id
+        if not self.user_controller:
+            self.user_controller = UserController(db)
+        return await self.user_controller.get_user_by_id(user_id)
 
     # ─── Admin user management endpoints ───────────────────────────────────────
 
