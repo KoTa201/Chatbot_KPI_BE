@@ -27,6 +27,12 @@ class UserService:
         self.email_service: EmailService = EmailService()
 
     async def create_user(self, payload: UserCreateRequest) -> User:
+        if await self.repo.email_exists(payload.email):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Email '{payload.email}' sudah digunakan oleh user lain.",
+            )
+            
         user = User(
             username=payload.username,
             email=payload.email,
