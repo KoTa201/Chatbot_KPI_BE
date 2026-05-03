@@ -101,7 +101,7 @@ def make_master_record(
     category: str = "Operasional",
     tahun: int = TAHUN,
 ):
-    """Create mock KPIMasterORM."""
+    """Create mock KPIMaster."""
     record = MagicMock()
     record.id = id
     record.group_id = group_id
@@ -113,7 +113,7 @@ def make_master_record(
     record.achieve = "85%"
     record.partial = "80%"
     record.fail = "50%"
-    record.responsibility_persons = "Manager A"
+    record.user_id = uuid.UUID("11111111-1111-1111-1111-111111111111")  
     record.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
     return record
 

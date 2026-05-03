@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from model.KPITracker import KPITrackerORM
+from model.KPITracker import KPITracker
 
 
 class KPITrackerRepository:
@@ -34,7 +34,7 @@ class KPITrackerRepository:
         if not records:
             return 0
 
-        orm_records = [KPITrackerORM(**r) for r in records]
+        orm_records = [KPITracker(**r) for r in records]
         self.db.add_all(orm_records)
         try:
             await self.db.commit()
@@ -63,13 +63,13 @@ class KPITrackerRepository:
         Returns jumlah baris terhapus.
         """
         try:
-            stmt = delete(KPITrackerORM).where(
-                KPITrackerORM.group_id == group_id,
-                KPITrackerORM.tahun == tahun,
+            stmt = delete(KPITracker).where(
+                KPITracker.group_id == group_id,
+                KPITracker.tahun == tahun,
             )
 
             if bulan_num is not None:
-                stmt = stmt.where(KPITrackerORM.bulan_num == bulan_num)
+                stmt = stmt.where(KPITracker.bulan_num == bulan_num)
 
             result = await self.db.execute(stmt)
             await self.db.commit()

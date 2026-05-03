@@ -27,11 +27,11 @@ from model.Base import Base
 
 if TYPE_CHECKING:
     from model.KPIGroup import KPIGroup
-    from model.KPIMaster import KPIMasterORM
+    from model.KPIMaster import KPIMaster
     from model.User import User
 
 
-class KPITrackerORM(Base):
+class KPITracker(Base):
     __tablename__ = "kpi_tracker_records"
 
     __table_args__ = (
@@ -93,8 +93,8 @@ class KPITrackerORM(Base):
     group: Mapped["KPIGroup"] = relationship(
         "KPIGroup", back_populates="tracker_records"
     )
-    kpi_master: Mapped[Optional["KPIMasterORM"]] = relationship(
-        "KPIMasterORM", back_populates="tracker_records"
+    kpi_master: Mapped[Optional["KPIMaster"]] = relationship(
+        "KPIMaster", back_populates="tracker_records"
     )
     user: Mapped[Optional["User"]] = relationship(
         "User",

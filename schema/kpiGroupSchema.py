@@ -13,12 +13,12 @@ Catatan penamaan nested response:
   tidak dimaksudkan untuk menggantikan schema di file lain.
 
 Penyesuaian field terhadap ORM saat ini:
-  KPIGroupMasterRecord  (≈ KPIMasterORM):
+  KPIGroupMasterRecord  (≈ KPIMaster):
     - TIDAK ADA: source_sheet_id, source_sheet_name  → ada di KPIGroupResponse
     - TIDAK ADA: updated_at                          → kolom tidak ada di ORM
     - ADA:       group_id                            → FK yang ada di ORM
 
-  KPIGroupTrackerRecord (≈ KPITrackerORM):
+  KPIGroupTrackerRecord (≈ KPITracker):
     - TIDAK ADA: nama_kpi                            → kolom dihapus dari ORM
     - TIDAK ADA: source_sheet_id, source_sheet_name  → ada di KPIGroupResponse
     - ADA:       group_id, kpi_master_id             → FK yang ada di ORM
@@ -48,7 +48,7 @@ class GroupTypeEnum(str, Enum):
 class KPIGroupMasterRecord(BaseModel):
     """
     Representasi satu baris kpi_master_records sebagai nested response.
-    Field disesuaikan 1:1 dengan KPIMasterORM — tidak ada field yang
+    Field disesuaikan 1:1 dengan KPIMaster — tidak ada field yang
     tidak ada di ORM agar model_validate(orm_instance) tidak error.
     """
     id:                     UUID
@@ -61,7 +61,6 @@ class KPIGroupMasterRecord(BaseModel):
     achieve:                Optional[str] = None
     partial:                Optional[str] = None
     fail:                   Optional[str] = None
-    responsibility_persons: Optional[str] = None
     created_at:             datetime
 
     model_config = {"from_attributes": True}
@@ -71,7 +70,7 @@ class KPIGroupMasterRecord(BaseModel):
 class KPIGroupTrackerRecord(BaseModel):
     """
     Representasi satu baris kpi_tracker_records sebagai nested response.
-    Field disesuaikan 1:1 dengan KPITrackerORM:
+    Field disesuaikan 1:1 dengan KPITracker:
       - nama_kpi tidak ada (dihapus dari ORM; dapat via JOIN ke master)
       - source_sheet_* tidak ada (ada di KPIGroupResponse)
     """

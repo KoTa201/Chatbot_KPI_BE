@@ -18,7 +18,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model.KPIMaster import KPIMasterORM
+from model.KPIMaster import KPIMaster
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
@@ -537,11 +537,11 @@ class TrackerIngestionService:
         if not kpi_names:
             return {}
         try:
-            query = select(KPIMasterORM.id, KPIMasterORM.kpi_name).where(
-                KPIMasterORM.kpi_name.in_(kpi_names)
+            query = select(KPIMaster.id, KPIMaster.kpi_name).where(
+                KPIMaster.kpi_name.in_(kpi_names)
             )
             if tahun:
-                query = query.where(KPIMasterORM.tahun == tahun)
+                query = query.where(KPIMaster.tahun == tahun)
             result = await self.db.execute(query)
             rows = result.fetchall()
             master_map: dict[str, UUID] = {}

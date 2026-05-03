@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
 
-from model.KPIMaster import KPIMasterORM
+from model.KPIMaster import KPIMaster
 from repository.kpiMasterRepository import KPIMasterRepository
 
 logger = logging.getLogger(__name__)

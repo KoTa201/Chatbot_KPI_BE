@@ -2,21 +2,23 @@
 service/kpiMasterIngestionService.py
 Orchestrator ingestion KPI Master dari Google Sheets.
 
-Changelog v3:
-  - Tambah user_id lookup sebelum upsert kpi_master_records.
-    Lookup dilakukan via UserLookupUtil.by_first_name_in_text() agar
-    field responsibility_persons (comma-separated names) ter-resolve ke
-    user_id (PIC pertama).
-  - Behavior jika user tidak ditemukan: user_id = None (nullable FK).
-    Record tetap di-insert; admin dapat manual assign user_id nanti.
-    Daftar nama yang tidak ter-resolve dicatat di IngestionLog.errors.
+Changelog v4 (many-to-many):
+  - _inject_user_ids() kini menggunakan UserLookupUtil.all_ids_in_text()
+    sehingga SEMUA nama di responsibility_persons (comma-separated) di-resolve
+    ke list[UUID], bukan hanya nama pertama.
+  - Record menerima key "user_ids" (list[UUID]) sebagai pengganti "user_id".
+  - Repository upsert_by_group() mengelola sync ke junction table
+    kpi_master_users secara otomatis.
+  - Perilaku unresolved: sama seperti v3
+      * ingest_kpi_master  → fail (HTTP 422) jika ada nama tidak ditemukan.
+      * update_and_reingest → lenient; nama yang tidak ditemukan dicatat di log.
 
 Alur "trigger-like" saat ingest:
   1. KPIGroup di-upsert berdasarkan sheet_id.
   2. IngestionLog dibuat dengan status 'running'.
   3. Records di-parse dan di-inject dengan group_id.
-  4. user_id di-resolve untuk setiap record (batch, dengan cache).
-  5. KPI Master di-upsert.
+  4. user_ids di-resolve untuk setiap record (batch, dengan cache).
+  5. KPI Master di-upsert + junction table di-sync.
   6. IngestionLog di-update ke status akhir.
 """
 
@@ -67,12 +69,14 @@ class KPIMasterIngestionService:
         Ingest KPI Master dari Google Sheets.
 
         Side effects (otomatis, tanpa input dari caller):
-          - KPIGroup di-upsert
-          - IngestionLog dibuat dan diupdate
-          - user_id di-resolve dari responsibility_persons
+          - KPIGroup di-upsert.
+          - IngestionLog dibuat dan diupdate.
+          - user_ids (list) di-resolve dari semua nama di responsibility_persons.
+          - Junction table kpi_master_users di-sync oleh repository.
 
         Returns:
-            {"status", "count", "message", "group_id", "log_id"}
+            {"status", "count", "message", "group_id", "log_id",
+             "data", "unresolved_users"}
         """
         log_id = None
         group_id = None
@@ -82,7 +86,7 @@ class KPIMasterIngestionService:
             logger.info("[ingest_kpi_master] Fetching sheet: %s", sheet_url)
             df, spreadsheet_id, sheet_name = self._fetch_sheet(sheet_url)
 
-            # ── STEP 2: Auto-create KPIGroup (trigger-like) ──────────
+            # ── STEP 2: Auto-create KPIGroup ─────────────────────────
             logger.info(
                 "[ingest_kpi_master] Upserting KPIGroup for sheet_id=%s",
                 spreadsheet_id,
@@ -129,10 +133,13 @@ class KPIMasterIngestionService:
                 len(errors),
             )
 
-            # ── STEP 5: Resolve user_id ──────────────────────────────────
+            # ── STEP 5: Resolve user_ids (many-to-many) ───────────────
             records, unresolved_names = await self._inject_user_ids(records)
             if unresolved_names:
-                detail = f"User tidak ditemukan untuk: {', '.join(unresolved_names)}. Perbaiki nama di sheet atau tambahkan user terlebih dahulu."
+                detail = (
+                    f"User tidak ditemukan untuk: {', '.join(unresolved_names)}. "
+                    "Perbaiki nama di sheet atau tambahkan user terlebih dahulu."
+                )
                 await self.log_repo.update_status(
                     log_id=log_id,
                     status="failed",
@@ -142,10 +149,10 @@ class KPIMasterIngestionService:
                 )
                 raise HTTPException(status_code=422, detail=detail)
 
-            # ── STEP 6: Upsert KPI Master records ───────────────────
+            # ── STEP 6: Upsert KPI Master + sync junction table ───────
             ingested_count = await self.kpi_repo.upsert_by_group(records)
 
-            # ── STEP 7: Finalize IngestionLog ────────────────────────
+            # ── STEP 7: Finalize IngestionLog ─────────────────────────
             status = self._resolve_status(ingested_count, total_rows, errors)
             error_summary = self._format_errors(errors) if errors else None
 
@@ -166,12 +173,12 @@ class KPIMasterIngestionService:
             )
 
             return {
-                "status":   status,
-                "count":    ingested_count,
-                "message":  f"Berhasil ingest {ingested_count} dari {total_rows} KPI Master records.",
-                "group_id": str(group_id),
-                "log_id":   str(log_id),
-                "data":     records,
+                "status":           status,
+                "count":            ingested_count,
+                "message":          f"Berhasil ingest {ingested_count} dari {total_rows} KPI Master records.",
+                "group_id":         str(group_id),
+                "log_id":           str(log_id),
+                "data":             records,
                 "unresolved_users": unresolved_names,
             }
 
@@ -197,8 +204,8 @@ class KPIMasterIngestionService:
         group:     KPIGroup = None,
     ) -> dict:
         """
-        Update KPIGroup (sheet_url/tahun), hapus seluruh master lama,
-        lalu lakukan ingest ulang untuk group tersebut.
+        Update KPIGroup (sheet_url/tahun), hapus seluruh master lama
+        (beserta junction rows via CASCADE), lalu ingest ulang.
         """
         log_id = None
 
@@ -229,6 +236,7 @@ class KPIMasterIngestionService:
                 },
             )
 
+            # Hapus master lama — junction rows terhapus via ON DELETE CASCADE
             deleted_count = await self.kpi_repo.delete_by_group_id(group_id)
             logger.info(
                 "[update_and_reingest] Deleted %s old records for group_id=%s",
@@ -256,11 +264,11 @@ class KPIMasterIngestionService:
             for record in records:
                 record["group_id"] = group_id
 
-            # Resolve user_id
+            # Resolve user_ids — lenient: nama tak dikenal dicatat di errors
             records, unresolved_names = await self._inject_user_ids(records)
             if unresolved_names:
                 errors.extend(
-                    f"[user_lookup] '{name}' tidak ditemukan di users — user_id=NULL"
+                    f"[user_lookup] '{name}' tidak ditemukan di users — user_ids tidak ter-assign"
                     for name in unresolved_names
                 )
 
@@ -304,31 +312,41 @@ class KPIMasterIngestionService:
             )
 
     # ================================================================ #
-    #  PRIVATE: User ID resolution                                     #
+    #  PRIVATE: User ID resolution                                      #
     # ================================================================ #
 
     async def _inject_user_ids(
         self,
         records: list[dict],
     ) -> tuple[list[dict], list[str]]:
+        """
+        Resolve responsibility_persons (comma-separated names) → user_ids (list[UUID]).
+
+        Tiap record:
+          - Key "responsibility_persons" di-pop.
+          - Key "user_ids" (list[UUID]) di-inject — kosong jika tidak ada PIC valid.
+
+        Mengembalikan:
+          records        — list record yang sudah di-inject user_ids.
+          unresolved_all — semua nama (de-duplikasi global) yang gagal di-resolve.
+        """
         lookup = UserLookupUtil(self.db)
         await lookup.preload()
 
-        unresolved: list[str] = []
+        unresolved_all: list[str] = []
         seen_unresolved: set[str] = set()
 
         for record in records:
             raw_persons: str | None = record.pop("responsibility_persons", None)
-            user_id = await lookup.by_first_name_in_text(raw_persons)
-            record["user_id"] = user_id
+            resolved, unresolved = await lookup.all_ids_in_text(raw_persons)
+            record["user_ids"] = resolved
 
-            if user_id is None and raw_persons:
-                first_name = raw_persons.split(",")[0].strip()
-                if first_name and first_name not in seen_unresolved:
-                    unresolved.append(first_name)
-                    seen_unresolved.add(first_name)
+            for name in unresolved:
+                if name not in seen_unresolved:
+                    unresolved_all.append(name)
+                    seen_unresolved.add(name)
 
-        return records, unresolved
+        return records, unresolved_all
 
     # ================================================================ #
     #  PRIVATE: Sheet & parse helpers                                   #

@@ -116,8 +116,8 @@ class KPIGroupRepository:
         Alur dua langkah:
           Query 1 — fetch grup tanpa relationship (metadata saja).
           Query 2 — db.refresh() hanya relasi yang sesuai group_type:
-                      'master'  → master_records  (list[KPIMasterORM])
-                      'tracker' → tracker_records (list[KPITrackerORM])
+                      'master'  → master_records  (list[KPIMaster])
+                      'tracker' → tracker_records (list[KPITracker])
 
         Returns:
             KPIGroup dengan relasi ter-load, atau None jika tidak ada.
