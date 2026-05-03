@@ -32,11 +32,11 @@ class KPIGroupController:
 
     async def list_groups(
         self,
-        page:       int,
-        limit:      int,
-        tahun:      int | None,
-        group_type: GroupTypeEnum | None,
-        search:     str | None,
+        page:       int = 1,
+        limit:      int = 10,
+        tahun:      int | None = None,
+        group_type: GroupTypeEnum | None = None,
+        search:     str | None = None,
     ) -> KPIGroupListResponse:
         if limit < 1 or limit > 100:
             raise HTTPException(

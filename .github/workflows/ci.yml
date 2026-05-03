@@ -38,11 +38,27 @@ jobs:
           echo "REFRESH_SECRET_KEY=${{ secrets.REFRESH_SECRET_KEY }}" >> .env
           echo "REFRESH_TOKEN_EXPIRE_DAYS=7" >> .env
           echo "RESET_SECRET_KEY=${{ secrets.RESET_SECRET_KEY }}" >> .env
+          echo "AUTH_ALGORITHM=HS256" >> .env
+          echo "AUTH_TOKEN_TYPE=bearer" >> .env
+          echo "AUTH_REFRESH_TOKEN_TYPE=refresh" >> .env
+          echo "AUTH_RESET_TOKEN_TYPE=reset" >> .env
+          echo "AUTH_PIN_EXPIRE_MINUTES=15" >> .env
+          echo "AUTH_RESET_TOKEN_EXPIRE_MINUTES=10" >> .env
           echo "SMTP_FROM=Chatbot KPI <chatbotkpi@example.com>" >> .env
           echo "SMTP_HOST=sandbox.smtp.mailtrap.io" >> .env
           echo "SMTP_PORT=587" >> .env
           echo "SMTP_USER=${{ secrets.SMTP_USER }}" >> .env
           echo "SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}" >> .env
+          echo "LLM_MODEL_API_KEY=${{ secrets.LLM_MODEL_API_KEY }}" >> .env
+          echo "LLM_MODEL_BASE_URL=${{ secrets.LLM_MODEL_BASE_URL }}" >> .env
+          echo "LLM_MODEL_NL_TO_SQL=openai/gpt-4o" >> .env
+          echo "LLM_MODEL_ANALYSIS=openai/gpt-4o" >> .env
+          echo "LLM_MODEL_DISAMBIGUATION=openai/gpt-4o-mini" >> .env
+          echo "LLM_MODEL_GRAPHIC_CLASSIFIER=openai/gpt-4o-mini" >> .env
+          echo "RATE_LIMIT_PER_MINUTE=30" >> .env
+          echo "SQL_MAX_LIMIT=5000" >> .env
+          echo "SQL_MAX_SUBQUERY_DEPTH=3" >> .env
+          echo "SQL_EXECUTION_TIMEOUT=30" >> .env
 
       - name: Run tests
         run: |
