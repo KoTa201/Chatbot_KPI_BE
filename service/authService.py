@@ -22,18 +22,12 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from model.PasswordReset import PasswordReset
-from schema.authSchema import (
-    ResetTokenResponse,
-)
 from service.emailService import EmailService
 
 from configCredidential import settings
 from databaseConfig import get_db
 from model.User import RoleEnum, User
 from repository.userRepository import UserRepository
-from schema.authSchema import (
-    MessageResponse
-)
 
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -316,19 +310,19 @@ class AuthService:
             )
         return user
 
-    async def request_password_reset(self, email: str) -> MessageResponse:
+    async def request_password_reset(self, email: str) -> str:
         """
         Buat PIN 6 digit, simpan hash-nya ke DB, kirim ke email user.
         Selalu kembalikan pesan sukses generik — jangan bocorkan
         apakah email terdaftar atau tidak (cegah user enumeration).
         """
-        _GENERIC_OK = MessageResponse(
-            message="Jika email terdaftar, kode reset akan dikirim dalam beberapa saat."
-        )
-
         user = await self.repo.get_by_username_or_email(email)
         if not user or not user.is_active:
-            return _GENERIC_OK   # ← sengaja tidak raise 404
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"User dengan email {email} tidak ditemukan atau tidak aktif.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         pin = f"{random.SystemRandom().randint(0, 999_999):06d}"
         pin_hash = self.hash_password(pin)   # bcrypt — sama seperti password
@@ -347,9 +341,9 @@ class AuthService:
             full_name=user.full_name or user.username,
             pin=pin,
         )
-        return _GENERIC_OK
+        return "Jika email terdaftar, kode reset akan dikirim dalam beberapa saat."
 
-    async def verify_reset_pin(self, email: str, pin: str) -> ResetTokenResponse:
+    async def verify_reset_pin(self, email: str, pin: str) -> tuple[str, int]:
         """
         Verifikasi PIN. Jika valid, kembalikan reset_token (JWT pendek sekali pakai).
         PIN langsung ditandai used_at agar tidak bisa dipakai ulang.
@@ -386,9 +380,9 @@ class AuthService:
         reset_token = jwt.encode(
             payload, self.reset_secret_key, algorithm=self.algorithm
         )
-        return ResetTokenResponse(reset_token=reset_token, expires_in=expire_seconds)
+        return reset_token, expire_seconds
 
-    async def reset_password(self, reset_token: str, new_password: str) -> MessageResponse:
+    async def reset_password(self, reset_token: str, new_password: str) -> str:
         """
         Verifikasi reset_token lalu simpan password baru.
         Token hanya berlaku sekali — setelah dipakai tidak ada mekanisme
@@ -419,13 +413,9 @@ class AuthService:
 
         user.hashed_password = self.hash_password(new_password)
         await self.repo.save(user)
-        return MessageResponse(message="Password berhasil direset. Silakan login dengan password baru.")
+        return "Password berhasil direset. Silakan login dengan password baru."
 
 
-# ------------------------------------------------------------------ #
-#  FastAPI Dependencies                                                #
-# ------------------------------------------------------------------ #
-# instance global untuk dependency
 _auth_service = AuthService(UserRepository(Depends(get_db)))
 
 

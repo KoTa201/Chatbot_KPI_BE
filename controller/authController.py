@@ -105,10 +105,10 @@ class AuthController:
             )
 
         # -- delegasi --
-        result = await self.svc.request_password_reset(email=payload.email.strip())
+        message = await self.svc.request_password_reset(email=payload.email.strip())
 
         # -- mapping output --
-        return MessageResponse.model_validate(result)
+        return MessageResponse(message=message)
 
     async def verify_reset_pin(
         self, payload: VerifyResetPinRequest
@@ -121,13 +121,13 @@ class AuthController:
             )
 
         # -- delegasi --
-        result = await self.svc.verify_reset_pin(
+        reset_token, expires_in = await self.svc.verify_reset_pin(
             email=payload.email,
             pin=payload.pin,
         )
 
         # -- mapping output --
-        return ResetTokenResponse.model_validate(result)
+        return ResetTokenResponse(reset_token=reset_token, expires_in=expires_in)
 
     async def reset_password(
         self, payload: ResetPasswordRequest
@@ -145,13 +145,13 @@ class AuthController:
             )
 
         # -- delegasi --
-        result = await self.svc.reset_password(
+        message = await self.svc.reset_password(
             reset_token=payload.reset_token.strip(),
             new_password=payload.new_password,
         )
 
         # -- mapping output --
-        return MessageResponse.model_validate(result)
+        return MessageResponse(message=message)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/logout                                                   #
