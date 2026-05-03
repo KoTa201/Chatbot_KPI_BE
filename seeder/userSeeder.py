@@ -3,7 +3,8 @@ seeders/user_seeder.py
 Seeder untuk mengisi tabel users dengan data awal.
 - 1 admin
 - 3 kepala_divisi
-- 3 karyawan
+- 3 karyawan (default)
+- 17 karyawan (dari KPI Master 2025 — responsibility_persons)
 
 Jalankan:
     python -m seeders.user_seeder
@@ -29,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from model.User import RoleEnum, UserORM
+from model.User import RoleEnum
 from databaseConfig import get_db
 
 
@@ -75,21 +76,12 @@ SEED_USERS = [
     {
         "username": "kadiv_sari",
         "email": "sari.kadiv@kpiapp.id",
-        
         "full_name": "Sari Dewi",
         "password": "Kadiv123",
         "role": RoleEnum.kepala_divisi,
         "is_active": True,
     },
-    # ── Karyawan ───────────────────────────────────────────────────
-    {
-        "username": "pirmadi",
-        "email": "pirmadi@kpiapp.id",
-        "full_name": "Pirmadi Surya",
-        "password": "User1234",
-        "role": RoleEnum.karyawan,
-        "is_active": True,
-    },
+    # ── Karyawan (default) ─────────────────────────────────────────
     {
         "username": "siti_rahayu",
         "email": "siti.rahayu@kpiapp.id",
@@ -102,6 +94,151 @@ SEED_USERS = [
         "username": "Daiva",
         "email": "daivaraditya36@gmail.com",
         "full_name": "Rizky Pratama",
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    # ── Karyawan (KPI Master 2025 — Responsibility Persons) ────────
+    {
+        "username": "pirmadi",
+        "email": "pirmadi@kpiapp.id",
+        "full_name": "Pirmadi S",          # KPI: High Level
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "djoko_k",
+        "email": "djoko.k@kpiapp.id",
+        "full_name": "Djoko K",            # KPI: High Level, Project Delivery
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "erlan_h",
+        "email": "erlan.h@kpiapp.id",
+        "full_name": "Erlan H",            # KPI: Product Management
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "farhan",
+        "email": "farhan@kpiapp.id",
+        "full_name": "Farhan",             # KPI: Product Management
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "andi",
+        "email": "andi@kpiapp.id",
+        "full_name": "Andi",               # KPI: Product Management
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "adiansyah",
+        "email": "adiansyah@kpiapp.id",
+        "full_name": "Adiansyah",          # KPI: Product Management
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "bandy",
+        "email": "bandy@kpiapp.id",
+        "full_name": "Bandy",              # KPI: Project Delivery
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "rafly",
+        "email": "rafly@kpiapp.id",
+        "full_name": "Rafly",              # KPI: Project Delivery
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "akmal",
+        "email": "akmal@kpiapp.id",
+        "full_name": "Akmal",              # KPI: Project Delivery
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "mia",
+        "email": "mia@kpiapp.id",
+        "full_name": "Mia",                # KPI: Pre-Sales/Sales Support
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "dini",
+        "email": "dini@kpiapp.id",
+        "full_name": "Dini",               # KPI: Pre-Sales/Sales Support
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "jessica",
+        "email": "jessica@kpiapp.id",
+        "full_name": "Jessica",            # KPI: Pre-Sales/Sales Support
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "abdul_r",
+        "email": "abdul.r@kpiapp.id",
+        "full_name": "Abdul R",            # KPI: Partner/Subcon Handling
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "tresna",
+        "email": "tresna@kpiapp.id",
+        "full_name": "Tresna",             # KPI: Partner/Subcon Handling
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "hasbi",
+        "email": "hasbi@kpiapp.id",
+        "full_name": "Hasbi",              # KPI: Partner/Subcon Handling
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "heri",
+        "email": "heri@kpiapp.id",
+        "full_name": "Heri",               # KPI: Team Growth
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "romli",
+        "email": "romli@kpiapp.id",
+        "full_name": "Romli",              # KPI: Team Growth
+        "password": "User1234",
+        "role": RoleEnum.karyawan,
+        "is_active": True,
+    },
+    {
+        "username": "dani",
+        "email": "dani@kpiapp.id",
+        "full_name": "Dani",               # KPI: Team Growth
         "password": "User1234",
         "role": RoleEnum.karyawan,
         "is_active": True,

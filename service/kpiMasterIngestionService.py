@@ -2,23 +2,22 @@
 service/kpiMasterIngestionService.py
 Orchestrator ingestion KPI Master dari Google Sheets.
 
-Alur "trigger-like" saat ingest:
-  Ketika ingest dipanggil, secara otomatis dan transparan:
-    1. KPIGroup di-upsert (get_or_create) berdasarkan sheet_id.
-       → Implementasi mirip DB trigger: terjadi sebelum master disimpan,
-         tanpa controller/caller perlu tahu.
-    2. IngestionLog dibuat dengan status 'running'.
-    3. Records di-parse dan di-inject dengan group_id.
-    4. KPI Master di-upsert.
-    5. IngestionLog di-update ke status akhir (success/partial/failed).
+Changelog v3:
+  - Tambah user_id lookup sebelum upsert kpi_master_records.
+    Lookup dilakukan via UserLookupUtil.by_first_name_in_text() agar
+    field responsibility_persons (comma-separated names) ter-resolve ke
+    user_id (PIC pertama).
+  - Behavior jika user tidak ditemukan: user_id = None (nullable FK).
+    Record tetap di-insert; admin dapat manual assign user_id nanti.
+    Daftar nama yang tidak ter-resolve dicatat di IngestionLog.errors.
 
-Mengapa tidak pakai PostgreSQL trigger murni?
-  - IngestionLog butuh konteks runtime (sheet_url, jumlah baris, error messages)
-    yang tidak tersedia di DB trigger.
-  - KPIGroup butuh data dari Google Sheets API (sheet_id, sheet_name)
-    yang hanya ada di application layer.
-  Solusi: SQLAlchemy session event (lihat _register_session_events) untuk
-  validasi group_id, orchestration tetap di service layer.
+Alur "trigger-like" saat ingest:
+  1. KPIGroup di-upsert berdasarkan sheet_id.
+  2. IngestionLog dibuat dengan status 'running'.
+  3. Records di-parse dan di-inject dengan group_id.
+  4. user_id di-resolve untuk setiap record (batch, dengan cache).
+  5. KPI Master di-upsert.
+  6. IngestionLog di-update ke status akhir.
 """
 
 import logging
@@ -27,12 +26,14 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from service.kpiMasterService import KPIMasterService
 from model.KPIGroup import KPIGroup
+from utils.userLookUp import UserLookupUtil
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,13 @@ class KPIMasterIngestionService:
 
     def __init__(
         self,
+        db:          AsyncSession,
         kpi_repo:    KPIMasterRepository,
         kpi_service: KPIMasterService,
         log_repo:    IngestionLogRepository,
         group_repo:  KPIGroupRepository,
     ):
+        self.db = db
         self.kpi_repo = kpi_repo
         self.kpi_service = kpi_service
         self.log_repo = log_repo
@@ -66,6 +69,7 @@ class KPIMasterIngestionService:
         Side effects (otomatis, tanpa input dari caller):
           - KPIGroup di-upsert
           - IngestionLog dibuat dan diupdate
+          - user_id di-resolve dari responsibility_persons
 
         Returns:
             {"status", "count", "message", "group_id", "log_id"}
@@ -75,16 +79,14 @@ class KPIMasterIngestionService:
 
         try:
             # ── STEP 1: Fetch sheet ──────────────────────────────────
-            logger.info(f"[ingest_kpi_master] Fetching sheet: {sheet_url}")
+            logger.info("[ingest_kpi_master] Fetching sheet: %s", sheet_url)
             df, spreadsheet_id, sheet_name = self._fetch_sheet(sheet_url)
 
-            logger.error(f"{sheet_name}")
-
             # ── STEP 2: Auto-create KPIGroup (trigger-like) ──────────
-            # Dipanggil sebelum apapun disimpan ke kpi_master_records.
-            # Jika grup sudah ada (re-ingest), data sheet di-refresh.
             logger.info(
-                f"[ingest_kpi_master] Upserting KPIGroup for sheet_id={spreadsheet_id}")
+                "[ingest_kpi_master] Upserting KPIGroup for sheet_id=%s",
+                spreadsheet_id,
+            )
             group = await self.group_repo.get_or_create(
                 sheet_id=spreadsheet_id,
                 group_type="master",
@@ -94,25 +96,15 @@ class KPIMasterIngestionService:
                 tahun=tahun,
             )
             group_id = group.id
-            logger.info(
-                f"[ingest_kpi_master] KPIGroup ready: group_id={group_id}")
+            logger.info("[ingest_kpi_master] KPIGroup ready: group_id=%s", group_id)
 
             # ── STEP 3: Create IngestionLog (status=running) ─────────
-            # Log dibuat SEBELUM proses dimulai sehingga crash di tengah
-            # tetap terekam dengan status 'running' (detectable sebagai hung).
-            log = await self.log_repo.create(
-                kpi_group_id=group_id,
-            )
+            log = await self.log_repo.create(kpi_group_id=group_id)
             log_id = log.id
-            logger.info(
-                f"[ingest_kpi_master] IngestionLog created: log_id={log_id}")
+            logger.info("[ingest_kpi_master] IngestionLog created: log_id=%s", log_id)
 
             # ── STEP 4: Parse records ────────────────────────────────
-            records, errors = self._parse(
-                df, spreadsheet_id, sheet_name, tahun)
-
-            logger.error(f"{errors}")
-
+            records, errors = self._parse(df, spreadsheet_id, sheet_name, tahun)
             if not records:
                 await self.log_repo.update_status(
                     log_id=log_id,
@@ -126,18 +118,34 @@ class KPIMasterIngestionService:
                     detail="Sheet tidak menghasilkan records valid.",
                 )
 
-            # Inject group_id ke setiap record (tidak boleh ada di parser)
+            # Inject group_id ke setiap record
             for record in records:
                 record["group_id"] = group_id
 
             total_rows = len(records)
             logger.info(
-                f"[ingest_kpi_master] Parsed {total_rows} records, {len(errors)} errors")
+                "[ingest_kpi_master] Parsed %s records, %s parse errors",
+                total_rows,
+                len(errors),
+            )
 
-            # ── STEP 5: Upsert KPI Master records ───────────────────
+            # ── STEP 5: Resolve user_id ──────────────────────────────────
+            records, unresolved_names = await self._inject_user_ids(records)
+            if unresolved_names:
+                detail = f"User tidak ditemukan untuk: {', '.join(unresolved_names)}. Perbaiki nama di sheet atau tambahkan user terlebih dahulu."
+                await self.log_repo.update_status(
+                    log_id=log_id,
+                    status="failed",
+                    total_rows=total_rows,
+                    ingested_count=0,
+                    errors=detail,
+                )
+                raise HTTPException(status_code=422, detail=detail)
+
+            # ── STEP 6: Upsert KPI Master records ───────────────────
             ingested_count = await self.kpi_repo.upsert_by_group(records)
 
-            # ── STEP 6: Finalize IngestionLog ────────────────────────
+            # ── STEP 7: Finalize IngestionLog ────────────────────────
             status = self._resolve_status(ingested_count, total_rows, errors)
             error_summary = self._format_errors(errors) if errors else None
 
@@ -151,8 +159,10 @@ class KPIMasterIngestionService:
             )
 
             logger.info(
-                f"[ingest_kpi_master] Done: {ingested_count}/{total_rows} "
-                f"records, status={status}"
+                "[ingest_kpi_master] Done: %s/%s records, status=%s",
+                ingested_count,
+                total_rows,
+                status,
             )
 
             return {
@@ -162,17 +172,16 @@ class KPIMasterIngestionService:
                 "group_id": str(group_id),
                 "log_id":   str(log_id),
                 "data":     records,
+                "unresolved_users": unresolved_names,
             }
 
         except HTTPException:
-            # Update log ke 'failed' jika log sudah dibuat
             if log_id:
                 await self._mark_log_failed(log_id, "HTTPException saat proses ingestion.")
             raise
 
         except Exception as e:
-            logger.error(
-                f"[ingest_kpi_master] Unexpected error: {traceback.format_exc()}")
+            logger.error("[ingest_kpi_master] Unexpected error: %s", traceback.format_exc())
             if log_id:
                 await self._mark_log_failed(log_id, str(e))
             raise HTTPException(
@@ -182,10 +191,10 @@ class KPIMasterIngestionService:
 
     async def update_and_reingest(
         self,
-        group_id: UUID,
+        group_id:  UUID,
         sheet_url: Optional[str] = None,
-        tahun: Optional[int] = None,
-        group: KPIGroup = None,
+        tahun:     Optional[int] = None,
+        group:     KPIGroup = None,
     ) -> dict:
         """
         Update KPIGroup (sheet_url/tahun), hapus seluruh master lama,
@@ -194,9 +203,7 @@ class KPIMasterIngestionService:
         log_id = None
 
         try:
-
-            effective_sheet_url = sheet_url if sheet_url is not None else str(
-                group.sheet_url)
+            effective_sheet_url = sheet_url if sheet_url is not None else str(group.sheet_url)
             effective_tahun = tahun if tahun is not None else group.tahun
             if effective_tahun is None:
                 raise HTTPException(
@@ -205,35 +212,34 @@ class KPIMasterIngestionService:
                 )
 
             logger.info(
-                f"[update_and_reingest] Fetching sheet for group_id={group_id}: {effective_sheet_url}"
+                "[update_and_reingest] Fetching sheet for group_id=%s: %s",
+                group_id,
+                effective_sheet_url,
             )
-            df, spreadsheet_id, sheet_name = self._fetch_sheet(
-                effective_sheet_url)
+            df, spreadsheet_id, sheet_name = self._fetch_sheet(effective_sheet_url)
 
             await self.group_repo.update(
                 group_id=group_id,
                 fields={
-                    "sheet_url": effective_sheet_url,
-                    "sheet_id": spreadsheet_id,
+                    "sheet_url":  effective_sheet_url,
+                    "sheet_id":   spreadsheet_id,
                     "sheet_name": sheet_name,
-                    "nama_grup": f"{sheet_name} Master {effective_tahun}",
-                    "tahun": effective_tahun,
+                    "nama_grup":  f"{sheet_name} Master {effective_tahun}",
+                    "tahun":      effective_tahun,
                 },
             )
 
             deleted_count = await self.kpi_repo.delete_by_group_id(group_id)
             logger.info(
-                f"[update_and_reingest] Deleted {deleted_count} old records for group_id={group_id}"
+                "[update_and_reingest] Deleted %s old records for group_id=%s",
+                deleted_count,
+                group_id,
             )
 
-            log = await self.log_repo.create(
-                kpi_group_id=group_id,
-            )
+            log = await self.log_repo.create(kpi_group_id=group_id)
             log_id = log.id
 
-            records, errors = self._parse(
-                df, spreadsheet_id, sheet_name, effective_tahun)
-
+            records, errors = self._parse(df, spreadsheet_id, sheet_name, effective_tahun)
             if not records:
                 await self.log_repo.update_status(
                     log_id=log_id,
@@ -250,6 +256,14 @@ class KPIMasterIngestionService:
             for record in records:
                 record["group_id"] = group_id
 
+            # Resolve user_id
+            records, unresolved_names = await self._inject_user_ids(records)
+            if unresolved_names:
+                errors.extend(
+                    f"[user_lookup] '{name}' tidak ditemukan di users — user_id=NULL"
+                    for name in unresolved_names
+                )
+
             total_rows = len(records)
             ingested_count = await self.kpi_repo.upsert_by_group(records)
 
@@ -265,15 +279,22 @@ class KPIMasterIngestionService:
                 errors=error_summary,
             )
 
+            return {
+                "status":           status,
+                "count":            ingested_count,
+                "group_id":         str(group_id),
+                "log_id":           str(log_id),
+                "unresolved_users": unresolved_names,
+            }
+
         except HTTPException:
             if log_id:
-                await self._mark_log_failed(
-                    log_id, "HTTPException saat update_and_reingest.")
+                await self._mark_log_failed(log_id, "HTTPException saat update_and_reingest.")
             raise
 
         except Exception as e:
             logger.error(
-                f"[update_and_reingest] Unexpected error: {traceback.format_exc()}"
+                "[update_and_reingest] Unexpected error: %s", traceback.format_exc()
             )
             if log_id:
                 await self._mark_log_failed(log_id, str(e))
@@ -283,11 +304,37 @@ class KPIMasterIngestionService:
             )
 
     # ================================================================ #
-    #  PRIVATE Helpers                                                 #
+    #  PRIVATE: User ID resolution                                     #
+    # ================================================================ #
+
+    async def _inject_user_ids(
+        self,
+        records: list[dict],
+    ) -> tuple[list[dict], list[str]]:
+        lookup = UserLookupUtil(self.db)
+        await lookup.preload()
+
+        unresolved: list[str] = []
+        seen_unresolved: set[str] = set()
+
+        for record in records:
+            raw_persons: str | None = record.pop("responsibility_persons", None)
+            user_id = await lookup.by_first_name_in_text(raw_persons)
+            record["user_id"] = user_id
+
+            if user_id is None and raw_persons:
+                first_name = raw_persons.split(",")[0].strip()
+                if first_name and first_name not in seen_unresolved:
+                    unresolved.append(first_name)
+                    seen_unresolved.add(first_name)
+
+        return records, unresolved
+
+    # ================================================================ #
+    #  PRIVATE: Sheet & parse helpers                                   #
     # ================================================================ #
 
     def _fetch_sheet(self, sheet_url: str):
-        """Fetch first sheet as raw DataFrame."""
         try:
             from service.googleSheetService import GoogleSheetService
             svc = GoogleSheetService()
@@ -301,42 +348,30 @@ class KPIMasterIngestionService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error fetching sheet: {str(e)}",
-            )
+            raise HTTPException(status_code=500, detail=f"Error fetching sheet: {str(e)}")
 
     def _parse(self, df, spreadsheet_id: str, sheet_name: str, tahun: int):
-        """
-        Parse DataFrame ke list records KPI Master.
-        group_id TIDAK diisi di sini — diisi oleh caller setelah KPIGroup ready.
-        """
         try:
             from utils.kpiMasterParser import parse_kpi_master_dataframe
-            return parse_kpi_master_dataframe(
-                df, spreadsheet_id, sheet_name, tahun=tahun
-            )
+            return parse_kpi_master_dataframe(df, spreadsheet_id, sheet_name, tahun=tahun)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-    def _resolve_status(
-        self,
-        ingested_count: int,
-        total_rows:     int,
-        errors:         list,
-    ) -> str:
-        """Tentukan status akhir dengan mode biner: success atau failed."""
+    # ================================================================ #
+    #  PRIVATE: Log helpers                                             #
+    # ================================================================ #
+
+    def _resolve_status(self, ingested_count: int, total_rows: int, errors: list) -> str:
+        """Status biner: success atau failed."""
         if ingested_count == 0 or ingested_count < total_rows or errors:
             return "failed"
         return "success"
 
     def _format_errors(self, errors: list) -> str:
-        """Format list error jadi string ringkas untuk disimpan di log."""
         if not errors:
             return ""
         MAX_ERRORS = 20
-        summary = errors[:MAX_ERRORS]
-        result = "; ".join(str(e) for e in summary)
+        result = "; ".join(str(e) for e in errors[:MAX_ERRORS])
         if len(errors) > MAX_ERRORS:
             result += f" ... dan {len(errors) - MAX_ERRORS} error lainnya."
         return result
@@ -350,5 +385,4 @@ class KPIMasterIngestionService:
                 errors=reason,
             )
         except Exception:
-            logger.warning(
-                f"[ingest_kpi_master] Gagal update log {log_id} ke 'failed'")
+            logger.warning("[ingest_kpi_master] Gagal update log %s ke 'failed'", log_id)

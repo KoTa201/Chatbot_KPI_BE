@@ -1,24 +1,17 @@
 """
 model/KPITracker.py
 
-Perubahan dari versi sebelumnya:
-- Tambah FK `group_id` → kpi_groups.id (grup tracker sheet-nya sendiri)
-- Tambah FK `kpi_master_id` → kpi_master_records.id (relasi ke definisi KPI)
-- HAPUS: nama_kpi (string redundan), tahun, source_sheet_id, source_sheet_name
-  Semua info ini sudah bisa didapat lewat JOIN ke group dan master.
-- Composite index (group_id, nama_orang) — query: semua realisasi dalam
-  sheet tracker ini untuk orang tertentu
-- Composite index (kpi_master_id, nama_orang) — query: realisasi KPI X
-  oleh karyawan Y, lintas sheet
-- BRIN pada created_at — tabel append-only, tumbuh besar
-
-Catatan desain — dua FK sekaligus (group_id dan kpi_master_id):
-  Tracker punya DUA konteks yang independen:
-  1. group_id  → "data ini berasal dari sheet tracker mana?"
-  2. kpi_master_id → "data ini realisasi untuk KPI definisi mana?"
-  Keduanya dibutuhkan karena master dan tracker berasal dari sheet berbeda.
-  Tanpa group_id di tracker, kita tidak tahu sheet tracker mana sumber datanya.
-  Tanpa kpi_master_id, kita tidak bisa JOIN ke definisi KPI (rumus, target, dll).
+Changelog:
+  v2 → v3:
+    - Tambah FK user_id → users.id (nullable, ON DELETE SET NULL).
+      Menggantikan kolom nama_orang (string bebas) dengan referensi ke tabel users.
+    - HAPUS: nama_orang (sudah di-migrate ke user_id lewat Alembic migration).
+    - HAPUS: responsibility_person (tidak pernah ada di ORM, tapi dihapus dari DB
+      via migration jika kolom tersebut eksis).
+    - Index composite diperbarui:
+        ix_kpitracker_group_user  (group_id, user_id)
+        ix_kpitracker_master_user (kpi_master_id, user_id)
+      menggantikan index lama berbasis nama_orang.
 """
 
 from datetime import datetime
@@ -35,6 +28,7 @@ from model.Base import Base
 if TYPE_CHECKING:
     from model.KPIGroup import KPIGroup
     from model.KPIMaster import KPIMasterORM
+    from model.User import User
 
 
 class KPITrackerORM(Base):
@@ -42,40 +36,47 @@ class KPITrackerORM(Base):
 
     __table_args__ = (
         # Query: siapa saja yang punya realisasi di sheet tracker ini?
-        Index("ix_kpitracker_group_orang", "group_id", "nama_orang"),
-        # Query: semua realisasi untuk satu definisi KPI, lintas orang
-        Index("ix_kpitracker_master_orang", "kpi_master_id", "nama_orang"),
+        Index("ix_kpitracker_group_user", "group_id", "user_id"),
+        # Query: semua realisasi untuk satu definisi KPI, lintas user
+        Index("ix_kpitracker_master_user", "kpi_master_id", "user_id"),
+        # Query: semua realisasi milik satu user (lintas group/KPI)
+        Index("ix_kpitracker_user_id", "user_id"),
         # BRIN — tabel append-only, range scan by waktu
-        Index("ix_kpitracker_created_brin",
-              "created_at", postgresql_using="brin"),
+        Index("ix_kpitracker_created_brin", "created_at", postgresql_using="brin"),
     )
 
     id: Mapped[UUID] = mapped_column(
         SAUUID(as_uuid=True), primary_key=True, default=uuid4
     )
 
-    # FK 1: grup tracker — "data ini dari sheet tracker mana?"
+    # FK 1: grup tracker
     group_id: Mapped[UUID] = mapped_column(
         SAUUID(as_uuid=True),
         ForeignKey("kpi_groups.id", ondelete="RESTRICT"),
         nullable=False,
     )
 
-    # FK 2: KPI master — "ini realisasi dari definisi KPI mana?"
-    # nullable=True untuk toleransi data yang belum bisa di-match ke master
+    # FK 2: KPI master
     kpi_master_id: Mapped[Optional[UUID]] = mapped_column(
         SAUUID(as_uuid=True),
         ForeignKey("kpi_master_records.id", ondelete="SET NULL"),
         nullable=True,
     )
 
+    # FK 3: user pemilik realisasi — menggantikan nama_orang
+    # nullable=True: data lama mungkin belum ter-migrasi
+    # ON DELETE SET NULL: jika user dihapus, realisasi tetap ada
+    user_id: Mapped[Optional[UUID]] = mapped_column(
+        SAUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_kpitracker_user_id"),
+        nullable=True,
+        comment="Karyawan pemilik realisasi ini; menggantikan kolom nama_orang.",
+    )
+
     # Data realisasi
     tahun: Mapped[int] = mapped_column(Integer, nullable=False)
     bulan_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    realisasi: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True)
-    nama_orang: Mapped[Optional[str]] = mapped_column(
-        String(255), nullable=True)
+    realisasi: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     keterangan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -95,9 +96,14 @@ class KPITrackerORM(Base):
     kpi_master: Mapped[Optional["KPIMasterORM"]] = relationship(
         "KPIMasterORM", back_populates="tracker_records"
     )
+    user: Mapped[Optional["User"]] = relationship(
+        "User",
+        foreign_keys=[user_id],
+        lazy="select",
+    )
 
     def __repr__(self) -> str:
         return (
             f"<KPITracker id={self.id} master={self.kpi_master_id} "
-            f"orang='{self.nama_orang}'>"
+            f"user={self.user_id} tahun={self.tahun} bulan={self.bulan_num}>"
         )

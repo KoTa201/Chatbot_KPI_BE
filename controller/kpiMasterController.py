@@ -37,6 +37,7 @@ class KPIMasterController:
             db)      # ← baru
         self.service: KPIMasterService = KPIMasterService(self.kpi_repo)
         self.ingestion_service: KPIMasterIngestionService = KPIMasterIngestionService(
+            db=self.db,
             kpi_repo=self.kpi_repo,
             kpi_service=self.service,
             log_repo=self.log_repo,
