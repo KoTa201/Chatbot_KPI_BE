@@ -161,7 +161,7 @@ class KPIGroupListResponse(BaseModel):
     """List endpoint tidak menyertakan records — hanya metadata grup."""
     total:       int
     page:        int
-    page_size:   int
+    limit:       int
     total_pages: int
     data:        list[KPIGroupResponse]
 
