@@ -44,44 +44,47 @@ class GroupTypeEnum(str, Enum):
     tracker = "tracker"
 
 
-# ─── Nested: KPI Master record (bersarang di dalam KPIGroupResponse) ──────────
-class KPIGroupMasterRecord(BaseModel):
-    """
-    Representasi satu baris kpi_master_records sebagai nested response.
-    Field disesuaikan 1:1 dengan KPIMaster — tidak ada field yang
-    tidak ada di ORM agar model_validate(orm_instance) tidak error.
-    """
-    id:                     UUID
-    group_id:               UUID
-    tahun:                  int
-    category:               str
-    kpi_name:               str
-    definisi_operasional:   Optional[str] = None
-    target:                 Optional[str] = None
-    achieve:                Optional[str] = None
-    partial:                Optional[str] = None
-    fail:                   Optional[str] = None
-    created_at:             datetime
+class PICUserResponse(BaseModel):
+    id:        UUID
+    full_name: str
 
     model_config = {"from_attributes": True}
 
 
-# ─── Nested: KPI Tracker record (bersarang di dalam KPIGroupResponse) ─────────
+
+# ─── Nested: KPI Master record (bersarang di dalam KPIGroupResponse) ──────────
+class KPIGroupMasterRecord(BaseModel):
+    id:                    UUID
+    group_id:              UUID
+    tahun:                 int
+    category:              str
+    kpi_name:              str
+    definisi_operasional:  Optional[str] = None
+    target:                Optional[str] = None
+    achieve:               Optional[str] = None
+    partial:               Optional[str] = None
+    fail:                  Optional[str] = None
+    # ORM attr: pic_users → response key: responsibility_persons
+    responsibility_persons: list[PICUserResponse] = Field(
+        default=[], validation_alias="pic_users"
+    )
+    created_at:            datetime
+
+    model_config = {"from_attributes": True}
+
+
 class KPIGroupTrackerRecord(BaseModel):
-    """
-    Representasi satu baris kpi_tracker_records sebagai nested response.
-    Field disesuaikan 1:1 dengan KPITracker:
-      - nama_kpi tidak ada (dihapus dari ORM; dapat via JOIN ke master)
-      - source_sheet_* tidak ada (ada di KPIGroupResponse)
-    """
     id:            UUID
     group_id:      UUID
-    # nullable — data belum ter-match ke master
     kpi_master_id: Optional[UUID] = None
     tahun:         int
+    bulan_num:     Optional[int] = None
     realisasi:     Optional[str] = None
-    nama_orang:    Optional[str] = None
     keterangan:    Optional[str] = None
+    # ORM attr: user → response key: responsibility_person
+    responsibility_person: Optional[PICUserResponse] = Field(
+        default=None, validation_alias="user"
+    )
     created_at:    datetime
     updated_at:    datetime
 

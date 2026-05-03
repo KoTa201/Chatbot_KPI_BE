@@ -160,7 +160,7 @@ class TrackerIngestionService:
     async def ingest_batch(
         self,
         sources:               list[TrackerSourceItem],
-        skip_on_error:         bool = True,
+        skip_on_error:         bool = False,
         delay_between_sources: float = 0.0,
     ) -> dict:
         results: list[dict] = []
@@ -354,7 +354,7 @@ class TrackerIngestionService:
                     total_rows=total_rows,
                     ingested=0,
                     failed=total_rows,
-                    errors=["Tidak ada records valid."],
+                    errors=["Sheet tidak menghasilkan records valid."],
                     status="failed",
                 )
 

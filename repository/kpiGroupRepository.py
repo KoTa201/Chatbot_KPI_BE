@@ -21,8 +21,9 @@ from sqlalchemy import select, func
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.KPIGroup import KPIGroup
-
-from model.KPIGroup import KPIGroup
+from model.KPIMaster import KPIMaster
+from model.KPITracker import KPITracker
+from sqlalchemy.orm import selectinload
 
 
 class KPIGroupRepository:
@@ -114,10 +115,10 @@ class KPIGroupRepository:
         Fetch KPIGroup beserta relasi yang relevan berdasarkan group_type.
 
         Alur dua langkah:
-          Query 1 — fetch grup tanpa relationship (metadata saja).
-          Query 2 — db.refresh() hanya relasi yang sesuai group_type:
-                      'master'  → master_records  (list[KPIMaster])
-                      'tracker' → tracker_records (list[KPITracker])
+        Query 1 — fetch grup tanpa relationship (metadata saja).
+        Query 2 — re-query dengan selectinload hanya relasi yang sesuai group_type:
+                    'master'  → master_records + pic_users (M2M via kpi_master_users)
+                    'tracker' → tracker_records + user     (FK langsung via user_id)
 
         Returns:
             KPIGroup dengan relasi ter-load, atau None jika tidak ada.
@@ -133,12 +134,28 @@ class KPIGroupRepository:
 
         # ── Query 2: load HANYA relasi yang relevan ───────────────────────────
         if group.group_type == "master":
-            # master_records ter-load; tracker_records tetap unloaded
-            await self.db.refresh(group, attribute_names=["master_records"])
+            # master_records ter-load beserta pic_users tiap record
+            # (M2M: kpi_master_records → kpi_master_users → users)
+            result = await self.db.execute(
+                select(KPIGroup)
+                .where(KPIGroup.id == group_id)
+                .options(
+                    selectinload(KPIGroup.master_records).selectinload(KPIMaster.pic_users)
+                )
+            )
+            group = result.scalars().first()
 
         elif group.group_type == "tracker":
-            # tracker_records ter-load; master_records tetap unloaded
-            await self.db.refresh(group, attribute_names=["tracker_records"])
+            # tracker_records ter-load beserta user tiap record
+            # (FK langsung: kpi_tracker_records.user_id → users.id)
+            result = await self.db.execute(
+                select(KPIGroup)
+                .where(KPIGroup.id == group_id)
+                .options(
+                    selectinload(KPIGroup.tracker_records).selectinload(KPITracker.user)
+                )
+            )
+            group = result.scalars().first()
 
         return group
 
