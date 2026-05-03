@@ -10,13 +10,24 @@ Desain:
   - Behavior saat tidak ditemukan: kembalikan None (nullable FK).
     Caller yang menentukan apakah None diterima atau dianggap error.
 
+Changelog:
+  v2:
+    - Tambah all_ids_in_text(): resolve SEMUA nama comma-separated ke list UUID.
+      Mengembalikan (resolved: list[UUID], unresolved: list[str]) agar
+      caller bisa tahu nama mana saja yang gagal di-resolve.
+      Dipakai untuk relasi many-to-many KPIMaster ↔ User.
+
 Contoh pemakaian:
     lookup = UserLookupUtil(db)
-    await lookup.preload()                       # opsional, cache semua user
+    await lookup.preload()
 
-    user_id = await lookup.by_full_name("Budi Santoso")   # → UUID | None
-    user_id = await lookup.by_email("budi@company.com")   # → UUID | None
-    user_id = await lookup.by_username("budi")             # → UUID | None
+    # One-to-one (lama)
+    user_id = await lookup.by_full_name("Budi Santoso")    # → UUID | None
+
+    # Many-to-many (baru)
+    uids, unknown = await lookup.all_ids_in_text("Budi Santoso, Ani Wati")
+    # uids    → [UUID(...), UUID(...)]
+    # unknown → []  (kosong jika semua resolved)
 """
 
 from __future__ import annotations
@@ -83,29 +94,48 @@ class UserLookupUtil:
             return None
         return await self._lookup("full_name", name, User.full_name)
 
-    async def by_email(self, email: str | None) -> Optional[UUID]:
-        """Cari user berdasarkan email (case-insensitive)."""
-        if not email or not email.strip():
-            return None
-        return await self._lookup("email", email, User.email)
-
-    async def by_username(self, username: str | None) -> Optional[UUID]:
-        """Cari user berdasarkan username (case-insensitive)."""
-        if not username or not username.strip():
-            return None
-        return await self._lookup("username", username, User.username)
-
-    async def by_first_name_in_text(self, text: str | None) -> Optional[UUID]:
+    async def all_ids_in_text(
+        self,
+        text: str | None,
+    ) -> tuple[list[UUID], list[str]]:
         """
-        Ambil nama pertama dari teks comma-separated, lalu cari berdasarkan full_name.
-        Berguna untuk memigrasi field responsibility_persons (master KPI).
+        Resolve SEMUA nama dari teks comma-separated ke list UUID.
 
-        Contoh: "Budi Santoso, Ani Wati" → cari "Budi Santoso"
+        Returns:
+            resolved   — list UUID yang berhasil di-resolve (urut sesuai input).
+            unresolved — list nama yang tidak ditemukan di tabel users.
+
+        Contoh::
+
+            uids, unknown = await lookup.all_ids_in_text("Budi Santoso, Ani Wati, Ghost")
+            # uids    → [UUID_budi, UUID_ani]
+            # unknown → ["Ghost"]
         """
         if not text or not text.strip():
-            return None
-        first_name = text.split(",")[0].strip()
-        return await self.by_full_name(first_name)
+            return [], []
+
+        names = [n.strip() for n in text.split(",") if n.strip()]
+        if not names:
+            return [], []
+
+        resolved: list[UUID] = []
+        unresolved: list[str] = []
+        seen: set[str] = set()
+
+        for name in names:
+            # Deduplikasi nama dalam satu field (misal: "Budi, Budi, Ani")
+            key = _normalize(name)
+            if key in seen:
+                continue
+            seen.add(key)
+
+            uid = await self.by_full_name(name)
+            if uid is not None:
+                resolved.append(uid)
+            else:
+                unresolved.append(name)
+
+        return resolved, unresolved
 
     def stats(self) -> dict:
         """Kembalikan statistik cache untuk debugging/logging."""
@@ -127,7 +157,6 @@ class UserLookupUtil:
         # Cache miss: query ke DB
         result = await self._db.execute(
             select(User.id).where(
-                # Gunakan ilike untuk case-insensitive di PostgreSQL
                 column.ilike(_normalize(value))
             )
         )
@@ -151,30 +180,6 @@ class UserLookupUtil:
 
         self._cache[key] = uid
         return uid
-
-
-# ──────────────────────────────────────────────────────────────── #
-#  Standalone helper (tanpa cache, cocok untuk satu-kali lookup)   #
-# ──────────────────────────────────────────────────────────────── #
-
-async def resolve_user_id_by_name(
-    db: AsyncSession,
-    name: str | None,
-) -> Optional[UUID]:
-    """
-    One-shot lookup user_id berdasarkan full_name.
-    Tidak ada cache — gunakan UserLookupUtil.preload() untuk batch processing.
-    """
-    if not name or not name.strip():
-        return None
-
-    result = await db.execute(
-        select(User.id).where(User.full_name.ilike(_normalize(name))).limit(1)
-    )
-    uid = result.scalar_one_or_none()
-    if uid is None:
-        logger.debug("[UserLookup] User not found for name=%r", name)
-    return uid
 
 
 def _normalize(value: str) -> str:
