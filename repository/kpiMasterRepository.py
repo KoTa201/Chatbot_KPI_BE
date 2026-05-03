@@ -30,7 +30,7 @@ _UPSERT_COLS = [
     "achieve",
     "partial",
     "fail",
-    "responsibility_persons",
+    "user_id",
 ]
 
 
