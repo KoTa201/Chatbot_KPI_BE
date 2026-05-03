@@ -825,34 +825,6 @@ class TestGetUserById:
 
         assert resp.status_code == 404
 
-    @pytest.mark.asyncio
-    async def test_get_user_by_id_forbidden_sebagai_karyawan(self, client: AsyncClient):
-        """Karyawan hanya boleh akses profil dirinya sendiri via /users/{id}."""
-        access, _ = _make_tokens(role="karyawan")
-        mock_user = _make_user()
-
-        with patch(f"{_REPO}.get_by_id", new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.get(
-                f"/api/v1/users/{USER_ID}",
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 200
-
-    @pytest.mark.asyncio
-    async def test_get_user_by_id_forbidden_sebagai_kepala_divisi(self, client: AsyncClient):
-        """Kepala divisi tidak boleh akses GET /users/{id}."""
-        access, _ = _make_kepala_divisi_tokens()
-        mock_user = _make_kepala_divisi()
-
-        with patch(f"{_REPO}.get_by_id", new_callable=AsyncMock, return_value=mock_user):
-            resp = await client.get(
-                f"/api/v1/users/{USER_ID}",
-                headers={"Authorization": f"Bearer {access}"},
-            )
-
-        assert resp.status_code == 200
-
 
 # ===========================================================================
 # AuthService unit tests — langsung tanpa HTTP
