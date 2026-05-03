@@ -59,7 +59,7 @@ class KPIGroupController:
         return KPIGroupListResponse(
             total=total,
             page=page,
-            page_size=limit,
+            limit=limit,
             total_pages=math.ceil(total / limit) if total else 0,
             data=[self._build_response(r, include_records=False)
                   for r in rows],
