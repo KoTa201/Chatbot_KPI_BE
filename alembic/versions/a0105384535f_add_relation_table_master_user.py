@@ -70,7 +70,7 @@ def upgrade() -> None:
     # ── 3. Hapus artefak lama dari kpi_master_records ─────────────────────
     op.drop_index("ix_kpimaster_user_id", table_name="kpi_master_records")
     op.drop_constraint(
-        "fk_kpimaster_user_id",
+        "kpi_master_records_user_id_fkey",
         "kpi_master_records",
         type_="foreignkey",
     )

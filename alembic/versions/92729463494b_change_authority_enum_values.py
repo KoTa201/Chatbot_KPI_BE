@@ -19,12 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. Rename nilai lama → nilai baru
-    op.execute("ALTER TYPE authorityenum RENAME VALUE 'HRD' TO 'kepala_divisi'")
     op.execute("ALTER TYPE authorityenum RENAME VALUE 'KARYAWAN' TO 'karyawan'")
 
 
 def downgrade() -> None:
-    # Rollback: kembalikan ke nilai lama
-    op.execute("ALTER TYPE authorityenum RENAME VALUE 'kepala_divisi' TO 'HRD'")
     op.execute("ALTER TYPE authorityenum RENAME VALUE 'karyawan' TO 'KARYAWAN'")

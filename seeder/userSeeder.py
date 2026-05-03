@@ -13,14 +13,9 @@ Seeder bersifat idempoten: user yang sudah ada (by username) dilewati,
 tidak akan duplikat meskipun dijalankan berkali-kali.
 """
 
-from model.User import RoleEnum, User
-from databaseConfig import get_db
-from sqlalchemy import select
-import bcrypt
 import asyncio
 import sys
 from pathlib import Path
-import asyncio
 
 import bcrypt
 from sqlalchemy import select
@@ -30,7 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from model.User import RoleEnum
+from model.User import RoleEnum, User
 from databaseConfig import get_db
 
 

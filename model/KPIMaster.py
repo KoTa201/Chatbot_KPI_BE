@@ -90,13 +90,6 @@ class KPIMaster(Base):
     partial: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     fail: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
-    # Legacy field — akan di-deprecated setelah semua data ter-migrasi
-    responsibility_persons: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        comment="Nama PIC comma-separated (legacy). Gunakan relasi `pic_users` untuk data baru.",
-    )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
