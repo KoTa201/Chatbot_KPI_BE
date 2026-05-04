@@ -103,7 +103,7 @@ class KPIMasterIngestionService:
             logger.info("[ingest_kpi_master] KPIGroup ready: group_id=%s", group_id)
 
             # ── STEP 3: Create IngestionLog (status=running) ─────────
-            log = await self.log_repo.create(kpi_group_id=group_id)
+            log = await self.log_repo.create(kpi_group_id=group_id, source_type="master")
             log_id = log.id
             logger.info("[ingest_kpi_master] IngestionLog created: log_id=%s", log_id)
 
@@ -244,7 +244,7 @@ class KPIMasterIngestionService:
                 group_id,
             )
 
-            log = await self.log_repo.create(kpi_group_id=group_id)
+            log = await self.log_repo.create(kpi_group_id=group_id, source_type="master")
             log_id = log.id
 
             records, errors = self._parse(df, spreadsheet_id, sheet_name, effective_tahun)
