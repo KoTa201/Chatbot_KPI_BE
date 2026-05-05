@@ -12,7 +12,7 @@ class SchedulerJobService:
     JOB_ID = "kpi_tracker_ingestion"
     TIMEZONE = "UTC"
     MISFIRE_GRACE_TIME = 300
-    RATE_LIMIT_DELAY_SECONDS: float = 30.0
+    RATE_LIMIT_DELAY_SECONDS: float = 60.0
 
     def __init__(self):
         self.scheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
@@ -29,31 +29,32 @@ class SchedulerJobService:
         """
         Executed by APScheduler on each cron tick.
         Opens its own sessions because it runs outside any request context.
+        Processes each source one by one with a 60-second delay between them.
         """
+        import asyncio
         from databaseConfig import AsyncSessionLocal
         from controller.kpiTrackerController import KPITrackerController
         from repository.kpiGroupRepository import KPIGroupRepository
-        from schema.kpiTrackerSchema import BatchTrackerIngestionRequest
+        from schema.kpiTrackerSchema import IngestAllSheetsRequest
 
         async with AsyncSessionLocal() as db:
             group_repo = KPIGroupRepository(db)
             groups = await group_repo.get_active_scheduled_tracker()
-            source_items = [
-                {"sheet_url": g.sheet_url, "tahun": g.tahun}
-                for g in groups
-            ]
 
-        if not source_items:
+        if not groups:
             return
 
-        async with AsyncSessionLocal() as db:
-            controller = KPITrackerController(db)
-            request = BatchTrackerIngestionRequest(
-                sources=source_items,
-                skip_on_error=True,
-                delay_between_sources=self.RATE_LIMIT_DELAY_SECONDS,
-            )
-            await controller.ingest_batch_from_google_sheets(request)
+        for i, group in enumerate(groups):
+            if i > 0:
+                await asyncio.sleep(self.RATE_LIMIT_DELAY_SECONDS)
+            async with AsyncSessionLocal() as db:
+                controller = KPITrackerController(db)
+                request = IngestAllSheetsRequest(
+                    sheet_url=group.sheet_url,
+                    tahun=group.tahun,
+                    skip_on_error=True,
+                )
+                await controller.ingest_all_sheets_from_google_sheets(request)
 
         repo = SchedulerRepository()
         next_run = self.get_next_run_time()
@@ -106,3 +107,7 @@ class SchedulerJobService:
     def stop(self) -> None:
         if self.scheduler.running:
             self.scheduler.shutdown()
+
+
+# Singleton — satu instance untuk seluruh umur aplikasi
+scheduler_job_service = SchedulerJobService()

@@ -20,6 +20,19 @@ from router import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from middleware.jwtMiddleware import JWTMiddleware
+from service.schedulerJobService import scheduler_job_service
+from repository.schedulerRepository import SchedulerRepository
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler_job_service.start()
+    repo = SchedulerRepository()
+    config = await repo.get_config()
+    if config.is_enabled:
+        scheduler_job_service.register_job(config)
+    yield
+    scheduler_job_service.stop()
 
 
 app = FastAPI(
@@ -29,6 +42,7 @@ app = FastAPI(
         "Data disimpan ke PostgreSQL."
     ),
     version="3.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(JWTMiddleware)
