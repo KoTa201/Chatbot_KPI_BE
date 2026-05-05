@@ -28,8 +28,10 @@ class ChatbotRepository:
                     Chatbot.is_active == True)
             )
         )
-        self.chatbot = result.scalars().first()
-        return self.chatbot
+        # Do not mutate self.chatbot here — return the found object so callers
+        # can decide how to handle it without clobbering repository internal state.
+        found = result.scalars().first()
+        return found
 
     async def get_all(self, page, limit, otoritas=None, search=None):
         query = select(Chatbot)
@@ -80,7 +82,14 @@ class ChatbotRepository:
         self.db.expire_all()
 
     async def update(self, payload: ChatbotUpdate) -> Chatbot:
+        # Only set attributes that are explicitly provided and not None.
+        # This prevents accidental NULL assignment to non-nullable columns
+        # like `otoritas` when callers pass { otoritas: null }.
         for field, value in payload.model_dump(exclude_unset=True).items():
+            if value is None:
+                # Skip explicit nulls to preserve existing DB values for
+                # non-nullable fields unless caller truly intends to clear them.
+                continue
             setattr(self.chatbot, field, value)
         self.db.add(self.chatbot)
         await self.db.commit()
