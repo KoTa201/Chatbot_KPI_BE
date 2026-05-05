@@ -113,17 +113,17 @@ class KPIGroupService:
             and update_fields["sheet_url"] != existing.sheet_url
         )
         tahun_changed = (
-            existing.group_type == "master"
-            and "tahun" in update_fields
+            "tahun" in update_fields
             and update_fields["tahun"] != existing.tahun
         )
 
-        if sheet_url_changed or tahun_changed:
+        if sheet_url_changed or (existing.group_type == "master" and tahun_changed):
             if existing.group_type == "master":
                 kpi_repo = KPIMasterRepository(self.db)
                 kpi_service = KPIMasterService(kpi_repo)
                 log_repo = IngestionLogRepository(self.db)
                 svc = KPIMasterIngestionService(
+                    db=self.db,
                     kpi_repo=kpi_repo,
                     kpi_service=kpi_service,
                     log_repo=log_repo,
@@ -141,11 +141,15 @@ class KPIGroupService:
                 svc = TrackerIngestionService(
                     self.db, group_repo=self.repo, log_repo=log_repo, tracker_repo=kpi_repo)
                 await svc.ingest_all_sheets(
-                    sheet_url=update_fields["sheet_url"],
-                    tahun=payload.tahun or 2026,
+                    sheet_url=update_fields["sheet_url"] if sheet_url_changed else str(existing.sheet_url),
+                    tahun=payload.tahun if payload.tahun is not None else existing.tahun,
                     skip_on_error=True,
                     existing_group_id=existing.id,
                 )
+        elif update_fields:
+            await self.repo.update(group_id=group_id, fields=update_fields)
+            await self.db.commit()
+
         group = await self.repo.get_by_id(group_id)
 
         return group

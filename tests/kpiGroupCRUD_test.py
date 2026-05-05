@@ -118,6 +118,27 @@ def make_master_record(
     return record
 
 
+def make_tracker_record(
+    *,
+    id: uuid.UUID = uuid.uuid4(),
+    group_id: uuid.UUID = GROUP_ID,
+    kpi_master_id: uuid.UUID | None = None,
+    bulan_num: int | None = 1,
+):
+    """Create mock KPITracker without record-level tahun."""
+    record = MagicMock()
+    record.id = id
+    record.group_id = group_id
+    record.kpi_master_id = kpi_master_id
+    record.bulan_num = bulan_num
+    record.realisasi = "90%"
+    record.keterangan = "On track"
+    record.user = None
+    record.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    record.updated_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    return record
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: CREATE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -439,6 +460,38 @@ async def test_get_kpi_group_master_with_records():
         assert result.master_records[0].kpi_name == "KPI A"
 
 
+@pytest.mark.asyncio
+async def test_get_kpi_group_tracker_records_use_group_tahun():
+    """Tracker nested records harus mengambil tahun dari KPIGroup, bukan KPITracker."""
+    db = make_db()
+    service = KPIGroupService(db)
+    controller = __import__(
+        "controller.kpiGroupController",
+        fromlist=["KPIGroupController"],
+    ).KPIGroupController(db)
+    controller.service = service
+
+    tracker_record = make_tracker_record()
+    mock_group = make_kpi_group(
+        group_type="tracker",
+        tahun=TAHUN,
+        tracker_records=[tracker_record],
+    )
+
+    with patch.object(
+        service,
+        "get_group",
+        new_callable=AsyncMock,
+        return_value=mock_group,
+    ):
+        result = await controller.get_group(GROUP_ID)
+
+    assert result.group_type == "tracker"
+    assert result.tahun == TAHUN
+    assert result.tracker_records[0].tahun == TAHUN
+    assert result.tracker_records[0].bulan_num == 1
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: UPDATE
 # ─────────────────────────────────────────────────────────────────────────────
@@ -466,11 +519,15 @@ async def test_update_kpi_group_partial():
     with patch.object(
         service.repo, "get_by_id",
         new_callable=AsyncMock, side_effect=[original_group, updated_group]
+    ), patch.object(
+        service.repo, "update",
+        new_callable=AsyncMock, return_value=updated_group
     ):
         result = await service.update_group(GROUP_ID, payload)
 
         assert result.nama_grup == "New Name"
         assert result.is_active is False
+        service.repo.update.assert_awaited_once()
 
 
 @pytest.mark.asyncio

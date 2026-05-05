@@ -18,7 +18,9 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from model.Base import GroupTypeEnum
 from model.KPIMaster import KPIMaster
+from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
@@ -51,6 +53,7 @@ class TrackerIngestionService:
             "source_sheet_id",
             "document_text",
             "source_row",
+            "tahun",
         }
 
     # ================================================================ #
@@ -73,8 +76,9 @@ class TrackerIngestionService:
         try:
             all_sheets = self._fetch_all_sheets(sheet_url, skip_on_error)
             spreadsheet_id = self._extract_spreadsheet_id(all_sheets)
+            effective_tahun = self._resolve_effective_tahun(tahun, all_sheets)
             group = await self._ensure_tracker_group(
-                sheet_url, spreadsheet_id, tahun, existing_group_id
+                sheet_url, spreadsheet_id, effective_tahun, existing_group_id
             )
 
             if group:
@@ -97,7 +101,7 @@ class TrackerIngestionService:
                 group=group,
                 run_log_id=run_log_id,
                 nama_orang_override=nama_orang_override,
-                tahun=tahun,
+                tahun=effective_tahun,
                 user_lookup=user_lookup,
             )
 
@@ -275,6 +279,24 @@ class TrackerIngestionService:
             None,
         )
 
+    @staticmethod
+    def _resolve_effective_tahun(
+        requested_tahun: Optional[int],
+        all_sheets: list[dict],
+    ) -> int:
+        if requested_tahun is not None:
+            return requested_tahun
+
+        for sheet in all_sheets:
+            if sheet.get("error"):
+                continue
+            meta = sheet.get("meta") or {}
+            meta_tahun = meta.get("tahun")
+            if meta_tahun is not None:
+                return meta_tahun
+
+        return 2026
+
     async def _ensure_tracker_group(
         self,
         sheet_url:         str,
@@ -389,11 +411,10 @@ class TrackerIngestionService:
                 master_id_map=master_id_map,
                 user_id_map=user_id_map,
                 group_id=group.id if group else None,
-                tahun=context.tahun,
                 bulan_num=context.bulan_num,
             )
 
-            await self._cleanup_existing_period(group, context.tahun, context.bulan_num)
+            await self._cleanup_existing_period(group, context.bulan_num)
 
             ingested_count = await self.tracker_repo.bulk_insert_kpi_records(clean_records)
             status = self._resolve_status(ingested_count, errors)
@@ -492,7 +513,6 @@ class TrackerIngestionService:
         master_id_map: dict[str, UUID],
         user_id_map:   dict[str, Optional[UUID]],
         group_id:      Optional[UUID],
-        tahun:         Optional[int],
         bulan_num:     Optional[int],
     ) -> list[dict[str, Any]]:
         clean_records: list[dict[str, Any]] = []
@@ -500,7 +520,6 @@ class TrackerIngestionService:
             nama_kpi_val   = record.get("nama_kpi")
             nama_orang_val = record.get("nama_orang")
             clean = {k: v for k, v in record.items() if k not in self.strip_fields}
-            clean["tahun"]         = clean.get("tahun") or tahun
             clean["bulan_num"]     = bulan_num
             clean["group_id"]      = group_id
             clean["kpi_master_id"] = master_id_map.get(nama_kpi_val)
@@ -541,7 +560,10 @@ class TrackerIngestionService:
                 KPIMaster.kpi_name.in_(kpi_names)
             )
             if tahun:
-                query = query.where(KPIMaster.tahun == tahun)
+                query = query.join(KPIGroup, KPIMaster.group_id == KPIGroup.id).where(
+                    KPIGroup.group_type.in_([GroupTypeEnum.MASTER, "master"]),
+                    KPIGroup.tahun == tahun,
+                )
             result = await self.db.execute(query)
             rows = result.fetchall()
             master_map: dict[str, UUID] = {}
@@ -625,19 +647,18 @@ class TrackerIngestionService:
     async def _cleanup_existing_period(
         self,
         group,
-        tahun:     Optional[int],
         bulan_num: Optional[int],
     ) -> None:
-        if not group or not tahun:
+        if not group:
             return
         deleted_count = await self.tracker_repo.delete_kpi_records_by_group_and_period(
-            group_id=group.id, tahun=tahun, bulan_num=bulan_num
+            group_id=group.id, bulan_num=bulan_num
         )
         if deleted_count:
             self.logger.info(
                 "[TrackerIngestion] Re-ingest cleanup: deleted %s records "
-                "for group=%s, tahun=%s, bulan_num=%s",
-                deleted_count, group.id, tahun, bulan_num,
+                "for group=%s, bulan_num=%s",
+                deleted_count, group.id, bulan_num,
             )
 
     @staticmethod

@@ -74,7 +74,6 @@ class KPITracker(Base):
     )
 
     # Data realisasi
-    tahun: Mapped[int] = mapped_column(Integer, nullable=False)
     bulan_num: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     realisasi: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     keterangan: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -105,5 +104,5 @@ class KPITracker(Base):
     def __repr__(self) -> str:
         return (
             f"<KPITracker id={self.id} master={self.kpi_master_id} "
-            f"user={self.user_id} tahun={self.tahun} bulan={self.bulan_num}>"
+            f"user={self.user_id} bulan={self.bulan_num}>"
         )
