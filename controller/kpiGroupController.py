@@ -117,12 +117,36 @@ class KPIGroupController:
         if include_records:
             if group.group_type == "master":
                 master_records = [
-                    KPIGroupMasterRecord.model_validate(r)
+                    KPIGroupMasterRecord.model_validate({
+                        "id": r.id,
+                        "group_id": r.group_id,
+                        "tahun": group.tahun,
+                        "category": r.category,
+                        "kpi_name": r.kpi_name,
+                        "definisi_operasional": r.definisi_operasional,
+                        "target": r.target,
+                        "achieve": r.achieve,
+                        "partial": r.partial,
+                        "fail": r.fail,
+                        "pic_users": r.pic_users,
+                        "created_at": r.created_at,
+                    })
                     for r in group.master_records
                 ]
             elif group.group_type == "tracker":
                 tracker_records = [
-                    KPIGroupTrackerRecord.model_validate(r)
+                    KPIGroupTrackerRecord.model_validate({
+                        "id": r.id,
+                        "group_id": r.group_id,
+                        "kpi_master_id": r.kpi_master_id,
+                        "tahun": group.tahun,
+                        "bulan_num": r.bulan_num,
+                        "realisasi": r.realisasi,
+                        "keterangan": r.keterangan,
+                        "user": r.user,
+                        "created_at": r.created_at,
+                        "updated_at": r.updated_at,
+                    })
                     for r in group.tracker_records
                 ]
 

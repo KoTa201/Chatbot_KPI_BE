@@ -23,7 +23,6 @@ from model.KPIMaster import KPIMaster, kpi_master_users
 
 # Kolom yang diupdate saat conflict (group_id & kpi_name adalah conflict key)
 _UPSERT_COLS = [
-    "tahun",
     "category",
     "definisi_operasional",
     "target",
@@ -64,6 +63,7 @@ class KPIMasterRepository:
             return 0
 
         # ── Pisahkan user_ids dari payload DB ───────────────────────────
+        # tahun disimpan di kpi_groups, bukan di kpi_master_records.
         # dict: (group_id_str, kpi_name) → list[UUID]
         user_ids_map: dict[tuple[str, str], list[UUID]] = {}
         clean_records: list[dict] = []
@@ -71,6 +71,7 @@ class KPIMasterRepository:
         for r in records:
             r = dict(r)                          # shallow copy agar tidak mutasi caller
             user_ids: list[UUID] = r.pop("user_ids", None) or []
+            r.pop("tahun", None)
             user_ids_map[(str(r["group_id"]), r["kpi_name"])] = user_ids
             clean_records.append(r)
 

@@ -137,7 +137,6 @@ async def test_ingest_all_sheets_tracker_success_inserts_clean_records_and_updat
     )
     tracker_repo.delete_kpi_records_by_group_and_period.assert_awaited_once_with(
         group_id=GROUP_ID,
-        tahun=TAHUN,
         bulan_num=1,
     )
     tracker_repo.bulk_insert_kpi_records.assert_awaited_once()
@@ -147,6 +146,7 @@ async def test_ingest_all_sheets_tracker_success_inserts_clean_records_and_updat
     assert clean_records[0]["kpi_master_id"] == MASTER_ID
     assert clean_records[0]["user_id"] == USER_ID
     assert clean_records[0]["bulan_num"] == 1
+    assert "tahun" not in clean_records[0]
     assert "nama_kpi" not in clean_records[0]
     assert "nama_orang" not in clean_records[0]
     assert "source_sheet_name" not in clean_records[0]
@@ -158,6 +158,52 @@ async def test_ingest_all_sheets_tracker_success_inserts_clean_records_and_updat
         ingested_count=2,
         failed_count=0,
         errors=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_ingest_all_sheets_tracker_uses_sheet_metadata_tahun_when_request_missing():
+    """Jika request tidak membawa tahun, KPIGroup tracker harus memakai tahun dari metadata sheet."""
+    service, _db, tracker_repo, log_repo, group_repo = make_service()
+    group_repo.get_or_create.return_value = make_group()
+    log_repo.create.return_value = make_log()
+    tracker_repo.delete_kpi_records_by_group_and_period.return_value = 0
+    tracker_repo.bulk_insert_kpi_records.return_value = 2
+    service.google_svc.get_spreadsheet_title = MagicMock(return_value="KPI Tracker 2026")
+
+    parsed_records = [
+        {
+            "nama_kpi": "Revenue Growth",
+            "nama_orang": "Budi Santoso",
+            "realisasi": "10%",
+        }
+    ]
+
+    mock_lookup = MagicMock()
+    mock_lookup.preload = AsyncMock()
+    mock_lookup.stats.return_value = {"users": 1}
+    mock_lookup.by_full_name = AsyncMock(return_value=USER_ID)
+
+    with (
+        patch.object(service, "_fetch_all_sheets", return_value=[make_sheet()]),
+        patch.object(service, "_parse_records", return_value=(parsed_records, [])),
+        patch.object(service, "_resolve_kpi_master_ids", new_callable=AsyncMock, return_value={"Revenue Growth": MASTER_ID}),
+        patch("service.TrackeringestionService.UserLookupUtil", return_value=mock_lookup),
+    ):
+        result = await service.ingest_all_sheets(
+            sheet_url=SHEET_URL,
+            tahun=None,
+            skip_on_error=True,
+        )
+
+    assert result["overall_status"] == "success"
+    group_repo.get_or_create.assert_awaited_once_with(
+        sheet_id=SPREADSHEET_ID,
+        group_type="tracker",
+        sheet_url=SHEET_URL,
+        sheet_name=None,
+        nama_grup="KPI Tracker 2026",
+        tahun=TAHUN,
     )
 
 

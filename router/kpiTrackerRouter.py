@@ -106,7 +106,7 @@ class IngestionRouter:
             effective_group_type = "tracker" if source_type == "kpi_tracker" else "master"
 
         return await self._get_log_controller(db).get_ingestion_logs(
-            page=page, limit=limit, group_type=effective_group_type
+            page=page, limit=limit, group_type=effective_group_type, status=status, start_date=start_date, end_date=end_date
         )
 
 

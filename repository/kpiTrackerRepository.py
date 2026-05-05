@@ -34,7 +34,13 @@ class KPITrackerRepository:
         if not records:
             return 0
 
-        orm_records = [KPITracker(**r) for r in records]
+        clean_records = []
+        for record in records:
+            clean = dict(record)
+            clean.pop("tahun", None)
+            clean_records.append(clean)
+
+        orm_records = [KPITracker(**r) for r in clean_records]
         self.db.add_all(orm_records)
         try:
             await self.db.commit()
@@ -53,20 +59,17 @@ class KPITrackerRepository:
     async def delete_kpi_records_by_group_and_period(
         self,
         group_id: UUID,
-        tahun: int,
         bulan_num: Optional[int] = None,
     ) -> int:
         """
-        Hapus data tracker existing untuk satu group + periode.
+        Hapus data tracker existing untuk satu group + periode bulan.
 
-        Jika bulan_num None, hapus semua bulan pada tahun tersebut.
+        Tahun berada di kpi_groups, jadi filter record cukup memakai group_id.
+        Jika bulan_num None, hapus semua bulan pada group tersebut.
         Returns jumlah baris terhapus.
         """
         try:
-            stmt = delete(KPITracker).where(
-                KPITracker.group_id == group_id,
-                KPITracker.tahun == tahun,
-            )
+            stmt = delete(KPITracker).where(KPITracker.group_id == group_id)
 
             if bulan_num is not None:
                 stmt = stmt.where(KPITracker.bulan_num == bulan_num)

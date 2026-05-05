@@ -102,7 +102,10 @@ async def test_ingest_kpi_master_success_upserts_group_records_and_log():
         nama_grup=f"{SHEET_NAME} Master {TAHUN}",
         tahun=TAHUN,
     )
-    log_repo.create.assert_awaited_once_with(kpi_group_id=GROUP_ID)
+    log_repo.create.assert_awaited_once_with(
+        kpi_group_id=GROUP_ID,
+        source_type="master",
+    )
     kpi_repo.upsert_by_group.assert_awaited_once()
 
     records_for_upsert = kpi_repo.upsert_by_group.await_args.args[0]

@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, String, Table, Text, UniqueConstraint
 from sqlalchemy import Column
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -79,7 +79,6 @@ class KPIMaster(Base):
         nullable=False,
     )
 
-    tahun: Mapped[int] = mapped_column(Integer, nullable=False)
     category: Mapped[str] = mapped_column(String(255), nullable=False)
     kpi_name: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -116,5 +115,5 @@ class KPIMaster(Base):
     def __repr__(self) -> str:
         return (
             f"<KPIMaster id={self.id} kpi='{self.kpi_name}' "
-            f"tahun={self.tahun} group={self.group_id}>"
+            f"group={self.group_id}>"
         )
