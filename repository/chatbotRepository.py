@@ -34,7 +34,7 @@ class ChatbotRepository:
         return found
 
     async def get_all(self, page, limit, otoritas=None, search=None):
-        query = select(Chatbot).where(Chatbot.is_active == True)
+        query = select(Chatbot)
         offset = (page - 1) * limit
 
         if otoritas:
