@@ -120,7 +120,10 @@ class KPIMasterRepository:
             self.upsert_count = 0
             raise HTTPException(
                 status_code=500,
-                detail=f"Gagal simpan KPI Master ke database: {str(e)}",
+                detail=(
+                    "Gagal simpan KPI Master ke database. "
+                    "Periksa data input dan constraint di database."
+                ),
             )
 
     # ================================================================ #
