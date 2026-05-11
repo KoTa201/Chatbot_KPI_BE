@@ -16,11 +16,6 @@ from schema.chatbotSchema import (
 from service.chatbotService import ChatbotService
 
 
-def get_chatbot_service(db: Session = Depends(get_db)) -> ChatbotService:
-    """Factory dependency: inject DB session ke service."""
-    return ChatbotService(db)
-
-
 class ChatbotController:
     """
     Controller: titik masuk dari router ke service.

@@ -33,8 +33,19 @@ _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
 class AuthService:
-    def __init__(self, repo: UserRepository):
-        self.repo = repo
+    def __init__(
+        self,
+        db: AsyncSession | None = None,
+        repo: UserRepository | None = None,
+    ):
+        if repo is not None:
+            self.repo = repo
+        elif isinstance(db, UserRepository):
+            self.repo = db
+        elif db is not None:
+            self.repo = UserRepository(db)
+        else:
+            raise ValueError("AuthService requires db or repo")
         self.secret_key: str = settings.SECRET_KEY
         self.refresh_secret_key: str = settings.REFRESH_SECRET_KEY
         self.reset_secret_key: str = settings.RESET_SECRET_KEY
@@ -147,7 +158,7 @@ class AuthService:
 
     def create_refresh_token(
         self,
-        user_id: int,
+        user_id: UUID,
         expires_delta: Optional[timedelta] = None,
     ) -> tuple[str, int]:
         """
@@ -210,7 +221,7 @@ class AuthService:
     async def rotate_tokens(
         self,
         refresh_token: str,
-        repo: UserRepository,
+        repo: UserRepository | None = None,
     ) -> tuple[str, int, str, int]:
         """
         Implementasi Refresh Token Rotation:
@@ -227,6 +238,7 @@ class AuthService:
             HTTP 401 — token tidak valid / sudah direvoke.
             HTTP 403 — akun tidak aktif.
         """
+        repo = repo or self.repo
         payload = self.decode_refresh_token(refresh_token)
 
         user_id = UUID(payload["sub"])
@@ -286,13 +298,14 @@ class AuthService:
         self,
         identifier: str,
         password: str,
-        repo: UserRepository,
+        repo: UserRepository | None = None,
     ) -> User:
         """
         Verifikasi credential. Field `identifier` bisa berupa username atau email.
         Raise HTTP 401 jika credential salah atau user tidak ditemukan.
         Raise HTTP 403 jika akun tidak aktif.
         """
+        repo = repo or self.repo
         user = await repo.get_by_username_or_email(identifier)
 
         if not user or not self.verify_password(password, user.hashed_password):
@@ -414,7 +427,7 @@ class AuthService:
         return "Password berhasil direset. Silakan login dengan password baru."
 
 
-_auth_service = AuthService(UserRepository(Depends(get_db)))
+_auth_service = AuthService(repo=UserRepository(Depends(get_db)))
 
 
 async def get_current_user(

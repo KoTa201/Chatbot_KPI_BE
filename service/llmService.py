@@ -4,10 +4,11 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast, NoReturn
 import httpx
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, APIStatusError
+from openai.types.chat import ChatCompletion
 from configCredidential import get_settings
 
 settings = get_settings()
@@ -133,6 +134,7 @@ class LLMService:
 
     async def _post_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self.client.chat.completions.create(**payload)
+        response = cast(ChatCompletion, response)
         return response.model_dump()  # pydantic v2; atau .dict() jika v1
 
     async def _request_with_retry(
@@ -194,6 +196,7 @@ class LLMService:
                     logger.error("LLM HTTP request failed: %s", error)
                     self._raise_model_not_available()
                 await asyncio.sleep(self.retry_delay_seconds)
+        self._raise_model_not_available()
 
     async def _call_llm(
         self,
@@ -237,7 +240,7 @@ class LLMService:
         )
 
     @staticmethod
-    def _raise_model_not_available() -> None:
+    def _raise_model_not_available() -> NoReturn:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",

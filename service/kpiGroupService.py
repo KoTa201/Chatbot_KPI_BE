@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
-from repository.kpiGroupRepository import KPIGroupRepository
+from repository.KpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from schema.kpiGroupSchema import (
     KPIGroupCreate,
@@ -80,7 +80,7 @@ class KPIGroupService:
                 nama_grup = nama_grup or sheet_url_str
                 sheet_id = sheet_id or ""
 
-        group = await self.repo.get_or_create(
+        return await self.repo.get_or_create_committed(
             sheet_id=sheet_id,
             group_type=payload.group_type,
             sheet_url=sheet_url_str,
@@ -89,9 +89,6 @@ class KPIGroupService:
             tahun=payload.tahun,
             is_active=payload.is_active,
         )
-        await self.db.commit()
-        await self.db.refresh(group)
-        return group
 
     # ─── Update ───────────────────────────────────────────────────────────────
 
@@ -120,7 +117,7 @@ class KPIGroupService:
         if sheet_url_changed or (existing.group_type == "master" and tahun_changed):
             if existing.group_type == "master":
                 kpi_repo = KPIMasterRepository(self.db)
-                kpi_service = KPIMasterService(kpi_repo)
+                kpi_service = KPIMasterService(repository=kpi_repo)
                 log_repo = IngestionLogRepository(self.db)
                 svc = KPIMasterIngestionService(
                     db=self.db,
@@ -133,7 +130,6 @@ class KPIGroupService:
                     group_id=group_id,
                     sheet_url=update_fields["sheet_url"] if sheet_url_changed else None,
                     tahun=payload.tahun,
-                    group=existing,
                 )
             elif existing.group_type == "tracker":
                 kpi_repo = KPITrackerRepository(self.db)
@@ -147,19 +143,17 @@ class KPIGroupService:
                     existing_group_id=existing.id,
                 )
         elif update_fields:
-            await self.repo.update(group_id=group_id, fields=update_fields)
-            await self.db.commit()
+            await self.repo.update_committed(group_id=group_id, fields=update_fields)
 
-        group = await self.repo.get_by_id(group_id)
+        group = await self._get_or_404(group_id)
 
-        return group
+        return group 
 
     # ─── Delete ───────────────────────────────────────────────────────────────
 
-    async def delete_group(self, group_id: UUID) -> None:
+    async def delete_group(self, group_id: UUID) -> dict:
         await self._get_or_404(group_id)
-        await self.repo.delete(group_id)
-        await self.db.commit()
+        await self.repo.delete_committed(group_id)
 
         return {"message": f"KPI Group '{group_id}' berhasil dihapus."}
 

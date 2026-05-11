@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from fastapi import Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
 
 from databaseConfig import get_db
 from service.authService import get_current_user
@@ -15,7 +16,6 @@ from service.chatService import ChatService
 from service.clarificationService import ClarificationService
 from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
 from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
-from repository.chatbotAuditLogRepository import AuditLogRepository
 from model.User import User
 
 
@@ -24,7 +24,6 @@ class ChatController:
 
     def __init__(self, db: AsyncSession = Depends(get_db)):
         self.db = db
-        self.audit_repo = AuditLogRepository(db)
 
     async def handle_chat(
         self,
@@ -51,7 +50,7 @@ class ChatController:
         service = ChatService(self.db)
         response = await service.process_query(
             user_message=request.message,
-            user_id=user_id,
+            user_id=UUID(user_id),
             user_role=user_role,
             user_divisi=user_divisi,
             session_id=request.session_id,
@@ -106,7 +105,7 @@ class ChatController:
         service = ChatService(self.db)
         response = await service.process_query(
             user_message=disambiguation_result.disambiguated_query,
-            user_id=user_id,
+            user_id=UUID(user_id),
             user_role=user_role,
             user_divisi=user_divisi,
             session_id=request.session_id,
@@ -133,7 +132,7 @@ class ChatController:
         user_id = str(current_user.id)
         service = ChatService(self.db)
         logs = await service.get_audit_history(
-            user_id=user_id,
+            user_id=UUID(user_id),
             skip=skip,
             limit=limit,
         )
@@ -156,7 +155,8 @@ class ChatController:
                 detail="Akses ditolak. Hanya Admin dan Kepala Divisi yang dapat melihat audit log.",
             )
 
-        logs = await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
+        service = ChatService(self.db)
+        logs = await service.get_failed_wireguard_audit_logs(skip=skip, limit=limit)
         return [AuditLogResponse.model_validate(log) for log in logs]
 
     async def handle_get_sessions(
@@ -165,7 +165,7 @@ class ChatController:
     ) -> list[SessionResponse]:
         user_id = str(current_user.id)
         service = ChatService(self.db)
-        sessions = await service.get_sessions(user_id=user_id)
+        sessions = await service.get_sessions(user_id=UUID(user_id))
         return [SessionResponse.model_validate(s) for s in sessions]
 
     async def handle_delete_session(
@@ -175,7 +175,7 @@ class ChatController:
     ) -> None:
         user_id = str(current_user.id)
         service = ChatService(self.db)
-        await service.delete_session(session_id=session_id, user_id=user_id)
+        await service.delete_session(session_id=session_id, user_id=UUID(user_id))
 
     async def handle_update_session_title(
         self,
@@ -187,7 +187,7 @@ class ChatController:
         service = ChatService(self.db)
         updated = await service.update_session_title(
             session_id=session_id,
-            user_id=user_id,
+            user_id=UUID(user_id),
             title=request.title,
         )
         return SessionResponse.model_validate(updated)
@@ -196,7 +196,7 @@ class ChatController:
     def _extract_role_value(current_user: User) -> str:
         role = current_user.role.value if hasattr(
             current_user.role, "value") else str(current_user.role)
-        return str(role).strip().lower()
+        return role.strip().lower()
 
     @staticmethod
     def _to_chat_role(role_value: str) -> str:

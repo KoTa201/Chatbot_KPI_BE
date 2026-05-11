@@ -270,13 +270,13 @@ async def run_seeder() -> None:
                 username=data["username"],
                 email=data["email"],
                 full_name=data["full_name"],
-                hashed_password=_hash_password(data["password"]),
+                hashed_password=_hash_password(str(data["password"])),
                 role=data["role"],
                 is_active=data["is_active"],
             )
             db.add(user)
             print(
-                f"  [INSERT] {data['username']:<20} role={data['role'].value}")
+                f"  [INSERT] {data['username']:<20} role={data['role']}")
             inserted += 1
 
         await db.commit()
@@ -290,7 +290,7 @@ async def run_seeder() -> None:
     print(f"  {'USERNAME':<20} {'PASSWORD':<12} {'ROLE'}")
     print(f"  {'-'*20} {'-'*12} {'-'*15}")
     for u in SEED_USERS:
-        print(f"  {u['username']:<20} {u['password']:<12} {u['role'].value}")
+        print(f"  {u['username']:<20} {u['password']:<12} {u['role']}")
     print()
 
 

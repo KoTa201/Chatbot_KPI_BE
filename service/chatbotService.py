@@ -51,7 +51,7 @@ class ChatbotService:
         limit: int = 10,
         otoritas: Optional[AuthorityEnum] = None,
         search: Optional[str] = None,
-    ) -> ChatbotListResponse:
+    ) -> dict:
         chatbots, total = await self.repo.get_all(page, limit, otoritas, search)
         total_pages = max(1, -(-total // limit))  # ceiling division
 
@@ -63,15 +63,15 @@ class ChatbotService:
             "total_pages": total_pages,
         }
 
-    async def get_by_id(self, chatbot_id: UUID) -> ChatbotResponse:
+    async def get_by_id(self, chatbot_id: UUID) -> Chatbot:
         return await self._get_or_404(chatbot_id)
 
-    async def create(self, payload: ChatbotCreate) -> ChatbotResponse:
+    async def create(self, payload: ChatbotCreate) -> Chatbot:
         await self._check_nama_unique(payload.nama_chatbot)
         await self._enforce_single_active_per_otoritas(payload.otoritas)
         return await self.repo.create(payload)
 
-    async def update(self, chatbot_id: UUID, payload: ChatbotUpdate) -> ChatbotResponse:
+    async def update(self, chatbot_id: UUID, payload: ChatbotUpdate) -> Chatbot:
         existing = await self._get_or_404(chatbot_id)
         if payload.nama_chatbot:
             await self._check_nama_unique(payload.nama_chatbot, exclude_id=chatbot_id)

@@ -17,6 +17,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.KPIMaster import KPIMaster
 from repository.kpiMasterRepository import KPIMasterRepository
@@ -26,8 +27,19 @@ logger = logging.getLogger(__name__)
 
 class KPIMasterService:
 
-    def __init__(self, repository: KPIMasterRepository):
-        self.repo: KPIMasterRepository = repository
+    def __init__(
+        self,
+        db: AsyncSession | None = None,
+        repository: KPIMasterRepository | None = None,
+    ):
+        if repository is not None:
+            self.repo = repository
+        elif isinstance(db, KPIMasterRepository):
+            self.repo = db
+        elif db is not None:
+            self.repo = KPIMasterRepository(db)
+        else:
+            raise ValueError("KPIMasterService requires db or repository")
 
     # ================================================================ #
     #  UPSERT                                                           #

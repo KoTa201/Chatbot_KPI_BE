@@ -31,7 +31,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
-from repository.kpiGroupRepository import KPIGroupRepository
+from repository.KpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from service.kpiMasterService import KPIMasterService
 from model.KPIGroup import KPIGroup
@@ -45,16 +45,16 @@ class KPIMasterIngestionService:
     def __init__(
         self,
         db:          AsyncSession,
-        kpi_repo:    KPIMasterRepository,
-        kpi_service: KPIMasterService,
-        log_repo:    IngestionLogRepository,
-        group_repo:  KPIGroupRepository,
+        kpi_repo:    KPIMasterRepository | None = None,
+        kpi_service: KPIMasterService | None = None,
+        log_repo:    IngestionLogRepository | None = None,
+        group_repo:  KPIGroupRepository | None = None,
     ):
         self.db = db
-        self.kpi_repo = kpi_repo
-        self.kpi_service = kpi_service
-        self.log_repo = log_repo
-        self.group_repo = group_repo
+        self.kpi_repo = kpi_repo or KPIMasterRepository(db)
+        self.kpi_service = kpi_service or KPIMasterService(repository=self.kpi_repo)
+        self.log_repo = log_repo or IngestionLogRepository(db)
+        self.group_repo = group_repo or KPIGroupRepository(db)
 
     # ================================================================ #
     #  PUBLIC: Entry point ingestion                                    #
@@ -201,7 +201,6 @@ class KPIMasterIngestionService:
         group_id:  UUID,
         sheet_url: Optional[str] = None,
         tahun:     Optional[int] = None,
-        group:     KPIGroup = None,
     ) -> dict:
         """
         Update KPIGroup (sheet_url/tahun), hapus seluruh master lama
@@ -209,9 +208,16 @@ class KPIMasterIngestionService:
         """
         log_id = None
 
+        existing_group = await self.group_repo.get_by_id(group_id)
+        if existing_group is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"KPI {group_id} tidak ditemukan.",
+            )
+
         try:
-            effective_sheet_url = sheet_url if sheet_url is not None else str(group.sheet_url)
-            effective_tahun = tahun if tahun is not None else group.tahun
+            effective_sheet_url = sheet_url if sheet_url is not None else existing_group.sheet_url
+            effective_tahun = tahun if tahun is not None else existing_group.tahun
             if effective_tahun is None:
                 raise HTTPException(
                     status_code=400,

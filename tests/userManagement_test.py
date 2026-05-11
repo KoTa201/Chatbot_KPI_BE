@@ -424,8 +424,7 @@ class TestRefresh:
                 json={"refresh_token": refresh},
             )
 
-        # rotate_tokens calls revoke_token(token) only — no user_id argument
-        mock_revoke.assert_awaited_once_with(refresh)
+        mock_revoke.assert_awaited_once_with(refresh, mock_user.id)
 
 class TestLogout:
 
@@ -946,8 +945,7 @@ class TestAuthServiceUnit:
         _, old_refresh = _make_tokens()
         new_access, _, new_refresh, _ = await svc.rotate_tokens(old_refresh, mock_repo)
 
-        # rotate_tokens calls revoke_token(token) only — no user_id argument
-        mock_repo.revoke_token.assert_awaited_once_with(old_refresh)
+        mock_repo.revoke_token.assert_awaited_once_with(old_refresh, mock_user.id)
         assert new_refresh != old_refresh
         assert new_access != ""
 

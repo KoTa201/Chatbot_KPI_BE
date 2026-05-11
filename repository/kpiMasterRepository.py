@@ -19,6 +19,7 @@ from sqlalchemy import delete, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from model.KPIGroup import KPIGroup
 from model.KPIMaster import KPIMaster, kpi_master_users
 
 # Kolom yang diupdate saat conflict (group_id & kpi_name adalah conflict key)
@@ -126,6 +127,30 @@ class KPIMasterRepository:
                 ),
             )
 
+    async def get_id_map_by_names(
+        self,
+        kpi_names: list[str],
+        tahun: int | None = None,
+    ) -> dict[str, UUID]:
+        if not kpi_names:
+            return {}
+
+        query = select(KPIMaster.id, KPIMaster.kpi_name).where(
+            KPIMaster.kpi_name.in_(kpi_names)
+        )
+        if tahun:
+            query = query.join(KPIGroup, KPIMaster.group_id == KPIGroup.id).where(
+                KPIGroup.group_type.in_(["master", "MASTER"]),
+                KPIGroup.tahun == tahun,
+            )
+
+        result = await self.db.execute(query)
+        master_map: dict[str, UUID] = {}
+        for row in result.fetchall():
+            if row.kpi_name not in master_map:
+                master_map[row.kpi_name] = row.id
+        return master_map
+
     # ================================================================ #
     #  DELETE                                                           #
     # ================================================================ #
@@ -145,7 +170,7 @@ class KPIMasterRepository:
             stmt = delete(KPIMaster).where(KPIMaster.group_id == group_id)
             result = await self.db.execute(stmt)
             await self.db.commit()
-            return int(result.rowcount or 0)
+            return result.rowcount or 0
 
         except Exception as e:
             await self.db.rollback()

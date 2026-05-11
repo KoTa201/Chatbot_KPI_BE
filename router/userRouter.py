@@ -6,7 +6,8 @@ from uuid import UUID
 from controller.authController import AuthController
 from controller.userController import UserController
 from databaseConfig import get_db
-from model.User import RoleEnum, User
+from model.User import RoleEnum
+from model.Base import UserStatusEnum
 from schema.authSchema import (
     LoginRequest,
     MessageResponse,
@@ -120,7 +121,7 @@ class UserRouter:
             default=None,
             description="Filter role user",
         ),
-        status: str | None = Query(
+        status: UserStatusEnum | None = Query(
             default=None,
             description="Filter status user: active atau inactive",
         ),

@@ -63,4 +63,5 @@ class AuditLogRepository:
         result = await self.db.execute(
             delete(ChatbotAuditLog).where(ChatbotAuditLog.session_id == session_id)
         )
+        await self.db.flush()
         return result.rowcount

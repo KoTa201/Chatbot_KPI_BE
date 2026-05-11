@@ -128,7 +128,7 @@ LIMIT 10;
 
 def build_nl_to_sql_prompt(
     user_query: str,
-    user_id: str,
+    user_id: UUID,
     user_role: str,
     divisi: str | None,
 ) -> str:

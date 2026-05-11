@@ -10,10 +10,10 @@ class ChatSessionRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, session_id: str, user_id: str, title: str) -> ChatSession:
+    async def create(self, session_id: str, user_id: uuid.UUID, title: str) -> ChatSession:
         session = ChatSession(
             id=session_id,
-            user_id=uuid.UUID(user_id),
+            user_id=user_id,
             title=title[:80].strip() or "New Chat",
         )
         self.db.add(session)
@@ -21,10 +21,10 @@ class ChatSessionRepository:
         await self.db.refresh(session)
         return session
 
-    async def get_by_user(self, user_id: str) -> list[ChatSession]:
+    async def get_by_user(self, user_id: uuid.UUID) -> list[ChatSession]:
         result = await self.db.execute(
             select(ChatSession)
-            .where(ChatSession.user_id == uuid.UUID(user_id))
+            .where(ChatSession.user_id == user_id)
             .order_by(ChatSession.created_at.desc())
         )
         return list(result.scalars().all())

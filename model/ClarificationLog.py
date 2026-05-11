@@ -6,6 +6,7 @@ ORM model untuk tracking semua aktivitas clarification mechanism.
 from datetime import datetime
 from typing import Optional
 from uuid import uuid4
+import uuid
 
 from sqlalchemy import Boolean, DateTime, Numeric, String, Text, UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,7 +18,7 @@ from model.Base import Base
 class ClarificationLogORM(Base):
     __tablename__ = "clarification_logs"
 
-    id: Mapped[SAUUID] = mapped_column(
+    id: Mapped[uuid.UUID] = mapped_column(
         SAUUID(as_uuid=True), primary_key=True, default=uuid4
     )
 

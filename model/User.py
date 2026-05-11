@@ -5,6 +5,7 @@ SQLAlchemy ORM model untuk tabel users.
 
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
+import uuid
 from uuid import uuid4
 
 from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
@@ -20,8 +21,8 @@ if TYPE_CHECKING:
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[UUID] = mapped_column(
-        UUID, primary_key=True, index=True, default=uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, index=True, default=uuid4)
     username: Mapped[str] = mapped_column(
         String(100), unique=True, nullable=True, index=True)
     email: Mapped[str] = mapped_column(

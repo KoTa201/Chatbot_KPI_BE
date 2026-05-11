@@ -5,6 +5,7 @@ Mengimplementasikan Rules W-01 s/d W-08 dari PRD Section 8.2.
 """
 
 import re
+from uuid import UUID
 
 from configCredidential import get_settings
 from schema.wireguardSchema import ValidationResult
@@ -88,7 +89,7 @@ class SQLWireguardService:
             r"\b(GROUP\s+BY|ORDER\s+BY|LIMIT|;|$)", re.IGNORECASE
         )
 
-    def validate(self, sql: str, user_id: str, user_role: str) -> "ValidationResult":
+    def validate(self, sql: str, user_id: UUID, user_role: str) -> "ValidationResult":
         """
         Jalankan semua validasi secara berurutan.
         Mengembalikan ValidationResult dengan sanitized_sql jika lolos.
@@ -111,7 +112,7 @@ class SQLWireguardService:
         sanitized_sql = self._sanitize_sql(normalized_sql, user_id, user_role)
         return ValidationResult(is_valid=True, reason=None, sanitized_sql=sanitized_sql)
 
-    def _sanitize_sql(self, sql: str, user_id: str, user_role: str) -> str:
+    def _sanitize_sql(self, sql: str, user_id: UUID, user_role: str) -> str:
         sanitized = self._enforce_limit(sql)
         return self._enforce_rls(sanitized, user_id, user_role)
 
@@ -176,8 +177,8 @@ class SQLWireguardService:
 
     # -- Rule W-06 -------------------------------------------------------------
 
-    def _enforce_rls(self, sql: str, user_id: str, user_role: str) -> str:
-        if str(user_role).strip().lower() != "karyawan":
+    def _enforce_rls(self, sql: str, user_id: UUID, user_role: str) -> str:
+        if user_role.strip().lower() != "karyawan":
             return sql
 
         if self._has_owner_filter(sql):
@@ -191,12 +192,12 @@ class SQLWireguardService:
     def _has_owner_filter(self, sql: str) -> bool:
         return bool(self.owner_filter_pattern.search(sql))
 
-    def _inject_owner_filter_existing_where(self, sql: str, user_id: str) -> str:
+    def _inject_owner_filter_existing_where(self, sql: str, user_id: UUID) -> str:
         return self.where_pattern.sub(
             f"WHERE karyawan_id = '{user_id}' AND", sql, count=1
         )
 
-    def _inject_owner_filter_no_where(self, sql: str, user_id: str) -> str:
+    def _inject_owner_filter_no_where(self, sql: str, user_id: UUID) -> str:
         match = self.insertion_pattern.search(sql)
         if not match:
             return sql.rstrip("; \n") + f" WHERE karyawan_id = '{user_id}'"

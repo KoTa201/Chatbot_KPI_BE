@@ -7,12 +7,12 @@ Menjalankan stage secara berurutan:
   Stage 4: Graphic Generation (opsional, jika diminta user)
     Stage 5: Result Analysis (LLM)
 """
+from uuid import UUID
 import logging
 import time
 import uuid
 import asyncio
 from typing import Any
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
@@ -24,6 +24,7 @@ from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_promp
 from repository.chatbotAuditLogRepository import AuditLogRepository
 from repository.chatSessionRepository import ChatSessionRepository
 from repository.clarificationRepository import ClarificationRepository
+from repository.chatQueryRepository import ChatQueryRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
 
 settings = get_settings()
@@ -41,9 +42,10 @@ class ChatService:
         self.audit_repo = AuditLogRepository(db)
         self.session_repo = ChatSessionRepository(db)
         self.clarification_repo = ClarificationRepository(db)
+        self.query_repo = ChatQueryRepository(db)
 
     async def create_session(
-        self, session_id: str, user_id: str, first_message: str
+        self, session_id: str, user_id: UUID, first_message: str
     ) -> None:
         existing = await self.session_repo.get_by_id(session_id)
         if existing is None:
@@ -56,7 +58,7 @@ class ChatService:
     async def process_query(
         self,
         user_message: str,
-        user_id: str,
+        user_id: UUID,
         user_role: str,
         user_divisi: str | None,
         session_id: str | None,
@@ -118,7 +120,7 @@ class ChatService:
 
                     return ChatResponse(
                         session_id=session_id,
-                        message=clarification_response.clarifying_question,
+                        message=clarification_response.clarifying_question or "",
                         clarification_message_answer_options=clarification_response.options,
                         pipeline_stages=stages,
                     )
@@ -176,7 +178,7 @@ class ChatService:
             # STAGE 3 — SQL EXECUTION
             query_result, rows_count = await self._run_sql_execution_stage(
                 stages=stages,
-                sanitized_sql=sanitized_sql,
+                sanitized_sql=sanitized_sql or "",
                 user_id=user_id,
                 user_role=user_role,
                 pipeline=pipeline,
@@ -195,7 +197,7 @@ class ChatService:
             narrative = await self._run_result_analysis_stage(
                 stages=stages,
                 user_query=user_message,
-                executed_sql=sanitized_sql,
+                executed_sql=sanitized_sql or "",
                 query_result=query_result,
                 rows_count=rows_count,
             )
@@ -220,7 +222,7 @@ class ChatService:
     @staticmethod
     def _build_pipeline_context(
         session_id: str,
-        user_id: str,
+        user_id: UUID,
         user_role: str,
         user_message: str,
     ) -> dict[str, Any]:
@@ -286,7 +288,7 @@ class ChatService:
         self,
         stages: list[PipelineStageInfo],
         user_message: str,
-        user_id: str,
+        user_id: UUID,
         user_role: str,
         user_divisi: str | None,
         pipeline: dict[str, Any],
@@ -329,7 +331,7 @@ class ChatService:
         self,
         stages: list[PipelineStageInfo],
         generated_sql: str,
-        user_id: str,
+        user_id: UUID,
         user_role: str,
         pipeline: dict[str, Any],
     ):
@@ -346,14 +348,14 @@ class ChatService:
             self._complete_stage(
                 stage, "success", "Query lolos validasi keamanan.")
         else:
-            self._complete_stage(stage, "blocked", validation.reason)
+            self._complete_stage(stage, "blocked", validation.reason or "")
         return validation
 
     async def _run_sql_execution_stage(
         self,
         stages: list[PipelineStageInfo],
         sanitized_sql: str,
-        user_id: str,
+        user_id: UUID,
         user_role: str,
         pipeline: dict[str, Any],
     ) -> tuple[list[dict], int]:
@@ -444,10 +446,7 @@ class ChatService:
             timeout_seconds = settings.SQL_EXECUTION_TIMEOUT
 
             async def _run_query() -> tuple[list[dict], int]:
-                result = await self.db.execute(text(sql))
-                rows = result.mappings().all()
-                data = [dict(row) for row in rows]
-                return data, len(data)
+                return await self.query_repo.execute_read_query(sql)
 
             return await asyncio.wait_for(_run_query(), timeout=timeout_seconds)
 
@@ -472,22 +471,29 @@ class ChatService:
 
     async def get_audit_history(
         self,
-        user_id: str,
+        user_id: UUID,
         skip: int = 0,
         limit: int = 20,
     ):
         """Ambil riwayat query dari audit log untuk user tertentu."""
         import uuid as _uuid
         return await self.audit_repo.get_by_user(
-            user_id=_uuid.UUID(user_id),
+            user_id=user_id,
             skip=skip,
             limit=limit,
         )
 
-    async def get_sessions(self, user_id: str) -> list:
+    async def get_failed_wireguard_audit_logs(
+        self,
+        skip: int = 0,
+        limit: int = 50,
+    ):
+        return await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
+
+    async def get_sessions(self, user_id: UUID) -> list:
         return await self.session_repo.get_by_user(user_id=user_id)
 
-    async def delete_session(self, session_id: str, user_id: str) -> None:
+    async def delete_session(self, session_id: str, user_id: UUID) -> None:
         from fastapi import HTTPException, status
         session = await self.session_repo.get_by_id(session_id)
         if session is None:
@@ -503,10 +509,9 @@ class ChatService:
         await self.clarification_repo.delete_by_session(session_id)
         await self.audit_repo.delete_by_session(session_id)
         await self.session_repo.delete(session_id)
-        await self.db.flush()
 
     async def update_session_title(
-        self, session_id: str, user_id: str, title: str
+        self, session_id: str, user_id: UUID, title: str
     ):
         from fastapi import HTTPException, status
         session = await self.session_repo.get_by_id(session_id)
@@ -520,6 +525,4 @@ class ChatService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",
             )
-        updated = await self.session_repo.update_title(session_id, title)
-        await self.db.flush()
-        return updated
+        return await self.session_repo.update_title(session_id, title)

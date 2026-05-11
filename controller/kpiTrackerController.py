@@ -18,9 +18,6 @@ from typing import Optional
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from repository.ingestionLogRepository import IngestionLogRepository
-from repository.kpiGroupRepository import KPIGroupRepository
-from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import (
     BatchTrackerIngestionRequest,
     BatchTrackerIngestionResponse,
@@ -33,25 +30,8 @@ from service.TrackeringestionService import TrackerIngestionService
 
 class KPITrackerController:
 
-    def __init__(self, db: Optional[AsyncSession] = None):
-        self.db = db
-
-        # Repositories
-        self.tracker_repo: KPITrackerRepository = KPITrackerRepository(
-            db) if db else None
-        self.log_repo: IngestionLogRepository = IngestionLogRepository(
-            db) if db else None
-        self.group_repo: KPIGroupRepository = KPIGroupRepository(
-            db) if db else None
-        self.ingestion_service: TrackerIngestionService = (
-            TrackerIngestionService(
-                db=db,
-                tracker_repo=self.tracker_repo,
-                log_repo=self.log_repo,
-                group_repo=self.group_repo,
-            )
-            if db else None
-        )
+    def __init__(self, db: AsyncSession):
+        self.ingestion_service: TrackerIngestionService = TrackerIngestionService(db)
 
     # ================================================================ #
     #  INGESTION                                                       #

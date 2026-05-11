@@ -4,22 +4,22 @@ Service untuk menangani logika bisnis ingestion logs.
 """
 
 import re
-from datetime import date
+from datetime import date, datetime, time as dt_time
 from typing import Optional
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.Base import GroupTypeEnum
 from model.IngestionLog import IngestionLogORM
 from model.KPIGroup import KPIGroup
+from repository.ingestionLogRepository import IngestionLogRepository
 
 
 class IngestionLogService:
     """Service untuk ingestion log operations."""
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.repo = IngestionLogRepository(db)
 
     async def get_ingestion_logs(
         self,
@@ -30,8 +30,6 @@ class IngestionLogService:
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
     ) -> dict:
-        from datetime import datetime, time as dt_time
-
         group_type_filter = self._normalize_group_type(group_type)
         offset = (page - 1) * limit
 
@@ -39,39 +37,21 @@ class IngestionLogService:
         if group_type_filter is not None:
             source_type_value = "master" if group_type_filter == GroupTypeEnum.MASTER else "tracker"
 
-        base_filters = []
-        if source_type_value is not None:
-            base_filters.append(
-                IngestionLogORM.source_type == source_type_value)
-        if status is not None:
-            base_filters.append(IngestionLogORM.status == status)
-        if start_date is not None:
-            base_filters.append(IngestionLogORM.created_at >=
-                                datetime.combine(start_date, dt_time.min))
-        if end_date is not None:
-            base_filters.append(IngestionLogORM.created_at <=
-                                datetime.combine(end_date, dt_time.max))
-
-        count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
-            KPIGroup, KPIGroup.id == IngestionLogORM.kpi_group_id,
+        start_datetime = (
+            datetime.combine(start_date, dt_time.min) if start_date is not None else None
         )
-        for f in base_filters:
-            count_query = count_query.where(f)
-
-        total_result = await self.db.execute(count_query)
-        total_count = int(total_result.scalar_one() or 0)
-
-        query = select(IngestionLogORM, KPIGroup).outerjoin(
-            KPIGroup, KPIGroup.id == IngestionLogORM.kpi_group_id,
+        end_datetime = (
+            datetime.combine(end_date, dt_time.max) if end_date is not None else None
         )
-        for f in base_filters:
-            query = query.where(f)
 
-        query = query.order_by(IngestionLogORM.created_at.desc()).offset(
-            offset).limit(limit)
-
-        result = await self.db.execute(query)
-        rows = result.all()
+        rows, total_count = await self.repo.list_with_group(
+            offset=offset,
+            limit=limit,
+            source_type=source_type_value,
+            status=status,
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+        )
 
         logs_payload = [
             self._format_log_response(log, group)

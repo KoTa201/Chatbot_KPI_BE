@@ -12,7 +12,7 @@ from pathlib import Path
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Any
+from typing import Any, Coroutine
 
 from configCredidential import settings
 
@@ -96,7 +96,7 @@ class EmailService:
     async def _send(self, to: str, subject: str, html: str) -> None:
         await asyncio.to_thread(self._send_sync, to, subject, html)
 
-    def _run_in_background(self, coro: asyncio.Future, context: str) -> None:
+    def _run_in_background(self, coro: Coroutine[Any, Any, Any], context: str) -> None:
         task = asyncio.create_task(coro)
 
         def _log_background_error(done_task: asyncio.Task) -> None:

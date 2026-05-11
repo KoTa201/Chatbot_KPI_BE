@@ -15,7 +15,6 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from repository.userRepository import UserRepository
 from schema.authSchema import (
     LoginRequest,
     MessageResponse,
@@ -36,9 +35,7 @@ from schema.authSchema import (
 class AuthController:
 
     def __init__(self, db: AsyncSession):
-        self.db: AsyncSession = db
-        self.repo: UserRepository = UserRepository(db)
-        self.svc: AuthService = AuthService(self.repo)
+        self.svc: AuthService = AuthService(db=db)
 
     # ------------------------------------------------------------------ #
     #  POST /auth/login                                                    #
@@ -52,7 +49,6 @@ class AuthController:
         user = await self.svc.authenticate_user(
             identifier=payload.identifier,
             password=payload.password,
-            repo=self.repo,
         )
 
         access_token, expires_in = self.svc.create_access_token(
@@ -84,7 +80,6 @@ class AuthController:
         """
         new_access, access_exp, new_refresh, refresh_exp = await self.svc.rotate_tokens(
             refresh_token=payload.refresh_token,
-            repo=self.repo,
         )
 
         return TokenResponse(
