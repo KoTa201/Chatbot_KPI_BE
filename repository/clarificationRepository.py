@@ -153,4 +153,5 @@ class ClarificationRepository:
         result = await self.db.execute(
             delete(ClarificationLogORM).where(ClarificationLogORM.session_id == session_id)
         )
+        await self.db.flush()
         return result.rowcount

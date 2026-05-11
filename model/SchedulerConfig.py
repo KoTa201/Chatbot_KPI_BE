@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 class SchedulerConfigModel(BaseModel):
     id: UUID = Field(default_factory=uuid4)
-    interval_value: Optional[datetime] = None
+    interval_value: datetime
     is_enabled: bool = True
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None

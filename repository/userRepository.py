@@ -20,8 +20,8 @@ class UserRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.user: User = None
-        self.token: RevokedToken = None
+        self.user: User | None = None
+        self.token: RevokedToken | None = None
 
     # ------------------------------------------------------------------ #
     #  Create                                                              #
@@ -93,7 +93,7 @@ class UserRepository:
             .limit(limit)
             .offset(offset)
         )
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     async def count_all_users(
         self,
@@ -182,7 +182,7 @@ class UserRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def get_active_reset_pin(self, user_id: int) -> PasswordReset | None:
+    async def get_active_reset_pin(self, user_id: UUID) -> PasswordReset | None:
         """Ambil PIN reset aktif (belum dipakai, belum expired)."""
         now = datetime.now(timezone.utc)
         result = await self.db.execute(

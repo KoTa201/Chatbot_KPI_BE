@@ -99,7 +99,7 @@ class BulkDeleteKPIRecordsRequest(BaseModel):
 class IngestAllSheetsRequest(BaseModel):
     """Schema untuk ingest semua sheet dari satu spreadsheet."""
     sheet_url: str = Field(..., description="URL Google Sheets")
-    tahun: Optional[int] = Field(
+    tahun: int = Field(
         None, ge=2000, le=2031, description="Tahun data (opsional, fallback ke metadata sheet)")
     nama_orang_override: Optional[str] = Field(
         None, max_length=255,
@@ -256,7 +256,7 @@ class BulkIngestionResponse(BaseModel):
 class TrackerSourceItem(BaseModel):
     """Satu item sumber dalam batch ingestion."""
     sheet_url: str = Field(..., description="URL Google Sheets")
-    tahun: Optional[int] = Field(
+    tahun: int = Field(
         None, ge=2000, le=2031, description="Tahun data")
 
 

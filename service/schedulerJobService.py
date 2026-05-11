@@ -33,9 +33,8 @@ class SchedulerJobService:
         """
         import asyncio
         from databaseConfig import AsyncSessionLocal
-        from controller.kpiTrackerController import KPITrackerController
-        from repository.kpiGroupRepository import KPIGroupRepository
-        from schema.kpiTrackerSchema import IngestAllSheetsRequest
+        from repository.KpiGroupRepository import KPIGroupRepository
+        from service.TrackeringestionService import TrackerIngestionService
 
         async with AsyncSessionLocal() as db:
             group_repo = KPIGroupRepository(db)
@@ -48,13 +47,12 @@ class SchedulerJobService:
             if i > 0:
                 await asyncio.sleep(self.RATE_LIMIT_DELAY_SECONDS)
             async with AsyncSessionLocal() as db:
-                controller = KPITrackerController(db)
-                request = IngestAllSheetsRequest(
+                service = TrackerIngestionService(db=db)
+                await service.ingest_all_sheets(
                     sheet_url=group.sheet_url,
                     tahun=group.tahun,
                     skip_on_error=True,
                 )
-                await controller.ingest_all_sheets_from_google_sheets(request)
 
         repo = SchedulerRepository()
         next_run = self.get_next_run_time()

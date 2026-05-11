@@ -14,10 +14,13 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from datetime import datetime
+
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.IngestionLog import IngestionLogORM
+from model.KPIGroup import KPIGroup
 
 
 class IngestionLogRepository:
@@ -102,6 +105,44 @@ class IngestionLogRepository:
 
     # ── READ ─────────────────────────────────────────────────────────────────
 
+    async def list_with_group(
+        self,
+        offset: int,
+        limit: int,
+        source_type: str | None = None,
+        status: str | None = None,
+        start_datetime: datetime | None = None,
+        end_datetime: datetime | None = None,
+    ) -> tuple[list[tuple[IngestionLogORM, KPIGroup | None]], int]:
+        filters = []
+        if source_type is not None:
+            filters.append(IngestionLogORM.source_type == source_type)
+        if status is not None:
+            filters.append(IngestionLogORM.status == status)
+        if start_datetime is not None:
+            filters.append(IngestionLogORM.created_at >= start_datetime)
+        if end_datetime is not None:
+            filters.append(IngestionLogORM.created_at <= end_datetime)
+
+        count_query = select(func.count()).select_from(IngestionLogORM).outerjoin(
+            KPIGroup, KPIGroup.id == IngestionLogORM.kpi_group_id,
+        )
+        for condition in filters:
+            count_query = count_query.where(condition)
+
+        total_result = await self.db.execute(count_query)
+        total_count = total_result.scalar_one() or 0
+
+        query = select(IngestionLogORM, KPIGroup).outerjoin(
+            KPIGroup, KPIGroup.id == IngestionLogORM.kpi_group_id,
+        )
+        for condition in filters:
+            query = query.where(condition)
+
+        query = query.order_by(IngestionLogORM.created_at.desc()).offset(offset).limit(limit)
+        result = await self.db.execute(query)
+        return [(ingestion_log, kpi_group) for ingestion_log, kpi_group in result.all()], total_count
+
     async def get_by_group(
         self,
         kpi_group_id: UUID,
@@ -114,4 +155,4 @@ class IngestionLogRepository:
             .order_by(IngestionLogORM.created_at.desc())
             .limit(limit)
         )
-        return result.scalars().all()
+        return list(result.scalars().all())

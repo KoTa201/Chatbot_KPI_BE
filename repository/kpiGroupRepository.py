@@ -70,10 +70,9 @@ class KPIGroupRepository:
                 "sheet_name": sheet_name,
                 "nama_grup":  nama_grup,
                 "updated_at": func.now(),
-                # tahun diupdate jika caller mengirimkan nilai eksplisit
-                # agar grup lama dengan tahun NULL bisa terisi saat re-ingest.
             }
             if tahun is not None:
+                # pyrefly: ignore [bad-typed-dict-key]
                 update_set["tahun"] = tahun
 
             stmt = (
@@ -99,14 +98,44 @@ class KPIGroupRepository:
             await self.db.flush()
 
             group = await self.db.get(KPIGroup, group_id)
+            if not group:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Gagal retrieve KPI Group setelah upsert.",
+                )
             return group
 
+        except HTTPException:
+            raise
         except Exception as e:
             await self.db.rollback()
             raise HTTPException(
                 status_code=500,
                 detail=f"Gagal buat/update KPI Group: {str(e)}",
             )
+
+    async def get_or_create_committed(
+        self,
+        sheet_id: str,
+        group_type: str,
+        sheet_url: str,
+        sheet_name: str | None,
+        nama_grup: str,
+        tahun: int | None = None,
+        is_active: bool = True,
+    ) -> KPIGroup:
+        group = await self.get_or_create(
+            sheet_id=sheet_id,
+            group_type=group_type,
+            sheet_url=sheet_url,
+            sheet_name=sheet_name,
+            nama_grup=nama_grup,
+            tahun=tahun,
+            is_active=is_active,
+        )
+        await self.db.commit()
+        await self.db.refresh(group)
+        return group
 
     # ─── Read ─────────────────────────────────────────────────────────────────
 
@@ -171,7 +200,7 @@ class KPIGroupRepository:
             .offset(offset)
             .limit(limit)
         )
-        return result.scalars().all()
+        return list(result.scalars().all())
 
     async def list_groups(
         self,
@@ -213,7 +242,7 @@ class KPIGroupRepository:
             .offset(offset)
             .limit(limit)
         )
-        rows = rows_result.scalars().all()
+        rows = list(rows_result.scalars().all())
 
         return rows, total
 
@@ -254,6 +283,16 @@ class KPIGroupRepository:
                 detail=f"Gagal update KPI Group: {str(e)}",
             )
 
+    async def update_committed(
+        self,
+        group_id: UUID,
+        fields: dict,
+    ) -> KPIGroup:
+        group = await self.update(group_id=group_id, fields=fields)
+        await self.db.commit()
+        await self.db.refresh(group)
+        return group
+
     # ─── Delete ───────────────────────────────────────────────────────────────
 
     async def delete(self, group_id: UUID) -> None:
@@ -285,3 +324,7 @@ class KPIGroupRepository:
                 status_code=500,
                 detail=f"Gagal hapus KPI Group: {str(e)}",
             )
+
+    async def delete_committed(self, group_id: UUID) -> None:
+        await self.delete(group_id)
+        await self.db.commit()

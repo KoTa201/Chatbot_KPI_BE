@@ -63,7 +63,7 @@ class IngestionRouter:
     async def ingest_from_google_sheets(
         self,
         sheet_url: str = Query(..., description="URL Google Sheets"),
-        tahun: Optional[int] = Query(
+        tahun: int = Query(
             default=None, description="Tahun data (opsional, fallback ke metadata sheet)"
         ),
         nama_orang_override: Optional[str] = Query(

@@ -324,7 +324,7 @@ class GoogleSheetService:
         best_score = 0
 
         for i, row in enumerate(all_values):
-            row_text = " ".join(str(c).strip().lower() for c in row if c)
+            row_text = " ".join(c.strip().lower() for c in row if c)
             score = sum(1 for kw in HEADER_KEYWORDS if kw in row_text)
             if score > best_score:
                 best_score = score
@@ -398,7 +398,7 @@ class GoogleSheetService:
         }
 
         for row in all_values[:header_row]:
-            row_text = " ".join(str(c).strip() for c in row if c)
+            row_text = " ".join(c.strip() for c in row if c)
 
             if "KPI TRACKER" not in row_text.upper():
                 continue

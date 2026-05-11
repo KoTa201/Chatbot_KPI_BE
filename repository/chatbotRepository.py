@@ -12,7 +12,7 @@ from schema.chatbotSchema import ChatbotCreate, ChatbotUpdate
 class ChatbotRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
-        self.chatbot: Chatbot = None  # Akan di-set di service sebelum operasi update/delete
+        self.chatbot: Chatbot | None = None  # Akan di-set di service sebelum operasi update/delete
 
     async def get_by_id(self, chatbot_id: UUID) -> Optional[Chatbot]:
         result = await self.db.execute(
@@ -48,7 +48,7 @@ class ChatbotRepository:
             )
 
         count_result = await self.db.execute(select(func.count()).select_from(query.subquery()))
-        total = count_result.scalar()
+        total = count_result.scalar_one()
 
         result = await self.db.execute(
             query.order_by(Chatbot.created_at.desc())
@@ -82,6 +82,7 @@ class ChatbotRepository:
         self.db.expire_all()
 
     async def update(self, payload: ChatbotUpdate) -> Chatbot:
+        assert self.chatbot is not None
         # Only set attributes that are explicitly provided and not None.
         # This prevents accidental NULL assignment to non-nullable columns
         # like `otoritas` when callers pass { otoritas: null }.
@@ -97,12 +98,14 @@ class ChatbotRepository:
         return self.chatbot
 
     async def soft_delete(self) -> Chatbot:
+        assert self.chatbot is not None
         self.chatbot.is_active = False
         await self.db.commit()
         await self.db.refresh(self.chatbot)
         return self.chatbot
 
     async def hard_delete(self) -> None:
+        assert self.chatbot is not None
         await self.db.delete(self.chatbot)
         await self.db.commit()
         self.chatbot = None

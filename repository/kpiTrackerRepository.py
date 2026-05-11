@@ -76,7 +76,7 @@ class KPITrackerRepository:
 
             result = await self.db.execute(stmt)
             await self.db.commit()
-            return int(result.rowcount or 0)
+            return result.rowcount or 0
         except Exception as e:
             await self.db.rollback()
             raise HTTPException(

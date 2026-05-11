@@ -24,8 +24,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text, UniqueConstraint
-from sqlalchemy import UUID as SAUUID
+from sqlalchemy import Boolean, DateTime, Enum, Integer, String, Text, UniqueConstraint,UUID
+import uuid
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -46,8 +46,8 @@ class KPIGroup(Base):
                          name="uq_kpigroup_sheet_type"),
     )
 
-    id: Mapped[SAUUID] = mapped_column(
-        SAUUID(as_uuid=True), primary_key=True, default=uuid4
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID, primary_key=True, default=uuid4
     )
 
     # Nama deskriptif grup — biasanya diambil dari nama sheet / tab
@@ -65,7 +65,7 @@ class KPIGroup(Base):
         String(255), nullable=True)
 
     # Kolom khusus tracker — diabaikan untuk grup bertipe 'master'
-    tahun: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    tahun: Mapped[int] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False)
 

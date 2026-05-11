@@ -15,14 +15,13 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.Base import GroupTypeEnum
-from model.KPIMaster import KPIMaster
 from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
-from repository.kpiGroupRepository import KPIGroupRepository
+from repository.KpiGroupRepository import KPIGroupRepository
+from repository.kpiMasterRepository import KPIMasterRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import TrackerSourceItem   # input schema — boleh tetap
 from service.googleSheetService import GoogleSheetService
@@ -35,14 +34,16 @@ class TrackerIngestionService:
     def __init__(
         self,
         db:           AsyncSession,
-        tracker_repo: KPITrackerRepository,
-        log_repo:     IngestionLogRepository,
-        group_repo:   KPIGroupRepository,
+        tracker_repo: KPITrackerRepository | None = None,
+        log_repo:     IngestionLogRepository | None = None,
+        group_repo:   KPIGroupRepository | None = None,
+        master_repo:  KPIMasterRepository | None = None,
     ):
         self.db = db
-        self.tracker_repo = tracker_repo
-        self.log_repo = log_repo
-        self.group_repo = group_repo
+        self.tracker_repo = tracker_repo or KPITrackerRepository(db)
+        self.log_repo = log_repo or IngestionLogRepository(db)
+        self.group_repo = group_repo or KPIGroupRepository(db)
+        self.master_repo = master_repo or KPIMasterRepository(db)
         self.google_svc = GoogleSheetService()
         self.logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class TrackerIngestionService:
     async def ingest_all_sheets(
         self,
         sheet_url:           str,
-        nama_orang_override: str = None,
+        nama_orang_override: Optional[str] = None,
         tahun:               int = 2026,
         skip_on_error:       bool = True,
         existing_group_id:   Optional[UUID] = None,
@@ -316,7 +317,7 @@ class TrackerIngestionService:
             self.logger.info(
                 "[TrackerIngestion] Updating existing KPIGroup id=%s", existing_group_id
             )
-            group = await self.group_repo.update(
+            return await self.group_repo.update_committed(
                 group_id=existing_group_id,
                 fields={
                     "sheet_id":  spreadsheet_id,
@@ -325,9 +326,6 @@ class TrackerIngestionService:
                     "tahun":     tahun,
                 },
             )
-            await self.db.commit()
-            await self.db.refresh(group)
-            return group
 
         group = await self.group_repo.get_or_create(
             sheet_id=spreadsheet_id,
@@ -522,7 +520,7 @@ class TrackerIngestionService:
             clean = {k: v for k, v in record.items() if k not in self.strip_fields}
             clean["bulan_num"]     = bulan_num
             clean["group_id"]      = group_id
-            clean["kpi_master_id"] = master_id_map.get(nama_kpi_val)
+            clean["kpi_master_id"] = master_id_map.get(str(nama_kpi_val))
             clean["user_id"]       = user_id_map.get(nama_orang_val) if nama_orang_val else None
             clean_records.append(clean)
         return clean_records
@@ -556,25 +554,7 @@ class TrackerIngestionService:
         if not kpi_names:
             return {}
         try:
-            query = select(KPIMaster.id, KPIMaster.kpi_name).where(
-                KPIMaster.kpi_name.in_(kpi_names)
-            )
-            if tahun:
-                query = query.join(KPIGroup, KPIMaster.group_id == KPIGroup.id).where(
-                    KPIGroup.group_type.in_([GroupTypeEnum.MASTER, "master"]),
-                    KPIGroup.tahun == tahun,
-                )
-            result = await self.db.execute(query)
-            rows = result.fetchall()
-            master_map: dict[str, UUID] = {}
-            for row in rows:
-                if row.kpi_name not in master_map:
-                    master_map[row.kpi_name] = row.id
-                else:
-                    self.logger.warning(
-                        "[TrackerIngestion] Duplikasi kpi_name='%s' di kpi_master_records.",
-                        row.kpi_name,
-                    )
+            master_map = await self.master_repo.get_id_map_by_names(kpi_names, tahun)
             self.logger.info(
                 "[TrackerIngestion] Master matching: %s/%s KPI berhasil di-match",
                 len(master_map), len(kpi_names),

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import io
 from dataclasses import dataclass
+from typing import cast
 
 import pandas as pd
 from fastapi import HTTPException, status
@@ -101,9 +102,9 @@ class GraphicSeervice:
                 axis.set_ylabel(value_col)
                 axis.tick_params(axis="x", rotation=30)
             else:
-                wedges, _, _ = axis.pie(
+                wedges, *_ = axis.pie(
                     chart_df[value_col],
-                    labels=chart_df[category_col],
+                    labels=chart_df[category_col].to_list(),
                     autopct="%1.1f%%",
                     startangle=90,
                 )
@@ -134,12 +135,12 @@ class GraphicSeervice:
         chart_type: str,
     ) -> tuple[str, str, pd.DataFrame]:
         data = dataframe.copy()
-        data.columns = [str(col) for col in data.columns]
+        data.columns = [col for col in data.columns]
 
         numeric_valid_counts: dict[str, int] = {}
         for column in data.columns:
-            numeric_series = pd.to_numeric(data[column], errors="coerce")
-            valid_count = int(numeric_series.notna().sum())
+            numeric_series = cast(pd.Series, pd.to_numeric(data[column], errors="coerce"))
+            valid_count = numeric_series.notna().sum()
             if valid_count > 0:
                 numeric_valid_counts[column] = valid_count
 
@@ -164,11 +165,11 @@ class GraphicSeervice:
             category_column = "__baris__"
             data[category_column] = [f"Baris {i+1}" for i in range(len(data))]
 
-        chart_df = data[[category_column, best_numeric_column]].copy()
+        chart_df = pd.DataFrame(data[[category_column, best_numeric_column]].copy())
         is_month_category = self._is_month_like_column(category_column)
 
         if is_month_category:
-            month_numeric = pd.to_numeric(chart_df[category_column], errors="coerce")
+            month_numeric = cast(pd.Series, pd.to_numeric(chart_df[category_column], errors="coerce"))
             if month_numeric.notna().all() and month_numeric.between(1, 12).all():
                 chart_df["__month_order__"] = month_numeric.astype(int)
                 chart_df = chart_df.sort_values(
