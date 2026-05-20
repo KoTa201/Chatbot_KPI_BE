@@ -13,29 +13,29 @@ class ChatSessionService:
 
     async def create_session_if_missing(
         self,
-        session_id: str,
-        user_id: str,
+        session_id: UUID,
+        user_id: UUID,
         first_message: str,
     ) -> None:
         existing = await self.session_repo.get_by_id(session_id)
         if existing is None:
             await self.session_repo.create(
                 session_id=session_id,
-                user_id=UUID(user_id),
+                user_id=user_id,
                 title=first_message[:80].strip() or "New Chat",
             )
 
     async def get_sessions(self, user_id: str) -> list:
         return await self.session_repo.get_by_user(user_id=UUID(user_id))
 
-    async def delete_session(self, session_id: str, user_id: str) -> None:
+    async def delete_session(self, session_id: UUID, user_id: UUID) -> None:
         session = await self.session_repo.get_by_id(session_id)
         if session is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session tidak ditemukan.",
             )
-        if str(session.user_id) != str(user_id):
+        if str(session.user_id) != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",
@@ -45,8 +45,8 @@ class ChatSessionService:
 
     async def update_session_title(
         self,
-        session_id: str,
-        user_id: str,
+        session_id: UUID,
+        user_id: UUID,
         title: str,
     ):
         session = await self.session_repo.get_by_id(session_id)

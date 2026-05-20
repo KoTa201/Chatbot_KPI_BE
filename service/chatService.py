@@ -22,7 +22,6 @@ from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlWireguardService import SQLWireguardService
 from service.chatSessionService import ChatSessionService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
-from repository.chatbotAuditLogRepository import AuditLogRepository
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
@@ -39,7 +38,6 @@ class ChatService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.audit_repo = AuditLogRepository(db)
         self.session_service = ChatSessionService(db)
         self.clarification_repo = ClarificationRepository(db)
         self.query_repo = ChatQueryRepository(db)
@@ -51,7 +49,7 @@ class ChatService:
         user_id: UUID,
         user_role: str,
         user_divisi: str | None,
-        session_id: str | None,
+        session_id: UUID | None,
         show_sql: bool = False,
         context_from_clarification: Any = None,
     ) -> ChatResponse:
@@ -68,7 +66,6 @@ class ChatService:
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
 
-        session_id = session_id or str(uuid.uuid4())
         await self.session_service.create_session_if_missing(
             session_id=session_id,
             user_id=user_id,
@@ -208,7 +205,7 @@ class ChatService:
 
     @staticmethod
     def _build_pipeline_context(
-        session_id: str,
+        session_id: UUID,
         user_id: UUID,
         user_role: str,
         user_message: str,
@@ -448,23 +445,3 @@ class ChatService:
                 detail="Query tidak dapat dieksekusi. Silakan coba pertanyaan yang berbeda.",
             ) from e
 
-    async def _write_audit(self, pipeline: dict) -> None:
-        """Tulis hasil pipeline ke audit log (fire and forget — tidak raise error)."""
-        try:
-            await self.audit_repo.create(pipeline)
-        except Exception:
-            pass  # Audit log gagal tidak boleh mengganggu response utama
-
-    async def get_audit_history(
-        self,
-        user_id: str,
-        skip: int = 0,
-        limit: int = 20,
-    ):
-        """Ambil riwayat query dari audit log untuk user tertentu."""
-        import uuid as _uuid
-        return await self.audit_repo.get_by_user(
-            user_id=_uuid.UUID(user_id),
-            skip=skip,
-            limit=limit,
-        )
