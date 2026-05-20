@@ -495,13 +495,11 @@ class ChatService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session tidak ditemukan.",
             )
-        if str(session.user_id) != user_id:
+        if str(session.user_id) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",
             )
-        await self.clarification_repo.delete_by_session(session_id)
-        await self.audit_repo.delete_by_session(session_id)
         await self.session_repo.delete(session_id)
         await self.db.flush()
 
@@ -515,7 +513,7 @@ class ChatService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session tidak ditemukan.",
             )
-        if str(session.user_id) != user_id:
+        if str(session.user_id) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",
