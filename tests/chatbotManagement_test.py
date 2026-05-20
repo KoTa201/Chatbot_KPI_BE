@@ -152,18 +152,18 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
 def make_payload(
-    nama: str = "HR Assistant",
-    otoritas: str = "kepala_divisi",
+    name: str = "HR Assistant",
+    authority: str = "kepala_divisi",
     addon_prompt: str | None = "Kamu adalah asisten kepala_divisi yang ramah.",
 ) -> dict:
-    return {"nama_chatbot": nama, "otoritas": otoritas, "addon_prompt": addon_prompt}
+    return {"chatbot_name": name, "authority": authority, "addon_prompt": addon_prompt}
 
 
 async def seed_chatbot(session: AsyncSession, **kwargs) -> Chatbot:
     """Insert chatbot langsung ke DB tanpa melalui API."""
     defaults = {
-        "nama_chatbot": "Seed Bot",
-        "otoritas": AuthorityEnum.KEPALA_DIVISI,
+        "chatbot_name": "Seed Bot",
+        "authority": AuthorityEnum.KEPALA_DIVISI,
         "addon_prompt": "Prompt awal.",
         "is_active": True,
     }
@@ -224,8 +224,8 @@ class TestCreateChatbot:
 
         assert res.status_code == 201
         data = res.json()
-        assert data["nama_chatbot"] == "HR Assistant"
-        assert data["otoritas"] == "kepala_divisi"
+        assert data["chatbot_name"] == "HR Assistant"
+        assert data["authority"] == "kepala_divisi"
         assert data["addon_prompt"] == "Kamu adalah asisten kepala_divisi yang ramah."
         assert data["is_active"] is True
         assert "id" in data
@@ -234,26 +234,26 @@ class TestCreateChatbot:
 
     async def test_create_karyawan_success(self, client: AsyncClient):
         """POST chatbot Karyawan harus return 201."""
-        res = await client.post("/api/v1/chatbots/", json=make_payload(nama="Karyawan Bot", otoritas="karyawan"))
+        res = await client.post("/api/v1/chatbots/", json=make_payload(name="Karyawan Bot", authority="karyawan"))
 
         assert res.status_code == 201
-        assert res.json()["otoritas"] == "karyawan"
+        assert res.json()["authority"] == "karyawan"
 
     async def test_create_without_addon_prompt(self, client: AsyncClient):
         """addon_prompt bersifat opsional — boleh null."""
-        res = await client.post("/api/v1/chatbots/", json=make_payload(nama="Minimal Bot", addon_prompt=None))
+        res = await client.post("/api/v1/chatbots/", json=make_payload(name="Minimal Bot", addon_prompt=None))
 
         assert res.status_code == 201
         assert res.json()["addon_prompt"] is None
 
-    async def test_create_same_otoritas_deactivates_previous_active(
+    async def test_create_same_authority_deactivates_previous_active(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
     ):
-        """Create chatbot aktif baru dengan otoritas sama harus nonaktifkan chatbot aktif lama."""
-        first = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Lama", otoritas="kepala_divisi"))
-        second = await client.post("/api/v1/chatbots/", json=make_payload(nama="HR Bot Baru", otoritas="kepala_divisi"))
+        """Create chatbot aktif baru dengan authority sama harus nonaktifkan chatbot aktif lama."""
+        first = await client.post("/api/v1/chatbots/", json=make_payload(name="HR Bot Lama", authority="kepala_divisi"))
+        second = await client.post("/api/v1/chatbots/", json=make_payload(name="HR Bot Baru", authority="kepala_divisi"))
 
         assert first.status_code == 201
         assert second.status_code == 201
@@ -261,7 +261,7 @@ class TestCreateChatbot:
         first_id = first.json()["id"]
         second_id = second.json()["id"]
         result = await db_session.execute(
-            select(Chatbot).where(Chatbot.otoritas ==
+            select(Chatbot).where(Chatbot.authority ==
                                   AuthorityEnum.KEPALA_DIVISI)
         )
         status_by_id = {
@@ -272,50 +272,50 @@ class TestCreateChatbot:
 
     async def test_create_duplicate_nama_returns_409(self, client: AsyncClient):
         """Nama chatbot yang sudah ada harus return 409 Conflict."""
-        payload = make_payload(nama="Duplikat Bot")
+        payload = make_payload(name="Duplikat Bot")
         await client.post("/api/v1/chatbots/", json=payload)
         res = await client.post("/api/v1/chatbots/", json=payload)
 
         assert res.status_code == 409
-        assert "sudah digunakan" in res.json()["detail"]
+        assert "already used" in res.json()["detail"]
 
     async def test_create_duplicate_nama_case_insensitive(self, client: AsyncClient):
         """Duplikat nama tidak peka huruf besar/kecil."""
-        await client.post("/api/v1/chatbots/", json=make_payload(nama="MyBot"))
-        res = await client.post("/api/v1/chatbots/", json=make_payload(nama="mybot"))
+        await client.post("/api/v1/chatbots/", json=make_payload(name="MyBot"))
+        res = await client.post("/api/v1/chatbots/", json=make_payload(name="mybot"))
 
         assert res.status_code == 409
 
     async def test_create_missing_nama_returns_422(self, client: AsyncClient):
-        """nama_chatbot wajib — jika tidak ada harus return 422."""
-        res = await client.post("/api/v1/chatbots/", json={"otoritas": "kepala_divisi"})
+        """chatbot_name wajib — jika tidak ada harus return 422."""
+        res = await client.post("/api/v1/chatbots/", json={"authority": "kepala_divisi"})
 
         assert res.status_code == 422
 
-    async def test_create_missing_otoritas_returns_422(self, client: AsyncClient):
-        """otoritas wajib — jika tidak ada harus return 422."""
-        res = await client.post("/api/v1/chatbots/", json={"nama_chatbot": "Bot A"})
+    async def test_create_missing_authority_returns_422(self, client: AsyncClient):
+        """authority wajib — jika tidak ada harus return 422."""
+        res = await client.post("/api/v1/chatbots/", json={"chatbot_name": "Bot A"})
 
         assert res.status_code == 422
 
-    async def test_create_invalid_otoritas_returns_422(self, client: AsyncClient):
-        """otoritas hanya boleh 'kepala_divisi' atau 'karyawan'."""
-        res = await client.post("/api/v1/chatbots/", json=make_payload(otoritas="MANAGER"))
+    async def test_create_invalid_authority_returns_422(self, client: AsyncClient):
+        """authority hanya boleh 'kepala_divisi' atau 'karyawan'."""
+        res = await client.post("/api/v1/chatbots/", json=make_payload(authority="MANAGER"))
 
         assert res.status_code == 422
 
     async def test_create_empty_nama_returns_422(self, client: AsyncClient):
-        """nama_chatbot tidak boleh string kosong."""
-        res = await client.post("/api/v1/chatbots/", json=make_payload(nama=""))
+        """chatbot_name tidak boleh string kosong."""
+        res = await client.post("/api/v1/chatbots/", json=make_payload(name=""))
 
         assert res.status_code == 422
 
     async def test_create_nama_stripped_whitespace(self, client: AsyncClient):
-        """nama_chatbot dengan spasi di ujung harus di-strip."""
-        res = await client.post("/api/v1/chatbots/", json=make_payload(nama="  Stripped Bot  "))
+        """chatbot_name dengan spasi di ujung harus di-strip."""
+        res = await client.post("/api/v1/chatbots/", json=make_payload(name="  Stripped Bot  "))
 
         assert res.status_code == 201
-        assert res.json()["nama_chatbot"] == "Stripped Bot"
+        assert res.json()["chatbot_name"] == "Stripped Bot"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -336,29 +336,29 @@ class TestListChatbot:
 
     async def test_list_returns_all_active(self, client: AsyncClient, db_session: AsyncSession):
         """Semua chatbot aktif harus muncul di list."""
-        await seed_chatbot(db_session, nama_chatbot="Bot A")
-        await seed_chatbot(db_session, nama_chatbot="Bot B", otoritas=AuthorityEnum.KARYAWAN)
+        await seed_chatbot(db_session, chatbot_name="Bot A")
+        await seed_chatbot(db_session, chatbot_name="Bot B", authority=AuthorityEnum.KARYAWAN)
 
         res = await client.get("/api/v1/chatbots/")
 
         assert res.json()["total"] == 2
 
-    async def test_list_inactive_included(self, client: AsyncClient, db_session: AsyncSession):
-        """Chatbot dengan is_active=False tetap muncul di list default."""
-        await seed_chatbot(db_session, nama_chatbot="Aktif Bot")
-        await seed_chatbot(db_session, nama_chatbot="Nonaktif Bot", is_active=False)
+    async def test_list_inactive_excluded(self, client: AsyncClient, db_session: AsyncSession):
+        """Chatbot dengan is_active=False tidak muncul di list default."""
+        await seed_chatbot(db_session, chatbot_name="Aktif Bot")
+        await seed_chatbot(db_session, chatbot_name="Nonaktif Bot", is_active=False)
 
         res = await client.get("/api/v1/chatbots/")
 
         body = res.json()
-        assert body["total"] == 2
-        names = {item["nama_chatbot"] for item in body["data"]}
-        assert names == {"Aktif Bot", "Nonaktif Bot"}
+        assert body["total"] == 1
+        names = {item["chatbot_name"] for item in body["data"]}
+        assert names == {"Aktif Bot"}
 
     async def test_list_pagination_limit(self, client: AsyncClient, db_session: AsyncSession):
         """limit membatasi jumlah item per halaman."""
         for i in range(5):
-            await seed_chatbot(db_session, nama_chatbot=f"Bot {i}")
+            await seed_chatbot(db_session, chatbot_name=f"Bot {i}")
 
         res = await client.get("/api/v1/chatbots/?page=1&limit=2")
 
@@ -370,7 +370,7 @@ class TestListChatbot:
     async def test_list_pagination_page_2_different_items(self, client: AsyncClient, db_session: AsyncSession):
         """Halaman 2 harus return item yang berbeda dari halaman 1."""
         for i in range(4):
-            await seed_chatbot(db_session, nama_chatbot=f"Bot {i}")
+            await seed_chatbot(db_session, chatbot_name=f"Bot {i}")
 
         res1 = await client.get("/api/v1/chatbots/?page=1&limit=2")
         res2 = await client.get("/api/v1/chatbots/?page=2&limit=2")
@@ -386,47 +386,47 @@ class TestListChatbot:
         assert res.status_code == 422
 
     async def test_list_filter_kepala_divisi(self, client: AsyncClient, db_session: AsyncSession):
-        """Filter otoritas=Kepala Divisi hanya return chatbot Kepala Divisi."""
-        await seed_chatbot(db_session, nama_chatbot="Kepala Divisi Bot", otoritas=AuthorityEnum.KEPALA_DIVISI)
-        await seed_chatbot(db_session, nama_chatbot="Karyawan Bot", otoritas=AuthorityEnum.KARYAWAN)
+        """Filter authority=Kepala Divisi hanya return chatbot Kepala Divisi."""
+        await seed_chatbot(db_session, chatbot_name="Kepala Divisi Bot", authority=AuthorityEnum.KEPALA_DIVISI)
+        await seed_chatbot(db_session, chatbot_name="Karyawan Bot", authority=AuthorityEnum.KARYAWAN)
 
-        res = await client.get("/api/v1/chatbots/?otoritas=kepala_divisi")
+        res = await client.get("/api/v1/chatbots/?authority=kepala_divisi")
 
         body = res.json()
         assert body["total"] == 1
-        assert body["data"][0]["otoritas"] == "kepala_divisi"
+        assert body["data"][0]["authority"] == "kepala_divisi"
 
     async def test_list_filter_karyawan(self, client: AsyncClient, db_session: AsyncSession):
-        """Filter otoritas=karyawan hanya return chatbot Karyawan."""
-        await seed_chatbot(db_session, nama_chatbot="kepala_divisi Bot", otoritas=AuthorityEnum.KEPALA_DIVISI)
-        await seed_chatbot(db_session, nama_chatbot="Kar Bot", otoritas=AuthorityEnum.KARYAWAN)
+        """Filter authority=karyawan hanya return chatbot Karyawan."""
+        await seed_chatbot(db_session, chatbot_name="kepala_divisi Bot", authority=AuthorityEnum.KEPALA_DIVISI)
+        await seed_chatbot(db_session, chatbot_name="Kar Bot", authority=AuthorityEnum.KARYAWAN)
 
-        res = await client.get("/api/v1/chatbots/?otoritas=karyawan")
+        res = await client.get("/api/v1/chatbots/?authority=karyawan")
 
         body = res.json()
         assert body["total"] == 1
-        assert body["data"][0]["otoritas"] == "karyawan"
+        assert body["data"][0]["authority"] == "karyawan"
 
-    async def test_list_filter_invalid_otoritas_returns_422(self, client: AsyncClient):
-        """Filter dengan nilai otoritas tidak valid harus return 422."""
-        res = await client.get("/api/v1/chatbots/?otoritas=INVALID")
+    async def test_list_filter_invalid_authority_returns_422(self, client: AsyncClient):
+        """Filter dengan nilai authority tidak valid harus return 422."""
+        res = await client.get("/api/v1/chatbots/?authority=INVALID")
 
         assert res.status_code == 422
 
     async def test_list_search_by_nama(self, client: AsyncClient, db_session: AsyncSession):
-        """Search berdasarkan nama_chatbot (partial match)."""
-        await seed_chatbot(db_session, nama_chatbot="Recruitment Helper")
-        await seed_chatbot(db_session, nama_chatbot="Payroll Bot")
+        """Search berdasarkan chatbot_name (partial match)."""
+        await seed_chatbot(db_session, chatbot_name="Recruitment Helper")
+        await seed_chatbot(db_session, chatbot_name="Payroll Bot")
 
         res = await client.get("/api/v1/chatbots/?search=Recruit")
 
         assert res.json()["total"] == 1
-        assert "Recruitment" in res.json()["data"][0]["nama_chatbot"]
+        assert "Recruitment" in res.json()["data"][0]["chatbot_name"]
 
     async def test_list_search_by_addon_prompt(self, client: AsyncClient, db_session: AsyncSession):
         """Search juga mencakup konten addon_prompt."""
-        await seed_chatbot(db_session, nama_chatbot="Bot X", addon_prompt="Bantu proses rekrutmen.")
-        await seed_chatbot(db_session, nama_chatbot="Bot Y", addon_prompt="Cek gaji.")
+        await seed_chatbot(db_session, chatbot_name="Bot X", addon_prompt="Bantu proses rekrutmen.")
+        await seed_chatbot(db_session, chatbot_name="Bot Y", addon_prompt="Cek gaji.")
 
         res = await client.get("/api/v1/chatbots/?search=rekrutmen")
 
@@ -434,7 +434,7 @@ class TestListChatbot:
 
     async def test_list_search_no_result(self, client: AsyncClient, db_session: AsyncSession):
         """Search yang tidak cocok harus return data kosong."""
-        await seed_chatbot(db_session, nama_chatbot="Bot A")
+        await seed_chatbot(db_session, chatbot_name="Bot A")
 
         res = await client.get("/api/v1/chatbots/?search=xyznotfound")
 
@@ -450,15 +450,15 @@ class TestGetChatbotById:
 
     async def test_get_by_id_success(self, client: AsyncClient, db_session: AsyncSession):
         """GET /{id} harus return detail chatbot yang benar."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Detail Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Detail Bot")
 
         res = await client.get(f"/api/v1/chatbots/{chatbot.id}")
 
         assert res.status_code == 200
         data = res.json()
         assert data["id"] == str(chatbot.id)
-        assert data["nama_chatbot"] == "Detail Bot"
-        assert data["otoritas"] == "kepala_divisi"
+        assert data["chatbot_name"] == "Detail Bot"
+        assert data["authority"] == "kepala_divisi"
 
     async def test_get_by_id_not_found(self, client: AsyncClient):
         """GET dengan ID yang tidak ada harus return 404."""
@@ -469,7 +469,7 @@ class TestGetChatbotById:
 
     async def test_get_inactive_returns_200(self, client: AsyncClient, db_session: AsyncSession):
         """Chatbot nonaktif tetap bisa diakses via GET /{id}."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Nonaktif Bot", is_active=False)
+        chatbot = await seed_chatbot(db_session, chatbot_name="Nonaktif Bot", is_active=False)
 
         res = await client.get(f"/api/v1/chatbots/{chatbot.id}")
 
@@ -490,32 +490,32 @@ class TestGetChatbotById:
 class TestUpdateChatbot:
 
     async def test_update_nama_only(self, client: AsyncClient, db_session: AsyncSession):
-        """Update hanya nama_chatbot — field lain tidak berubah."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Lama Bot")
+        """Update hanya chatbot_name — field lain tidak berubah."""
+        chatbot = await seed_chatbot(db_session, chatbot_name="Lama Bot")
 
         from unittest.mock import patch, AsyncMock
-        with patch("repository.chatbotRepository.ChatbotRepository.get_by_nama", new_callable=AsyncMock, return_value=None):
-            res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"nama_chatbot": "Baru Bot"})
+        with patch("repository.chatbotRepository.ChatbotRepository.get_by_chatbot_name", new_callable=AsyncMock, return_value=None):
+            res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"chatbot_name": "Baru Bot"})
 
         assert res.status_code == 200
         data = res.json()
-        assert data["nama_chatbot"] == "Baru Bot"
-        assert data["otoritas"] == "kepala_divisi"  # tidak berubah
+        assert data["chatbot_name"] == "Baru Bot"
+        assert data["authority"] == "kepala_divisi"  # tidak berubah
 
-    async def test_update_otoritas_only(self, client: AsyncClient, db_session: AsyncSession):
-        """Update hanya otoritas — nama tidak berubah."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Switch Bot")
+    async def test_update_authority_only(self, client: AsyncClient, db_session: AsyncSession):
+        """Update hanya authority — nama tidak berubah."""
+        chatbot = await seed_chatbot(db_session, chatbot_name="Switch Bot")
 
-        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"otoritas": "karyawan"})
+        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"authority": "karyawan"})
 
         assert res.status_code == 200
         data = res.json()
-        assert data["otoritas"] == "karyawan"
-        assert data["nama_chatbot"] == "Switch Bot"  # tidak berubah
+        assert data["authority"] == "karyawan"
+        assert data["chatbot_name"] == "Switch Bot"  # tidak berubah
 
     async def test_update_addon_prompt(self, client: AsyncClient, db_session: AsyncSession):
         """Update addon_prompt dengan nilai baru."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Prompt Bot", addon_prompt="Prompt lama.")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Prompt Bot", addon_prompt="Prompt lama.")
 
         res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"addon_prompt": "Prompt baru."})
 
@@ -524,7 +524,7 @@ class TestUpdateChatbot:
 
     async def test_update_addon_prompt_to_null(self, client: AsyncClient, db_session: AsyncSession):
         """addon_prompt bisa di-set ke null."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Null Prompt Bot", addon_prompt="Ada prompt.")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Null Prompt Bot", addon_prompt="Ada prompt.")
 
         res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"addon_prompt": None})
 
@@ -533,47 +533,47 @@ class TestUpdateChatbot:
 
     async def test_update_all_fields(self, client: AsyncClient, db_session: AsyncSession):
         """Update semua field sekaligus."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Old Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Old Bot")
 
         from unittest.mock import patch, AsyncMock
-        with patch("repository.chatbotRepository.ChatbotRepository.get_by_nama", new_callable=AsyncMock, return_value=None):
+        with patch("repository.chatbotRepository.ChatbotRepository.get_by_chatbot_name", new_callable=AsyncMock, return_value=None):
             res = await client.patch(
             f"/api/v1/chatbots/{chatbot.id}",
-            json={"nama_chatbot": "New Bot", "otoritas": "karyawan",
+            json={"chatbot_name": "New Bot", "authority": "karyawan",
                   "addon_prompt": "Prompt baru."},
         )
 
         assert res.status_code == 200
         data = res.json()
-        assert data["nama_chatbot"] == "New Bot"
-        assert data["otoritas"] == "karyawan"
+        assert data["chatbot_name"] == "New Bot"
+        assert data["authority"] == "karyawan"
         assert data["addon_prompt"] == "Prompt baru."
 
     async def test_update_is_active_to_false(self, client: AsyncClient, db_session: AsyncSession):
         """is_active bisa di-update melalui PATCH."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Toggle Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Toggle Bot")
 
         res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"is_active": False})
 
         assert res.status_code == 200
         assert res.json()["is_active"] is False
 
-    async def test_update_activate_chatbot_deactivates_other_same_otoritas(
+    async def test_update_activate_chatbot_deactivates_other_same_authority(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
     ):
-        """Saat aktivasi chatbot, chatbot aktif lain pada otoritas sama harus dinonaktifkan."""
+        """Saat aktivasi chatbot, chatbot aktif lain pada authority sama harus dinonaktifkan."""
         old_active = await seed_chatbot(
             db_session,
-            nama_chatbot="HR Active Lama",
-            otoritas=AuthorityEnum.KEPALA_DIVISI,
+            chatbot_name="HR Active Lama",
+            authority=AuthorityEnum.KEPALA_DIVISI,
             is_active=True,
         )
         to_activate = await seed_chatbot(
             db_session,
-            nama_chatbot="HR Active Baru",
-            otoritas=AuthorityEnum.KEPALA_DIVISI,
+            chatbot_name="HR Active Baru",
+            authority=AuthorityEnum.KEPALA_DIVISI,
             is_active=True,
         )
 
@@ -595,30 +595,30 @@ class TestUpdateChatbot:
         assert status_by_id[str(old_active.id)] is False
         assert status_by_id[str(to_activate.id)] is True
 
-    async def test_update_otoritas_active_chatbot_deactivates_active_target_otoritas(
+    async def test_update_authority_active_chatbot_deactivates_active_target_authority(
         self,
         client: AsyncClient,
         db_session: AsyncSession,
     ):
-        """Pindah otoritas chatbot aktif harus nonaktifkan chatbot aktif lain di otoritas tujuan."""
+        """Pindah authority chatbot aktif harus nonaktifkan chatbot aktif lain di authority tujuan."""
         target_active = await seed_chatbot(
             db_session,
-            nama_chatbot="Karyawan Active Lama",
-            otoritas=AuthorityEnum.KARYAWAN,
+            chatbot_name="Karyawan Active Lama",
+            authority=AuthorityEnum.KARYAWAN,
             is_active=True,
         )
         mover = await seed_chatbot(
             db_session,
-            nama_chatbot="kepala_divisi Pindah",
-            otoritas=AuthorityEnum.KEPALA_DIVISI,
+            chatbot_name="kepala_divisi Pindah",
+            authority=AuthorityEnum.KEPALA_DIVISI,
             is_active=True,
         )
 
-        res = await client.patch(f"/api/v1/chatbots/{mover.id}", json={"otoritas": "karyawan"})
+        res = await client.patch(f"/api/v1/chatbots/{mover.id}", json={"authority": "karyawan"})
 
         assert res.status_code == 200
         data = res.json()
-        assert data["otoritas"] == "karyawan"
+        assert data["authority"] == "karyawan"
         assert data["is_active"] is True
 
         result = await db_session.execute(
@@ -635,41 +635,41 @@ class TestUpdateChatbot:
 
     async def test_update_nama_to_existing_returns_409(self, client: AsyncClient, db_session: AsyncSession):
         """Ganti nama ke nama chatbot lain yang sudah ada harus return 409."""
-        await seed_chatbot(db_session, nama_chatbot="Existing Bot")
-        chatbot2 = await seed_chatbot(db_session, nama_chatbot="Other Bot")
+        await seed_chatbot(db_session, chatbot_name="Existing Bot")
+        chatbot2 = await seed_chatbot(db_session, chatbot_name="Other Bot")
 
-        res = await client.patch(f"/api/v1/chatbots/{chatbot2.id}", json={"nama_chatbot": "Existing Bot"})
+        res = await client.patch(f"/api/v1/chatbots/{chatbot2.id}", json={"chatbot_name": "Existing Bot"})
 
         assert res.status_code == 409
-        assert "sudah digunakan" in res.json()["detail"]
+        assert "already used" in res.json()["detail"]
 
     async def test_update_same_nama_not_conflict(self, client: AsyncClient, db_session: AsyncSession):
         """Update ke nama yang sama (milik dirinya sendiri) tidak boleh 409."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Same Name Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Same Name Bot")
 
-        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"nama_chatbot": "Same Name Bot"})
+        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"chatbot_name": "Same Name Bot"})
 
         assert res.status_code == 200
 
     async def test_update_not_found_returns_404(self, client: AsyncClient):
         """Update chatbot yang tidak ada harus return 404."""
-        res = await client.patch("/api/v1/chatbots/45ba7477-99d5-471b-aa4b-9e161c187705", json={"nama_chatbot": "Ghost Bot"})
+        res = await client.patch("/api/v1/chatbots/45ba7477-99d5-471b-aa4b-9e161c187705", json={"chatbot_name": "Ghost Bot"})
 
         assert res.status_code == 404
 
-    async def test_update_invalid_otoritas_returns_422(self, client: AsyncClient, db_session: AsyncSession):
-        """otoritas tidak valid saat update harus return 422."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Val Bot")
+    async def test_update_invalid_authority_returns_422(self, client: AsyncClient, db_session: AsyncSession):
+        """authority tidak valid saat update harus return 422."""
+        chatbot = await seed_chatbot(db_session, chatbot_name="Val Bot")
 
-        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"otoritas": "ADMIN"})
+        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"authority": "ADMIN"})
 
         assert res.status_code == 422
 
     async def test_update_empty_nama_returns_422(self, client: AsyncClient, db_session: AsyncSession):
-        """nama_chatbot tidak boleh string kosong saat update."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Empty Test Bot")
+        """chatbot_name tidak boleh string kosong saat update."""
+        chatbot = await seed_chatbot(db_session, chatbot_name="Empty Test Bot")
 
-        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"nama_chatbot": ""})
+        res = await client.patch(f"/api/v1/chatbots/{chatbot.id}", json={"chatbot_name": ""})
 
         assert res.status_code == 422
 
@@ -682,7 +682,7 @@ class TestSoftDeleteChatbot:
 
     async def test_soft_delete_returns_200(self, client: AsyncClient, db_session: AsyncSession):
         """Soft delete harus return 200 dengan pesan sukses."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Soft Del Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Soft Del Bot")
 
         res = await client.delete(f"/api/v1/chatbots/{chatbot.id}")
 
@@ -693,7 +693,7 @@ class TestSoftDeleteChatbot:
 
     async def test_soft_delete_sets_is_active_false(self, client: AsyncClient, db_session: AsyncSession):
         """Setelah soft delete, is_active di DB harus False."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Check Active Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Check Active Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
 
@@ -705,7 +705,7 @@ class TestSoftDeleteChatbot:
 
     async def test_soft_delete_still_accessible_via_get(self, client: AsyncClient, db_session: AsyncSession):
         """Setelah soft delete, GET /{id} tetap bisa diakses dengan status nonaktif."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Invisible Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Invisible Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.get(f"/api/v1/chatbots/{chatbot.id}")
@@ -713,16 +713,15 @@ class TestSoftDeleteChatbot:
         assert res.status_code == 200
         assert res.json()["is_active"] is False
 
-    async def test_soft_delete_still_in_list(self, client: AsyncClient, db_session: AsyncSession):
-        """Setelah soft delete, chatbot tetap muncul di GET / dengan status nonaktif."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Hidden Bot")
+    async def test_soft_delete_excluded_from_list(self, client: AsyncClient, db_session: AsyncSession):
+        """Setelah soft delete, chatbot tidak muncul di GET /."""
+        chatbot = await seed_chatbot(db_session, chatbot_name="Hidden Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.get("/api/v1/chatbots/")
 
         data_by_id = {c["id"]: c for c in res.json()["data"]}
-        assert str(chatbot.id) in data_by_id
-        assert data_by_id[str(chatbot.id)]["is_active"] is False
+        assert str(chatbot.id) not in data_by_id
 
     async def test_soft_delete_not_found_returns_404(self, client: AsyncClient):
         """Soft delete chatbot yang tidak ada harus return 404."""
@@ -732,7 +731,7 @@ class TestSoftDeleteChatbot:
 
     async def test_soft_delete_twice_returns_200(self, client: AsyncClient, db_session: AsyncSession):
         """Soft delete dua kali bersifat idempotent dan tetap return 200."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Double Del Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Double Del Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.delete(f"/api/v1/chatbots/{chatbot.id}")
@@ -749,7 +748,7 @@ class TestHardDeleteChatbot:
 
     async def test_hard_delete_returns_200(self, client: AsyncClient, db_session: AsyncSession):
         """Hard delete harus return 200 dengan pesan sukses."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Hard Del Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Hard Del Bot")
 
         res = await client.delete(f"/api/v1/chatbots/{chatbot.id}?hard=true")
 
@@ -760,7 +759,7 @@ class TestHardDeleteChatbot:
 
     async def test_hard_delete_removes_from_db(self, client: AsyncClient, db_session: AsyncSession):
         """Setelah hard delete, record benar-benar hilang dari DB."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Gone Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Gone Bot")
         chatbot_id = chatbot.id
 
         await client.delete(f"/api/v1/chatbots/{chatbot_id}?hard=true")
@@ -776,16 +775,16 @@ class TestHardDeleteChatbot:
 
     async def test_hard_delete_nama_can_be_reused(self, client: AsyncClient, db_session: AsyncSession):
         """Setelah hard delete, nama yang sama bisa dipakai lagi."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Reusable Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Reusable Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}?hard=true")
-        res = await client.post("/api/v1/chatbots/", json={"nama_chatbot": "Reusable Bot", "otoritas": "kepala_divisi"})
+        res = await client.post("/api/v1/chatbots/", json={"chatbot_name": "Reusable Bot", "authority": "kepala_divisi"})
 
         assert res.status_code == 201
 
     async def test_default_delete_is_soft(self, client: AsyncClient, db_session: AsyncSession):
         """Tanpa ?hard=true, default adalah soft delete — record masih ada di DB."""
-        chatbot = await seed_chatbot(db_session, nama_chatbot="Default Del Bot")
+        chatbot = await seed_chatbot(db_session, chatbot_name="Default Del Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
 

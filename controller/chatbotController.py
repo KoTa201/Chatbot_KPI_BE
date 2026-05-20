@@ -29,7 +29,7 @@ class ChatbotController:
         self,
         page: int,
         limit: int,
-        otoritas: Optional[AuthorityEnum],
+        authority: Optional[AuthorityEnum],
         search: Optional[str],
     ) -> ChatbotListResponse:
         if limit < 1 or limit > 100:
@@ -42,7 +42,7 @@ class ChatbotController:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="'page' tidak boleh negatif dan minimal 1.",
             )
-        chatbots = await self.service.get_all(page, limit, otoritas, search)
+        chatbots = await self.service.get_all(page, limit, authority, search)
 
         return ChatbotListResponse(
             data=chatbots["data"],

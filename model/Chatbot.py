@@ -11,9 +11,9 @@ class Chatbot(Base):
 
     id: Mapped[UUID] = mapped_column(
         UUID, primary_key=True, index=True, default=uuid4)
-    nama_chatbot: Mapped[str] = mapped_column(
+    chatbot_name: Mapped[str] = mapped_column(
         String(255), nullable=False, index=True)
-    otoritas: Mapped[AuthorityEnum] = mapped_column(
+    authority: Mapped[AuthorityEnum] = mapped_column(
         Enum(AuthorityEnum, values_callable=lambda e: [x.value for x in e]),
         nullable=False)
     addon_prompt: Mapped[str] = mapped_column(Text, nullable=True)
@@ -25,4 +25,4 @@ class Chatbot(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     def __repr__(self):
-        return f"<Chatbot id={self.id} nama='{self.nama_chatbot}' otoritas='{self.otoritas}'>"
+        return f"<Chatbot id={self.id} name='{self.chatbot_name}' authority='{self.authority}'>"

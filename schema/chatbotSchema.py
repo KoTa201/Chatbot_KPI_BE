@@ -9,14 +9,14 @@ from model.Chatbot import AuthorityEnum
 # ─── Base ────────────────────────────────────────────────────────────────────
 
 class ChatbotBase(BaseModel):
-    nama_chatbot: str = Field(
+    chatbot_name: str = Field(
         ...,
         min_length=1,
         max_length=255,
         examples=["HR Assistant"],
         description="Nama unik chatbot",
     )
-    otoritas: AuthorityEnum = Field(
+    authority: AuthorityEnum = Field(
         ...,
         examples=[AuthorityEnum.KEPALA_DIVISI],
         description="Otoritas akses: kepala_divisi atau Karyawan",
@@ -26,9 +26,9 @@ class ChatbotBase(BaseModel):
         description="Tambahan instruksi/prompt untuk chatbot dari FE",
     )
 
-    @field_validator("nama_chatbot")
+    @field_validator("chatbot_name")
     @classmethod
-    def strip_nama(cls, v: str) -> str:
+    def strip_chatbot_name(cls, v: str) -> str:
         return v.strip()
 
 
@@ -41,13 +41,13 @@ class ChatbotCreate(ChatbotBase):
 
 class ChatbotUpdate(BaseModel):
     """Schema untuk update parsial chatbot (semua field opsional)."""
-    nama_chatbot: Optional[str] = Field(
+    chatbot_name: Optional[str] = Field(
         default=None,
         min_length=1,
         max_length=255,
         description="Nama unik chatbot",
     )
-    otoritas: Optional[AuthorityEnum] = Field(
+    authority: Optional[AuthorityEnum] = Field(
         default=None,
         description="Otoritas akses: Kepala Divisi atau Karyawan",
     )
@@ -60,9 +60,9 @@ class ChatbotUpdate(BaseModel):
         description="Status aktif chatbot",
     )
 
-    @field_validator("nama_chatbot")
+    @field_validator("chatbot_name")
     @classmethod
-    def strip_nama(cls, v: Optional[str]) -> Optional[str]:
+    def strip_chatbot_name(cls, v: Optional[str]) -> Optional[str]:
         return v.strip() if v else v
 
 

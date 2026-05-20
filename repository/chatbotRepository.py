@@ -21,28 +21,25 @@ class ChatbotRepository:
         self.chatbot = result.scalars().first()
         return self.chatbot
 
-    async def get_by_nama(self, nama_chatbot: str) -> Optional[Chatbot]:
+    async def get_by_chatbot_name(self, chatbot_name: str) -> Optional[Chatbot]:
         result = await self.db.execute(
             select(Chatbot).where(
-                (func.lower(Chatbot.nama_chatbot) == nama_chatbot.lower()) & (
-                    Chatbot.is_active == True)
+                (func.lower(Chatbot.chatbot_name) == chatbot_name.lower()) &
+                (Chatbot.is_active == True)
             )
         )
-        # Do not mutate self.chatbot here — return the found object so callers
-        # can decide how to handle it without clobbering repository internal state.
-        found = result.scalars().first()
-        return found
+        return result.scalars().first()
 
-    async def get_all(self, page, limit, otoritas=None, search=None):
+    async def get_all(self, page, limit, authority=None, search=None):
         query = select(Chatbot).where(Chatbot.is_active == True)
         offset = (page - 1) * limit
 
-        if otoritas:
-            query = query.where(Chatbot.otoritas == otoritas)
+        if authority:
+            query = query.where(Chatbot.authority == authority)
         if search:
             query = query.where(
                 or_(
-                    Chatbot.nama_chatbot.ilike(f"%{search}%"),
+                    Chatbot.chatbot_name.ilike(f"%{search}%"),
                     Chatbot.addon_prompt.ilike(f"%{search}%"),
                 )
             )
@@ -65,14 +62,14 @@ class ChatbotRepository:
         await self.db.refresh(self.chatbot)
         return self.chatbot
 
-    async def deactivate_active_by_otoritas(
+    async def deactivate_active_by_authority(
         self,
-        otoritas: AuthorityEnum,
+        authority: AuthorityEnum,
         exclude_id: Optional[UUID] = None,
     ) -> None:
         stmt = (
             update(Chatbot)
-            .where((Chatbot.otoritas == otoritas) & (Chatbot.is_active == True))
+            .where((Chatbot.authority == authority) & (Chatbot.is_active == True))
             .values(is_active=False)
         )
         if exclude_id is not None:
@@ -85,9 +82,9 @@ class ChatbotRepository:
         assert self.chatbot is not None
         # Only set attributes that are explicitly provided and not None.
         # This prevents accidental NULL assignment to non-nullable columns
-        # like `otoritas` when callers pass { otoritas: null }.
+        # like `authority` when callers pass { authority: null }.
         for field, value in payload.model_dump(exclude_unset=True).items():
-            if value is None:
+            if value is None and field != "addon_prompt":
                 # Skip explicit nulls to preserve existing DB values for
                 # non-nullable fields unless caller truly intends to clear them.
                 continue
