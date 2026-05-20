@@ -30,7 +30,7 @@ class ChatbotRepository:
         )
         return result.scalars().first()
 
-    async def get_all(self, page, limit, otoritas=None, search=None):
+    async def get_all(self, page, limit, authority=None, search=None):
         query = select(Chatbot)
         offset = (page - 1) * limit
 

@@ -21,7 +21,6 @@ from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlWireguardService import SQLWireguardService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
-from repository.chatbotAuditLogRepository import AuditLogRepository
 from repository.chatSessionRepository import ChatSessionRepository
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
@@ -39,7 +38,6 @@ class ChatService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.audit_repo = AuditLogRepository(db)
         self.session_repo = ChatSessionRepository(db)
         self.clarification_repo = ClarificationRepository(db)
         self.query_repo = ChatQueryRepository(db)
@@ -146,7 +144,6 @@ class ChatService:
             except HTTPException as error:
                 if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
                     pipeline["execution_status"] = "degraded"
-                    await self._write_audit(pipeline)
                     return ChatResponse(
                         session_id=session_id,
                         message="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
@@ -163,7 +160,6 @@ class ChatService:
                 pipeline=pipeline,
             )
             if not validation.is_valid:
-                await self._write_audit(pipeline)
                 return ChatResponse(
                     session_id=session_id,
                     message=(
@@ -203,7 +199,6 @@ class ChatService:
             )
 
             total_ms = int((time.monotonic() - total_start) * 1000)
-            await self._write_audit(pipeline)
 
             return ChatResponse(
                 session_id=session_id,
@@ -256,7 +251,6 @@ class ChatService:
         error: Exception,
     ) -> HTTPException:
         pipeline["execution_status"] = "error"
-        await self._write_audit(pipeline)
 
         if isinstance(error, HTTPException):
             if error.status_code in (
@@ -462,34 +456,6 @@ class ChatService:
                 detail="Query tidak dapat dieksekusi. Silakan coba pertanyaan yang berbeda.",
             ) from e
 
-    async def _write_audit(self, pipeline: dict) -> None:
-        """Tulis hasil pipeline ke audit log (fire and forget — tidak raise error)."""
-        try:
-            await self.audit_repo.create(pipeline)
-        except Exception:
-            pass  # Audit log gagal tidak boleh mengganggu response utama
-
-    async def get_audit_history(
-        self,
-        user_id: UUID,
-        skip: int = 0,
-        limit: int = 20,
-    ):
-        """Ambil riwayat query dari audit log untuk user tertentu."""
-        import uuid as _uuid
-        return await self.audit_repo.get_by_user(
-            user_id=user_id,
-            skip=skip,
-            limit=limit,
-        )
-
-    async def get_failed_wireguard_audit_logs(
-        self,
-        skip: int = 0,
-        limit: int = 50,
-    ):
-        return await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
-
     async def get_sessions(self, user_id: UUID) -> list:
         return await self.session_repo.get_by_user(user_id=user_id)
 
@@ -501,13 +467,11 @@ class ChatService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session tidak ditemukan.",
             )
-        if str(session.user_id) != user_id:
+        if str(session.user_id) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",
             )
-        await self.clarification_repo.delete_by_session(session_id)
-        await self.audit_repo.delete_by_session(session_id)
         await self.session_repo.delete(session_id)
 
     async def update_session_title(
@@ -520,7 +484,7 @@ class ChatService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session tidak ditemukan.",
             )
-        if str(session.user_id) != user_id:
+        if str(session.user_id) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",

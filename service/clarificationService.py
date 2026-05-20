@@ -105,7 +105,7 @@ class ClarificationService:
             decision_source=ambiguity_result.detection_source,
             clarifying_question=clarifying_q.clarifying_question,
         )
-        logger.info(f"[ClarificationService] Clarification logged: {log.id}")
+        logger.info(f"[ClarificationService] Clarification logged: {log.clarification_question_id}")
 
         # STEP 5: Return response untuk ditampilkan ke user
         return ClarificationMessageResponse(
@@ -130,8 +130,8 @@ class ClarificationService:
             raise ValueError(
                 f"Tidak ada pertanyaan klarifikasi untuk session {session_id}")
 
-        original_query = last_log.original_query
-        clarifying_question = last_log.clarifying_question
+        original_query = last_log.ambiguous_phrase or ""
+        clarifying_question = last_log.clarification_question
 
         if not clarifying_question:
             raise ValueError(f"Log tidak memiliki clarifying_question")
@@ -144,12 +144,12 @@ class ClarificationService:
 
         # STEP 3: Update log dengan jawaban dan disambiguated query
         await self.repo.update_with_answer(
-            log_id=last_log.id,
+            log_id=last_log.clarification_question_id,
             clarification_answer=clarification_answer,
             disambiguated_query=disambiguated_query,
         )
         logger.info(
-            f"[ClarificationService] Clarification response recorded: {last_log.id}"
+            f"[ClarificationService] Clarification response recorded: {last_log.clarification_question_id}"
         )
 
         # STEP 4: Return result untuk next step (pipeline RAG)

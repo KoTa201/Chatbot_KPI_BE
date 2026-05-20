@@ -192,7 +192,7 @@ async def test_ingest_all_sheets_tracker_uses_sheet_metadata_tahun_when_request_
     ):
         result = await service.ingest_all_sheets(
             sheet_url=SHEET_URL,
-            tahun=None,
+            tahun=0,
             skip_on_error=True,
         )
 

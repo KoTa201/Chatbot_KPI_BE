@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from model.ChatSession import ChatSession
 
 
@@ -10,11 +12,18 @@ class ChatSessionRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create(self, session_id: str, user_id: uuid.UUID, title: str) -> ChatSession:
+    async def create(
+        self,
+        session_id: str,
+        user_id: uuid.UUID,
+        title: str,
+        chatbot_id: uuid.UUID | None = None,
+    ) -> ChatSession:
         session = ChatSession(
-            id=session_id,
+            session_id=session_id,
             user_id=user_id,
-            title=title[:80].strip() or "New Chat",
+            chatbot_id=chatbot_id,
+            session_name=title[:80].strip() or "New Chat",
         )
         self.db.add(session)
         await self.db.flush()
@@ -25,13 +34,13 @@ class ChatSessionRepository:
         result = await self.db.execute(
             select(ChatSession)
             .where(ChatSession.user_id == user_id)
-            .order_by(ChatSession.created_at.desc())
+            .order_by(ChatSession.start_at.desc())
         )
         return list(result.scalars().all())
 
     async def get_by_id(self, session_id: str) -> Optional[ChatSession]:
         result = await self.db.execute(
-            select(ChatSession).where(ChatSession.id == session_id)
+            select(ChatSession).where(ChatSession.session_id == session_id)
         )
         return result.scalar_one_or_none()
 
@@ -39,8 +48,16 @@ class ChatSessionRepository:
         session = await self.get_by_id(session_id)
         if session is None:
             return None
-        session.title = title
-        session.updated_at = datetime.now(timezone.utc)
+        session.session_name = title
+        await self.db.flush()
+        await self.db.refresh(session)
+        return session
+
+    async def end_session(self, session_id: str) -> Optional[ChatSession]:
+        session = await self.get_by_id(session_id)
+        if session is None:
+            return None
+        session.end_at = datetime.now(timezone.utc)
         await self.db.flush()
         await self.db.refresh(session)
         return session

@@ -1,19 +1,13 @@
-"""
-repository/clarificationRepository.py
-Data access layer untuk clarification logs.
-"""
-
+import json
 from uuid import UUID
-from sqlalchemy import desc, select, delete
+
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from model.ClarificationLog import ClarificationLogORM
-from schema.clarificationSchema import ClarificationLogEntry
+from model.ClarificationQuestion import ClarificationQuestion
 
 
 class ClarificationRepository:
-    """Repository untuk CRUD operations pada clarification logs."""
-
     def __init__(self, db: AsyncSession):
         self.db = db
 
@@ -30,128 +24,79 @@ class ClarificationRepository:
         clarifying_question: str | None = None,
         clarification_answer: str | None = None,
         disambiguated_query: str | None = None,
-    ) -> ClarificationLogORM:
-        """Membuat log entry baru untuk clarification."""
-        log = ClarificationLogORM(
-            session_id=session_id,
-            user_id=user_id,
-            user_role=user_role,
-            original_query=original_query,
-            ambiguity_score=ambiguity_score,
-            ambiguity_type=ambiguity_type,
-            decision=decision,
-            decision_source=decision_source,
-            clarifying_question=clarifying_question,
-            clarification_answer=clarification_answer,
-            disambiguated_query=disambiguated_query,
+        answer_options: list[str] | None = None,
+        message_id: str | None = None,
+    ) -> ClarificationQuestion:
+        question = ClarificationQuestion(
+            ambiguous_phrase=original_query[:255],
+            ambiguity_type=ambiguity_type[:20] if ambiguity_type else None,
+            clarification_question=clarifying_question or original_query[:255],
+            answer_options=json.dumps(answer_options)[:255] if answer_options else None,
+            user_answer=self._parse_user_answer(clarification_answer),
+            message_id=message_id,
         )
-        self.db.add(log)
-        await self.db.commit()
-        await self.db.refresh(log)
-        return log
+        self.db.add(question)
+        await self.db.flush()
+        await self.db.refresh(question)
+        return question
 
     async def update_with_answer(
         self,
-        log_id: UUID,
+        log_id: str,
         clarification_answer: str,
         disambiguated_query: str,
-    ) -> ClarificationLogORM:
-        """Update log dengan jawaban klarifikasi dan query yang sudah disambiguasi."""
-        stmt = select(ClarificationLogORM).where(ClarificationLogORM.id == log_id)
+    ) -> ClarificationQuestion:
+        stmt = select(ClarificationQuestion).where(
+            ClarificationQuestion.clarification_question_id == str(log_id)
+        )
         result = await self.db.execute(stmt)
-        log = result.scalar_one_or_none()
-        
-        if not log:
-            raise ValueError(f"Log {log_id} tidak ditemukan")
-        
-        log.clarification_answer = clarification_answer
-        log.disambiguated_query = disambiguated_query
-        self.db.add(log)
-        await self.db.commit()
-        await self.db.refresh(log)
-        return log
+        question = result.scalar_one_or_none()
+
+        if not question:
+            raise ValueError(f"Clarification question {log_id} tidak ditemukan")
+
+        question.user_answer = self._parse_user_answer(clarification_answer)
+        self.db.add(question)
+        await self.db.flush()
+        await self.db.refresh(question)
+        return question
+
+    async def get_by_session(self, session_id: str) -> list[ClarificationQuestion]:
+        stmt = (
+            select(ClarificationQuestion)
+            .order_by(desc(ClarificationQuestion.created_at))
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_last_clarification(self, session_id: str) -> ClarificationQuestion | None:
+        stmt = (
+            select(ClarificationQuestion)
+            .order_by(desc(ClarificationQuestion.created_at))
+            .limit(1)
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
 
     async def update_feedback(
         self,
         log_id: UUID,
         user_feedback: bool,
         needed_correction: bool | None = None,
-    ) -> ClarificationLogORM:
-        """Update feedback pengguna untuk log."""
-        stmt = select(ClarificationLogORM).where(ClarificationLogORM.id == log_id)
-        result = await self.db.execute(stmt)
-        log = result.scalar_one_or_none()
-        
-        if not log:
-            raise ValueError(f"Log {log_id} tidak ditemukan")
-        
-        log.user_feedback = user_feedback
-        if needed_correction is not None:
-            log.needed_correction = needed_correction
-        
-        self.db.add(log)
-        await self.db.commit()
-        await self.db.refresh(log)
-        return log
-
-    async def get_by_session(self, session_id: str) -> list[ClarificationLogEntry]:
-        """Mendapatkan semua log untuk satu session."""
-        stmt = (
-            select(ClarificationLogORM)
-            .where(ClarificationLogORM.session_id == session_id)
-            .order_by(desc(ClarificationLogORM.created_at))
-        )
-        result = await self.db.execute(stmt)
-        logs = result.scalars().all()
-        return [ClarificationLogEntry.from_orm(log) for log in logs]
-
-    async def get_by_user(
-        self,
-        user_id: UUID,
-        skip: int = 0,
-        limit: int = 50,
-    ) -> tuple[list[ClarificationLogEntry], int]:
-        """Mendapatkan log clarification untuk satu user dengan pagination."""
-        # Get total count
-        count_stmt = select(ClarificationLogORM).where(ClarificationLogORM.user_id == user_id)
-        count_result = await self.db.execute(count_stmt)
-        total = len(count_result.scalars().all())
-
-        # Get paginated results
-        stmt = (
-            select(ClarificationLogORM)
-            .where(ClarificationLogORM.user_id == user_id)
-            .order_by(desc(ClarificationLogORM.created_at))
-            .offset(skip)
-            .limit(limit)
-        )
-        result = await self.db.execute(stmt)
-        logs = result.scalars().all()
-        return [ClarificationLogEntry.from_orm(log) for log in logs], total
+    ) -> None:
+        return None
 
     async def get_clarify_decisions_count(self, session_id: str) -> int:
-        """Menghitung berapa kali keputusan 'clarify' di satu session."""
-        stmt = select(ClarificationLogORM).where(
-            (ClarificationLogORM.session_id == session_id)
-            & (ClarificationLogORM.decision == "clarify")
-        )
-        result = await self.db.execute(stmt)
-        return len(result.scalars().all())
-
-    async def get_last_clarification(self, session_id: str) -> ClarificationLogORM | None:
-        """Mendapatkan clarification terakhir di satu session."""
-        stmt = (
-            select(ClarificationLogORM)
-            .where(ClarificationLogORM.session_id == session_id)
-            .order_by(desc(ClarificationLogORM.created_at))
-            .limit(1)
-        )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        return 0
 
     async def delete_by_session(self, session_id: str) -> int:
-        result = await self.db.execute(
-            delete(ClarificationLogORM).where(ClarificationLogORM.session_id == session_id)
-        )
-        await self.db.flush()
-        return result.rowcount
+        return 0
+
+    @staticmethod
+    def _parse_user_answer(clarification_answer: str | None) -> int | None:
+        if clarification_answer is None:
+            return None
+        try:
+            return int(clarification_answer)
+        except ValueError:
+            return None
