@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from fastapi import HTTPException, status
@@ -40,8 +40,8 @@ def _patch_clarification_service(monkeypatch, clarification_response):
 
 def _create_chat_service(monkeypatch) -> ChatService:
     service = ChatService(db=None)
-    monkeypatch.setattr(service, "_write_audit", AsyncMock(return_value=None))
-    monkeypatch.setattr(service, "create_session", AsyncMock(return_value=None))
+    service.session_service = Mock()
+    service.session_service.create_session_if_missing = AsyncMock(return_value=None)
     return service
 
 

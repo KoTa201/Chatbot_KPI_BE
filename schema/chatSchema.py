@@ -1,5 +1,3 @@
-import uuid
-from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, field_validator
 
@@ -45,18 +43,3 @@ class ChatErrorResponse(BaseModel):
     error: str
     stage: str | None = None
     safe: bool = True
-
-
-class AuditLogResponse(BaseModel):
-    id: uuid.UUID
-    session_id: str | None
-    user_role: str | None
-    user_query: str | None
-    wireguard_status: str | None
-    wireguard_reason: str | None
-    execution_status: str | None
-    rows_returned: int | None
-    execution_time_ms: int | None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}

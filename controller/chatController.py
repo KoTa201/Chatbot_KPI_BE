@@ -14,9 +14,8 @@ from service.authService import get_current_user
 from service.chatService import ChatService
 from service.chatSessionService import ChatSessionService
 from service.clarificationService import ClarificationService
-from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
+from schema.chatSchema import ChatRequest, ChatResponse
 from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
-from repository.chatbotAuditLogRepository import AuditLogRepository
 from model.User import User
 
 
@@ -25,7 +24,6 @@ class ChatController:
 
     def __init__(self, db: AsyncSession = Depends(get_db)):
         self.db = db
-        self.audit_repo = AuditLogRepository(db)
 
     async def handle_chat(
         self,
@@ -115,50 +113,6 @@ class ChatController:
             context_from_clarification=disambiguation_result,
         )
         return self._build_streaming_response(response)
-
-    async def handle_get_history(
-        self,
-        skip: int = 0,
-        limit: int = 20,
-        current_user: User = Depends(get_current_user),
-    ) -> list[AuditLogResponse]:
-        """
-        Handle GET /chat/history — ambil riwayat query user dari audit log.
-        """
-        if limit > 100:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Limit maksimal adalah 100.",
-            )
-
-        user_id = str(current_user.id)
-        service = ChatService(self.db)
-        logs = await service.get_audit_history(
-            user_id=user_id,
-            skip=skip,
-            limit=limit,
-        )
-        return [AuditLogResponse.model_validate(log) for log in logs]
-
-    async def handle_get_audit_all(
-        self,
-        skip: int = 0,
-        limit: int = 50,
-        current_user: User = Depends(get_current_user),
-    ) -> list[AuditLogResponse]:
-        """
-        Handle GET /chat/audit — hanya untuk Admin/Kepala Divisi.
-        Ambil semua audit log yang gagal validasi SQLWireguard.
-        """
-        role_value = self._extract_role_value(current_user)
-        if role_value not in ("admin", "kepala_divisi"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Akses ditolak. Hanya Admin dan Kepala Divisi yang dapat melihat audit log.",
-            )
-
-        logs = await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
-        return [AuditLogResponse.model_validate(log) for log in logs]
 
     async def handle_get_sessions(
         self,
