@@ -13,6 +13,7 @@ from uuid import UUID
 from databaseConfig import get_db
 from service.authService import get_current_user
 from service.chatService import ChatService
+from service.chatSessionService import ChatSessionService
 from service.clarificationService import ClarificationService
 from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
 from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
@@ -164,8 +165,8 @@ class ChatController:
         current_user: User = Depends(get_current_user),
     ) -> list[SessionResponse]:
         user_id = str(current_user.id)
-        service = ChatService(self.db)
-        sessions = await service.get_sessions(user_id=UUID(user_id))
+        service = ChatSessionService(self.db)
+        sessions = await service.get_sessions(user_id=user_id)
         return [SessionResponse.model_validate(s) for s in sessions]
 
     async def handle_delete_session(
@@ -174,8 +175,8 @@ class ChatController:
         current_user: User = Depends(get_current_user),
     ) -> None:
         user_id = str(current_user.id)
-        service = ChatService(self.db)
-        await service.delete_session(session_id=session_id, user_id=UUID(user_id))
+        service = ChatSessionService(self.db)
+        await service.delete_session(session_id=session_id, user_id=user_id)
 
     async def handle_update_session_title(
         self,
@@ -184,7 +185,7 @@ class ChatController:
         current_user: User = Depends(get_current_user),
     ) -> SessionResponse:
         user_id = str(current_user.id)
-        service = ChatService(self.db)
+        service = ChatSessionService(self.db)
         updated = await service.update_session_title(
             session_id=session_id,
             user_id=UUID(user_id),

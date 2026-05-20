@@ -53,6 +53,22 @@ class ChatSession(Base):
         lazy="noload",
     )
 
+    @property
+    def id(self) -> str:
+        return self.session_id
+
+    @property
+    def title(self) -> str:
+        return self.session_name
+
+    @property
+    def created_at(self) -> datetime:
+        return self.start_at
+
+    @property
+    def updated_at(self) -> datetime:
+        return self.end_at or self.start_at
+
     def __repr__(self) -> str:
         return (
             f"<ChatSession session_id={self.session_id} "
