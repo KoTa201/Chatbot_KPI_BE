@@ -48,8 +48,8 @@ class QueryDisambiguationResult(BaseModel):
 
 class ClarificationResponseRequest(BaseModel):
     """Request untuk mengirimkan jawaban atas pertanyaan klarifikasi."""
-    session_id: str = Field(...,
-                            description="Session ID dari pertanyaan klarifikasi")
+    session_id: UUID = Field(...,
+                             description="Session ID dari pertanyaan klarifikasi")
     answer: str = Field(...,
                         description="Jawaban pengguna (pilihan chip atau teks bebas)")
 
@@ -63,7 +63,7 @@ class ClarificationResponseRequest(BaseModel):
 
 class ClarificationMessageResponse(BaseModel):
     """Response untuk menampilkan pertanyaan klarifikasi kepada user."""
-    session_id: str
+    session_id: UUID
     # "clarification" atau "direct_answer"
     message_type: str = Field(default="clarification")
 
@@ -92,7 +92,7 @@ class ClarificationMessageResponse(BaseModel):
 class ClarificationLogEntry(BaseModel):
     """Entry untuk logging clarification mechanism."""
     id: Optional[UUID] = None
-    session_id: str
+    session_id: UUID
     user_id: UUID
     user_role: str
     original_query: str
@@ -117,7 +117,7 @@ class ClarificationLogEntry(BaseModel):
 
 class SessionClarificationContext(BaseModel):
     """Context clarification disimpan per session."""
-    session_id: str
+    session_id: UUID
     clarification_history: List[dict] = Field(default_factory=list)
     # menyimpan preferensi yang sudah dijawab
     scope_preferences: dict = Field(default_factory=dict)

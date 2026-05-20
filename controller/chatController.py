@@ -3,6 +3,7 @@ Chat Controller — validasi request/response untuk endpoint chatbot.
 Mengekstrak konteks user dari JWT dan meneruskan ke ChatService.
 """
 import json
+import uuid
 from collections.abc import AsyncIterator
 
 from fastapi import Depends, HTTPException, status
@@ -126,7 +127,7 @@ class ChatController:
 
     async def handle_delete_session(
         self,
-        session_id: str,
+        session_id: uuid.UUID,
         current_user: User = Depends(get_current_user),
     ) -> None:
         user_id = str(current_user.id)
@@ -135,7 +136,7 @@ class ChatController:
 
     async def handle_update_session_title(
         self,
-        session_id: str,
+        session_id: uuid.UUID,
         request: UpdateSessionTitleRequest,
         current_user: User = Depends(get_current_user),
     ) -> SessionResponse:
@@ -178,7 +179,7 @@ class ChatController:
         return chunks
 
     def _build_streaming_response(self, response: ChatResponse) -> StreamingResponse:
-        payload = response.model_dump()
+        payload = response.model_dump(mode="json")
         metadata = {key: value for key,
                     value in payload.items() if key != "message"}
         message = payload.get("message") or ""

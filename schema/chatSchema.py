@@ -1,10 +1,12 @@
 from typing import Optional, List
+from uuid import UUID
+
 from pydantic import BaseModel, field_validator
 
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str | None = None
+    session_id: UUID | None = None
     show_sql: bool = False  # Opsional: tampilkan SQL ke user
     # Jawaban atas pertanyaan klarifikasi
     clarification_answer: Optional[str] = None
@@ -27,7 +29,7 @@ class PipelineStageInfo(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    session_id: str
+    session_id: UUID
     message: str                        # Jawaban naratif dari LLM
     # Jika ada pertanyaan klarifikasi
     clarification_message_answer_options: List[str] | None = None

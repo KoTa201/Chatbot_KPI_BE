@@ -5,7 +5,7 @@ Berdasarkan skenario di PRD Section 8.
 """
 
 import pytest
-from uuid import uuid4
+from uuid import UUID, uuid4
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +14,15 @@ from service.clarificationQuestionGeneratorService import (
     ClarificationQuestionGeneratorService,
 )
 from service.clarificationService import ClarificationService
+
+SESSION_TEST_1 = UUID("00000000-0000-0000-0000-000000000201")
+SESSION_TEST_2 = UUID("00000000-0000-0000-0000-000000000202")
+SESSION_TEST_3 = UUID("00000000-0000-0000-0000-000000000203")
+SESSION_TEST_4 = UUID("00000000-0000-0000-0000-000000000204")
+SESSION_TEST_5 = UUID("00000000-0000-0000-0000-000000000205")
+SESSION_TEST_6 = UUID("00000000-0000-0000-0000-000000000206")
+SESSION_TEST_7 = UUID("00000000-0000-0000-0000-000000000207")
+SESSION_TEST_8 = UUID("00000000-0000-0000-0000-000000000208")
 from schema.clarificationSchema import AmbiguityAssessmentResult
 from utils.sessionContextManager import SessionContextManager
 
@@ -246,7 +255,7 @@ class TestClarificationService:
                 user_query="Tampilkan semua KPI Januari 2025",
                 user_id=uuid4(),
                 user_role="Owner",
-                session_id="test-1",
+                session_id=SESSION_TEST_1,
                 clarification_count=0,
             )
 
@@ -258,7 +267,7 @@ class TestClarificationService:
         """Test clarification diperlukan ketika query ambiguous."""
         service = ClarificationService(db=None)
         service.repo.create = AsyncMock(
-            return_value=SimpleNamespace(id=uuid4()))
+            return_value=SimpleNamespace(clarification_question_id=uuid4()))
 
         with patch.object(
             service.ambiguity_detector,
@@ -292,7 +301,7 @@ class TestClarificationService:
                     user_query="Siapa yang terbaik?",
                     user_id=uuid4(),
                     user_role="Owner",
-                    session_id="test-2",
+                    session_id=SESSION_TEST_2,
                     clarification_count=0,
                 )
 
@@ -304,7 +313,7 @@ class TestClarificationService:
     async def test_max_clarification_limit(self):
         """Test max clarification limit per session."""
         ctx_manager = SessionContextManager()
-        session_id = "test-3"
+        session_id = SESSION_TEST_3
 
         # Add 2 clarifications (max)
         ctx_manager.add_clarification_to_history(
@@ -331,7 +340,7 @@ class TestSessionContextManager:
     def test_create_session_context(self):
         """Test create new session context."""
         manager = SessionContextManager()
-        session_id = "test-session-1"
+        session_id = SESSION_TEST_4
 
         ctx = manager.get_session_context(session_id)
         assert ctx is not None
@@ -341,7 +350,7 @@ class TestSessionContextManager:
     def test_add_clarification_to_history(self):
         """Test add clarification to session history."""
         manager = SessionContextManager()
-        session_id = "test-session-2"
+        session_id = SESSION_TEST_5
 
         manager.add_clarification_to_history(
             session_id,
@@ -357,7 +366,7 @@ class TestSessionContextManager:
     def test_scope_preference_storage(self):
         """Test store scope preference dari clarification answer."""
         manager = SessionContextManager()
-        session_id = "test-session-3"
+        session_id = SESSION_TEST_6
 
         manager.set_scope_preference(session_id, "scope", "Per divisi")
 
@@ -367,7 +376,7 @@ class TestSessionContextManager:
     def test_preference_persistence_across_queries(self):
         """Test scope preference persist across multiple queries."""
         manager = SessionContextManager()
-        session_id = "test-session-4"
+        session_id = SESSION_TEST_7
 
         # Store preference
         manager.set_scope_preference(session_id, "scope", "Per divisi")
@@ -384,7 +393,7 @@ class TestSessionContextManager:
     def test_session_ttl_cleanup(self):
         """Test session TTL cleanup mechanism."""
         manager = SessionContextManager()
-        session_id = "test-session-5"
+        session_id = SESSION_TEST_8
 
         # Create context
         manager.get_session_context(session_id)

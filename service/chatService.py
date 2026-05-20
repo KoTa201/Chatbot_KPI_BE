@@ -66,6 +66,7 @@ class ChatService:
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
 
+        session_id = session_id or uuid.uuid4()
         await self.session_service.create_session_if_missing(
             session_id=session_id,
             user_id=user_id,

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
@@ -25,8 +25,8 @@ class ChatMessage(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
     )
-    session_id: Mapped[str] = mapped_column(
-        String(255),
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        SAUUID(as_uuid=True),
         ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
         nullable=False,
         index=True,

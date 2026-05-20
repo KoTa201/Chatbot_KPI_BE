@@ -14,7 +14,7 @@ class ChatSessionService:
     async def create_session_if_missing(
         self,
         session_id: UUID,
-        user_id: UUID,
+        user_id: str,
         first_message: str,
     ) -> None:
         existing = await self.session_repo.get_by_id(session_id)
@@ -28,7 +28,7 @@ class ChatSessionService:
     async def get_sessions(self, user_id: str) -> list:
         return await self.session_repo.get_by_user(user_id=UUID(user_id))
 
-    async def delete_session(self, session_id: UUID, user_id: UUID) -> None:
+    async def delete_session(self, session_id: UUID, user_id: str) -> None:
         session = await self.session_repo.get_by_id(session_id)
         if session is None:
             raise HTTPException(
@@ -46,7 +46,7 @@ class ChatSessionService:
     async def update_session_title(
         self,
         session_id: UUID,
-        user_id: UUID,
+        user_id: str,
         title: str,
     ):
         session = await self.session_repo.get_by_id(session_id)

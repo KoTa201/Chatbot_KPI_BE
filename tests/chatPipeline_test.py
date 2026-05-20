@@ -1,6 +1,16 @@
 from unittest.mock import AsyncMock, Mock
+from uuid import UUID
+
 
 import pytest
+
+SESSION_CLARIFY = UUID("00000000-0000-0000-0000-000000000001")
+SESSION_BLOCKED = UUID("00000000-0000-0000-0000-000000000002")
+SESSION_SUCCESS = UUID("00000000-0000-0000-0000-000000000003")
+SESSION_VISUAL = UUID("00000000-0000-0000-0000-000000000004")
+SESSION_RATE_LIMIT = UUID("00000000-0000-0000-0000-000000000005")
+SESSION_TIMEOUT = UUID("00000000-0000-0000-0000-000000000006")
+SESSION_LLM_DOWN = UUID("00000000-0000-0000-0000-000000000007")
 from fastapi import HTTPException, status
 
 import service.chatService as chat_service_module
@@ -16,7 +26,7 @@ def _patch_clarification_service(monkeypatch, clarification_response):
         def __init__(self, db):
             self.db = db
 
-        async def get_clarification_count_in_session(self, session_id: str) -> int:
+        async def get_clarification_count_in_session(self, session_id: UUID) -> int:
             return 0
 
         async def process_user_query(
@@ -24,7 +34,7 @@ def _patch_clarification_service(monkeypatch, clarification_response):
             user_query: str,
             user_id: str,
             user_role: str,
-            session_id: str,
+            session_id: UUID,
             clarification_count: int = 0,
         ):
             return clarification_response
@@ -52,7 +62,7 @@ def _stage_by_name(response, stage_name: str):
 @pytest.mark.asyncio
 async def test_process_query_returns_clarification_when_query_is_ambiguous(monkeypatch):
     clarification_response = ClarificationMessageResponse(
-        session_id="sess-clarify",
+        session_id=SESSION_CLARIFY,
         message_type="clarification",
         clarifying_question="Anda ingin data per individu atau per divisi?",
         options=["Per individu", "Per divisi"],
@@ -73,7 +83,7 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
         user_id="user-1",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-clarify",
+        session_id=SESSION_CLARIFY,
     )
 
     assert response.message == "Anda ingin data per individu atau per divisi?"
@@ -113,7 +123,7 @@ async def test_process_query_returns_security_message_when_sql_validation_fails(
         user_id="user-2",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-blocked",
+        session_id=SESSION_BLOCKED,
     )
 
     assert "alasan keamanan" in response.message.lower()
@@ -159,7 +169,7 @@ async def test_process_query_success_without_visualization(monkeypatch):
         user_id="user-3",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-success",
+        session_id=SESSION_SUCCESS,
         show_sql=True,
     )
 
@@ -219,7 +229,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
         user_id="user-4",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-visual",
+        session_id=SESSION_VISUAL,
     )
 
     assert response.message == "Analisa dengan grafik."
@@ -269,7 +279,7 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
         user_id="user-5",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-rate-limit",
+        session_id=SESSION_RATE_LIMIT,
     )
 
     assert "rate limit" in response.message.lower()
@@ -315,7 +325,7 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
             user_id="user-6",
             user_role="Owner",
             user_divisi=None,
-            session_id="sess-timeout",
+            session_id=SESSION_TIMEOUT,
         )
 
     assert error_info.value.status_code == status.HTTP_408_REQUEST_TIMEOUT
@@ -343,7 +353,7 @@ async def test_process_query_returns_fallback_message_when_llm_unavailable(monke
         user_id="user-7",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-llm-down",
+        session_id=SESSION_LLM_DOWN,
     )
 
     assert "sementara tidak tersedia" in response.message.lower()

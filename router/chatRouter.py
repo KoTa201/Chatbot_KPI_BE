@@ -3,6 +3,8 @@ Chat Router — mendefinisikan semua HTTP endpoint untuk chatbot KPI.
 Tanggung jawab: routing, HTTP method, status code, response model.
 Logika bisnis didelegasikan ke ChatController → ChatService.
 """
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
@@ -132,7 +134,7 @@ class ChatRouter:
 
     async def delete_session(
         self,
-        session_id: str,
+        session_id: UUID,
         current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
@@ -146,7 +148,7 @@ class ChatRouter:
 
     async def update_session_title(
         self,
-        session_id: str,
+        session_id: UUID,
         request: UpdateSessionTitleRequest,
         current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import UUID as SAUUID
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,8 +18,8 @@ if TYPE_CHECKING:
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
 
-    session_id: Mapped[str] = mapped_column(
-        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        SAUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     session_name: Mapped[str] = mapped_column(String(255), nullable=False)
     start_at: Mapped[datetime] = mapped_column(
@@ -54,7 +55,7 @@ class ChatSession(Base):
     )
 
     @property
-    def id(self) -> str:
+    def id(self) -> uuid.UUID:
         return self.session_id
 
     @property

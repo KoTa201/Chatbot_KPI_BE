@@ -1,5 +1,9 @@
 import json
 from types import SimpleNamespace
+from uuid import UUID
+
+SESSION_STREAM_CHAT = UUID("00000000-0000-0000-0000-000000000101")
+SESSION_STREAM_CLARIFICATION = UUID("00000000-0000-0000-0000-000000000102")
 
 import pytest
 
@@ -41,7 +45,7 @@ async def _read_sse_events(streaming_response):
 @pytest.mark.asyncio
 async def test_handle_chat_returns_stream_with_message_words(monkeypatch):
     expected = ChatResponse(
-        session_id="sess-stream-chat",
+        session_id=SESSION_STREAM_CHAT,
         message="Analisa KPI bulan ini menunjukkan peningkatan.",
         generated_sql="SELECT 1;",
         rows_returned=1,
@@ -69,7 +73,7 @@ async def test_handle_chat_returns_stream_with_message_words(monkeypatch):
 
     assert events[0][0] == "metadata"
     metadata = events[0][1]
-    assert metadata["session_id"] == "sess-stream-chat"
+    assert metadata["session_id"] == str(SESSION_STREAM_CHAT)
     assert metadata["generated_sql"] == "SELECT 1;"
     assert "message" not in metadata
 
@@ -93,7 +97,7 @@ async def test_handle_chat_returns_stream_with_message_words(monkeypatch):
 async def test_handle_clarification_streams_message_and_keeps_metadata_non_stream(monkeypatch):
     captured = {}
     expected = ChatResponse(
-        session_id="sess-stream-clarification",
+        session_id=SESSION_STREAM_CLARIFICATION,
         message="Baik, saya tampilkan KPI per divisi untuk bulan Januari.",
         clarification_message_answer_options=None,
         rows_returned=5,
@@ -104,7 +108,7 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
         def __init__(self, db):
             self.db = db
 
-        async def handle_clarification_response(self, session_id: str, clarification_answer: str):
+        async def handle_clarification_response(self, session_id: UUID, clarification_answer: str):
             return SimpleNamespace(disambiguated_query="Tampilkan KPI Januari per divisi")
 
     class FakeChatService:
@@ -122,7 +126,7 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
     response = await controller.handle_clarification(
         request=ChatRequest(
             message="Lanjut",
-            session_id="sess-stream-clarification",
+            session_id=SESSION_STREAM_CLARIFICATION,
             clarification_answer="Per divisi",
         ),
         current_user=_fake_user(role="kepala_divisi"),

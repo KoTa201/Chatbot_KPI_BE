@@ -30,7 +30,7 @@ def upgrade() -> None:
 
     op.create_table(
         "chat_sessions",
-        sa.Column("session_id", sa.String(length=255), nullable=False),
+        sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("session_name", sa.String(length=255), nullable=False),
         sa.Column("start_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("end_at", sa.DateTime(timezone=True), nullable=True),
@@ -49,7 +49,7 @@ def upgrade() -> None:
         sa.Column("message", sa.String(length=255), nullable=False),
         sa.Column("is_sender_chatbot", sa.Boolean(), nullable=False),
         sa.Column("send_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("session_id", sa.String(length=255), nullable=False),
+        sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.ForeignKeyConstraint(
             ["session_id"], ["chat_sessions.session_id"], ondelete="CASCADE"
         ),
@@ -123,7 +123,7 @@ def downgrade() -> None:
     op.create_table(
         "clarification_logs",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("session_id", sa.String(length=255), nullable=False),
+        sa.Column("session_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("user_role", sa.String(length=50), nullable=False),
         sa.Column("original_query", sa.Text(), nullable=False),
