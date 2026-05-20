@@ -31,7 +31,7 @@ class ChatbotRouter:
             methods=["GET"],
             response_model=ChatbotListResponse,
             summary="Daftar semua chatbot",
-            description="Ambil seluruh chatbot aktif dengan pagination, filter otoritas, dan pencarian nama/prompt.",
+            description="Get active chatbots with pagination, authority filter, and name/prompt search.",
         )
         self.router.add_api_route(
             "/{chatbot_id}",
@@ -48,7 +48,7 @@ class ChatbotRouter:
             response_model=ChatbotResponse,
             status_code=status.HTTP_201_CREATED,
             summary="Buat chatbot baru",
-            description="Tambah chatbot baru dengan nama unik, otoritas, dan addon prompt opsional.",
+            description="Create a chatbot with a unique name, authority, and optional addon prompt.",
         )
         self.router.add_api_route(
             "/{chatbot_id}",
@@ -76,8 +76,8 @@ class ChatbotRouter:
         page: int = Query(default=1, ge=1, description="Nomor halaman"),
         limit: int = Query(default=10, ge=1, le=100,
                            description="Jumlah item per halaman"),
-        otoritas: Optional[AuthorityEnum] = Query(
-            default=None, description="Filter berdasarkan otoritas"),
+        authority: Optional[AuthorityEnum] = Query(
+            default=None, description="Filter by authority"),
         search: Optional[str] = Query(
             default=None, description="Cari nama atau addon_prompt"),
         db: AsyncSession = Depends(get_db),
@@ -86,7 +86,7 @@ class ChatbotRouter:
         return await self.chatbot_controller.list_chatbots(
             page=page,
             limit=limit,
-            otoritas=otoritas,
+            authority=authority,
             search=search,
         )
 

@@ -28,20 +28,20 @@ class ChatbotService:
             )
         return chatbot
 
-    async def _check_nama_unique(self, nama: str, exclude_id: Optional[UUID] = None) -> None:
-        existing = await self.repo.get_by_nama(nama)
+    async def _check_chatbot_name_unique(self, chatbot_name: str, exclude_id: Optional[UUID] = None) -> None:
+        existing = await self.repo.get_by_chatbot_name(chatbot_name)
         if existing and existing.id != exclude_id:
             raise HTTPException(
                 status_code=409,
-                detail=f"Nama chatbot '{nama}' sudah digunakan."
+                detail=f"Chatbot name '{chatbot_name}' is already used."
             )
 
-    async def _enforce_single_active_per_otoritas(
+    async def _enforce_single_active_per_authority(
         self,
-        otoritas: AuthorityEnum,
+        authority: AuthorityEnum,
         exclude_id: Optional[UUID] = None,
     ) -> None:
-        await self.repo.deactivate_active_by_otoritas(otoritas, exclude_id=exclude_id)
+        await self.repo.deactivate_active_by_authority(authority, exclude_id=exclude_id)
 
     # ─── CRUD ─────────────────────────────────────────────────────────────────
 
@@ -49,10 +49,10 @@ class ChatbotService:
         self,
         page: int = 1,
         limit: int = 10,
-        otoritas: Optional[AuthorityEnum] = None,
+        authority: Optional[AuthorityEnum] = None,
         search: Optional[str] = None,
     ) -> dict:
-        chatbots, total = await self.repo.get_all(page, limit, otoritas, search)
+        chatbots, total = await self.repo.get_all(page, limit, authority, search)
         total_pages = max(1, -(-total // limit))  # ceiling division
 
         return {
@@ -67,20 +67,20 @@ class ChatbotService:
         return await self._get_or_404(chatbot_id)
 
     async def create(self, payload: ChatbotCreate) -> Chatbot:
-        await self._check_nama_unique(payload.nama_chatbot)
-        await self._enforce_single_active_per_otoritas(payload.otoritas)
+        await self._check_chatbot_name_unique(payload.chatbot_name)
+        await self._enforce_single_active_per_authority(payload.authority)
         return await self.repo.create(payload)
 
     async def update(self, chatbot_id: UUID, payload: ChatbotUpdate) -> Chatbot:
         existing = await self._get_or_404(chatbot_id)
-        if payload.nama_chatbot:
-            await self._check_nama_unique(payload.nama_chatbot, exclude_id=chatbot_id)
+        if payload.chatbot_name:
+            await self._check_chatbot_name_unique(payload.chatbot_name, exclude_id=chatbot_id)
 
-        target_otoritas = payload.otoritas if payload.otoritas is not None else existing.otoritas
+        target_authority = payload.authority if payload.authority is not None else existing.authority
         target_is_active = payload.is_active if payload.is_active is not None else existing.is_active
         if target_is_active:
-            await self._enforce_single_active_per_otoritas(
-                target_otoritas,
+            await self._enforce_single_active_per_authority(
+                target_authority,
                 exclude_id=chatbot_id,
             )
 
