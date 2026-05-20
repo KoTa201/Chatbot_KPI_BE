@@ -13,7 +13,7 @@ class ClarificationRepository:
 
     async def create(
         self,
-        session_id: str,
+        session_id: UUID,
         user_id: UUID,
         user_role: str,
         original_query: str,
@@ -61,7 +61,7 @@ class ClarificationRepository:
         await self.db.refresh(question)
         return question
 
-    async def get_by_session(self, session_id: str) -> list[ClarificationQuestion]:
+    async def get_by_session(self, session_id: UUID) -> list[ClarificationQuestion]:
         stmt = (
             select(ClarificationQuestion)
             .order_by(desc(ClarificationQuestion.created_at))
@@ -69,7 +69,7 @@ class ClarificationRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def get_last_clarification(self, session_id: str) -> ClarificationQuestion | None:
+    async def get_last_clarification(self, session_id: UUID) -> ClarificationQuestion | None:
         stmt = (
             select(ClarificationQuestion)
             .order_by(desc(ClarificationQuestion.created_at))
@@ -86,10 +86,10 @@ class ClarificationRepository:
     ) -> None:
         return None
 
-    async def get_clarify_decisions_count(self, session_id: str) -> int:
+    async def get_clarify_decisions_count(self, session_id: UUID) -> int:
         return 0
 
-    async def delete_by_session(self, session_id: str) -> int:
+    async def delete_by_session(self, session_id: UUID) -> int:
         return 0
 
     @staticmethod

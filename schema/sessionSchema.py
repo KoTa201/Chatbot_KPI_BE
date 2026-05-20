@@ -1,9 +1,11 @@
 from datetime import datetime
+from uuid import UUID
+
 from pydantic import BaseModel, field_validator
 
 
 class SessionResponse(BaseModel):
-    id: str
+    id: UUID
     title: str
     created_at: datetime
     updated_at: datetime

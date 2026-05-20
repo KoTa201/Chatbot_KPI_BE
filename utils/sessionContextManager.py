@@ -12,7 +12,7 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 # In-memory session store (TODO: replace dengan Redis untuk production)
-_SESSION_STORE: dict[str, dict] = {}
+_SESSION_STORE: dict[UUID, dict] = {}
 SESSION_TTL_HOURS = 8
 
 
@@ -20,7 +20,7 @@ class SessionContextManager:
     """Manager untuk session clarification context."""
 
     @staticmethod
-    def create_session_context(session_id: str) -> dict:
+    def create_session_context(session_id: UUID) -> dict:
         """Buat context baru untuk session."""
         context = {
             "session_id": session_id,
@@ -37,7 +37,7 @@ class SessionContextManager:
         return context
 
     @staticmethod
-    def get_session_context(session_id: str) -> dict | None:
+    def get_session_context(session_id: UUID) -> dict | None:
         """Ambil context untuk session. Auto-create jika tidak ada."""
         if session_id not in _SESSION_STORE:
             # Check TTL: jika sudah lama, hapus
@@ -56,7 +56,7 @@ class SessionContextManager:
 
     @staticmethod
     def add_clarification_to_history(
-        session_id: str,
+        session_id: UUID,
         question: str,
         answer: str,
         ambiguity_type: str,
@@ -83,7 +83,7 @@ class SessionContextManager:
 
     @staticmethod
     def set_scope_preference(
-        session_id: str,
+        session_id: UUID,
         preference_key: str,
         value: str,
     ) -> None:
@@ -98,7 +98,7 @@ class SessionContextManager:
         )
 
     @staticmethod
-    def get_scope_preference(session_id: str, preference_key: str) -> Optional[str]:
+    def get_scope_preference(session_id: UUID, preference_key: str) -> Optional[str]:
         """Ambil scope preference dari session."""
         context = SessionContextManager.get_session_context(session_id)
         if not context:
@@ -107,7 +107,7 @@ class SessionContextManager:
 
     @staticmethod
     def set_temporal_preference(
-        session_id: str,
+        session_id: UUID,
         period_key: str,
         value: str,
     ) -> None:
@@ -123,7 +123,7 @@ class SessionContextManager:
 
     @staticmethod
     def set_metric_preference(
-        session_id: str,
+        session_id: UUID,
         metric_key: str,
         value: str,
     ) -> None:
@@ -138,7 +138,7 @@ class SessionContextManager:
         )
 
     @staticmethod
-    def has_preference(session_id: str, preference_type: str, key: str) -> bool:
+    def has_preference(session_id: UUID, preference_type: str, key: str) -> bool:
         """Check apakah preference sudah ada di session."""
         context = SessionContextManager.get_session_context(session_id)
         if not context:
@@ -148,7 +148,7 @@ class SessionContextManager:
         return key in prefs
 
     @staticmethod
-    def get_clarification_history(session_id: str) -> list[dict]:
+    def get_clarification_history(session_id: UUID) -> list[dict]:
         """Ambil riwayat clarification di session."""
         context = SessionContextManager.get_session_context(session_id)
         if not context:
@@ -156,7 +156,7 @@ class SessionContextManager:
         return context["clarification_history"]
 
     @staticmethod
-    def clear_session_context(session_id: str) -> None:
+    def clear_session_context(session_id: UUID) -> None:
         """Hapus context untuk session (logout/session end)."""
         if session_id in _SESSION_STORE:
             del _SESSION_STORE[session_id]

@@ -41,7 +41,7 @@ class ClarificationService:
         user_query: str,
         user_id: UUID,
         user_role: str,
-        session_id: str,
+        session_id: UUID,
         clarification_count: int = 0,
     ) -> ClarificationMessageResponse | None:
         """
@@ -117,7 +117,7 @@ class ClarificationService:
 
     async def handle_clarification_response(
         self,
-        session_id: str,
+        session_id: UUID,
         clarification_answer: str,
     ) -> QueryDisambiguationResult:
         """
@@ -244,7 +244,7 @@ class ClarificationService:
         return result
 
     async def get_session_clarification_history(
-        self, session_id: str
+        self, session_id: UUID
     ) -> list[dict]:
         """Ambil riwayat clarification untuk satu session."""
         logs = await self.repo.get_by_session(session_id)
@@ -259,7 +259,7 @@ class ClarificationService:
             if log.clarifying_question  # Only clarifications, not direct answers
         ]
 
-    async def get_clarification_count_in_session(self, session_id: str) -> int:
+    async def get_clarification_count_in_session(self, session_id: UUID) -> int:
         """Hitung jumlah clarification dalam satu session."""
         return await self.repo.get_clarify_decisions_count(session_id)
 

@@ -47,7 +47,7 @@ class ChatService:
         user_id: str,
         user_role: str,
         user_divisi: str | None,
-        session_id: str | None,
+        session_id: uuid.UUID | None,
         show_sql: bool = False,
         context_from_clarification: Any = None,
     ) -> ChatResponse:
@@ -64,7 +64,7 @@ class ChatService:
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
 
-        session_id = session_id or str(uuid.uuid4())
+        session_id = session_id or uuid.uuid4()
         await self.session_service.create_session_if_missing(
             session_id=session_id,
             user_id=user_id,
@@ -204,7 +204,7 @@ class ChatService:
 
     @staticmethod
     def _build_pipeline_context(
-        session_id: str,
+        session_id: uuid.UUID,
         user_id: str,
         user_role: str,
         user_message: str,

@@ -5,7 +5,7 @@ ORM model untuk tracking semua aktivitas clarification mechanism.
 
 from datetime import datetime
 from typing import Optional
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import Boolean, DateTime, Numeric, String, Text, UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,8 +22,8 @@ class ClarificationLogORM(Base):
     )
 
     # Session & User Context
-    session_id: Mapped[str] = mapped_column(
-        String(255), nullable=False, index=True)
+    session_id: Mapped[UUID] = mapped_column(
+        SAUUID(as_uuid=True), nullable=False, index=True)
     user_id: Mapped[SAUUID] = mapped_column(
         SAUUID(as_uuid=True), nullable=False, index=True)
     user_role: Mapped[str] = mapped_column(String(50), nullable=False)
