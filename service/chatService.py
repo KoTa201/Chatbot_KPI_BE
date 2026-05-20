@@ -20,9 +20,9 @@ from configCredidential import get_settings
 from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlWireguardService import SQLWireguardService
+from service.chatSessionService import ChatSessionService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
 from repository.chatbotAuditLogRepository import AuditLogRepository
-from repository.chatSessionRepository import ChatSessionRepository
 from repository.clarificationRepository import ClarificationRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
 
@@ -39,19 +39,9 @@ class ChatService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.audit_repo = AuditLogRepository(db)
-        self.session_repo = ChatSessionRepository(db)
+        self.session_service = ChatSessionService(db)
         self.clarification_repo = ClarificationRepository(db)
 
-    async def create_session(
-        self, session_id: str, user_id: str, first_message: str
-    ) -> None:
-        existing = await self.session_repo.get_by_id(session_id)
-        if existing is None:
-            await self.session_repo.create(
-                session_id=session_id,
-                user_id=user_id,
-                title=first_message[:80].strip() or "New Chat",
-            )
 
     async def process_query(
         self,
@@ -77,7 +67,7 @@ class ChatService:
         from utils.sessionContextManager import SessionContextManager
 
         session_id = session_id or str(uuid.uuid4())
-        await self.create_session(
+        await self.session_service.create_session_if_missing(
             session_id=session_id,
             user_id=user_id,
             first_message=user_message,
@@ -483,41 +473,3 @@ class ChatService:
             skip=skip,
             limit=limit,
         )
-
-    async def get_sessions(self, user_id: str) -> list:
-        return await self.session_repo.get_by_user(user_id=user_id)
-
-    async def delete_session(self, session_id: str, user_id: str) -> None:
-        from fastapi import HTTPException, status
-        session = await self.session_repo.get_by_id(session_id)
-        if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session tidak ditemukan.",
-            )
-        if str(session.user_id) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke session ini.",
-            )
-        await self.session_repo.delete(session_id)
-        await self.db.flush()
-
-    async def update_session_title(
-        self, session_id: str, user_id: str, title: str
-    ):
-        from fastapi import HTTPException, status
-        session = await self.session_repo.get_by_id(session_id)
-        if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session tidak ditemukan.",
-            )
-        if str(session.user_id) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke session ini.",
-            )
-        updated = await self.session_repo.update_title(session_id, title)
-        await self.db.flush()
-        return updated
