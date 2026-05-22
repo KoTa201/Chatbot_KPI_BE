@@ -30,6 +30,16 @@ class ChatbotRepository:
         )
         return result.scalars().first()
 
+    async def get_active_by_authority(self, authority: AuthorityEnum | str) -> Optional[Chatbot]:
+        authority_value = authority.value if isinstance(authority, AuthorityEnum) else authority
+        result = await self.db.execute(
+            select(Chatbot).where(
+                (Chatbot.authority == authority_value) &
+                (Chatbot.is_active == True)
+            )
+        )
+        return result.scalars().first()
+
     async def get_all(self, page, limit, authority=None, search=None):
         query = select(Chatbot)
         offset = (page - 1) * limit
