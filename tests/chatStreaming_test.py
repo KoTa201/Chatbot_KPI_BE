@@ -2,14 +2,15 @@ import json
 from types import SimpleNamespace
 from uuid import UUID
 
-SESSION_STREAM_CHAT = UUID("00000000-0000-0000-0000-000000000101")
-SESSION_STREAM_CLARIFICATION = UUID("00000000-0000-0000-0000-000000000102")
-
 import pytest
 
 import controller.chatController as chat_controller_module
 from controller.chatController import ChatController
 from schema.chatSchema import ChatRequest, ChatResponse, PipelineStageInfo
+from schema.clarificationSchema import ClarificationAnswerItem
+
+SESSION_STREAM_CHAT = UUID("00000000-0000-0000-0000-000000000101")
+SESSION_STREAM_CLARIFICATION = UUID("00000000-0000-0000-0000-000000000102")
 
 
 def _fake_user(role: str = "admin"):
@@ -62,10 +63,10 @@ async def test_handle_chat_returns_stream_with_message_words(monkeypatch):
 
     monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
 
-    controller = ChatController(db=None)
+    controller = ChatController(db=None)  # type: ignore[arg-type]
     response = await controller.handle_chat(
         request=ChatRequest(message="Bagaimana KPI bulan ini?"),
-        current_user=_fake_user(),
+        current_user=_fake_user(),  # type: ignore[arg-type]
     )
 
     assert response.media_type == "text/event-stream"
@@ -108,7 +109,8 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
         def __init__(self, db):
             self.db = db
 
-        async def handle_clarification_response(self, session_id: UUID, clarification_answer: str):
+        async def handle_clarification_response(self, **kwargs):
+            captured["clarification_answers"] = kwargs["clarification_answers"]
             return SimpleNamespace(disambiguated_query="Tampilkan KPI Januari per divisi")
 
     class FakeChatService:
@@ -127,13 +129,19 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
         request=ChatRequest(
             message="Lanjut",
             session_id=SESSION_STREAM_CLARIFICATION,
-            clarification_answer="Per divisi",
+            clarification_answers=[
+                ClarificationAnswerItem(
+                    question_id="00000000-0000-0000-0000-000000000201",
+                    selected_option="Per divisi",
+                )
+            ],
         ),
-        current_user=_fake_user(role="kepala_divisi"),
+        current_user=_fake_user(role="kepala_divisi"),  # type: ignore[arg-type]
     )
 
     events = await _read_sse_events(response)
     assert captured["user_message"] == "Tampilkan KPI Januari per divisi"
+    assert captured["clarification_answers"][0].selected_option == "Per divisi"
     assert events[0][0] == "metadata"
     assert "message" not in events[0][1]
 
@@ -142,3 +150,94 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
     )
     assert streamed_message == expected.message
     assert events[-1][0] == "done"
+
+
+@pytest.mark.asyncio
+async def test_handle_clarification_streams_next_clarification_without_rag(monkeypatch):
+    from schema.clarificationSchema import ClarificationMessageResponse, ClarificationQuestionResponse
+
+    captured = {"rag_called": False}
+
+    class FakeClarificationService:
+        def __init__(self, db):
+            self.db = db
+
+        async def handle_clarification_response(self, **kwargs):
+            return SimpleNamespace(
+                disambiguated_query="Tampilkan ranking performa KPI",
+                needs_more_clarification=True,
+                clarification_message=ClarificationMessageResponse(
+                    session_id=SESSION_STREAM_CLARIFICATION,
+                    message_type="clarification",
+                    clarifying_question="Achievement yang dimaksud metrik apa?",
+                    options=["Achievement %", "Weighted score", "Lewati", "Lainnya"],
+                    questions=[
+                        ClarificationQuestionResponse(
+                            id="q-next",
+                            ambiguous_phrase="achievement",
+                            ambiguity_type="AmbiSchema",
+                            question="Achievement yang dimaksud metrik apa?",
+                            options=["Achievement %", "Weighted score", "Lewati", "Lainnya"],
+                        )
+                    ],
+                ),
+            )
+
+    class FakeChatService:
+        def __init__(self, db):
+            self.db = db
+
+        async def process_query(self, **kwargs):
+            captured["rag_called"] = True
+            raise AssertionError("RAG pipeline should not run when more clarification is needed")
+
+    monkeypatch.setattr(chat_controller_module, "ClarificationService", FakeClarificationService)
+    monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
+
+    controller = ChatController(db=None)
+    response = await controller.handle_clarification(
+        request=ChatRequest(
+            message="Lanjut",
+            session_id=SESSION_STREAM_CLARIFICATION,
+            clarification_answers=[
+                ClarificationAnswerItem(question_id="q1", selected_option="Ranking tertinggi"),
+            ],
+        ),
+        current_user=_fake_user(role="kepala_divisi"),  # type: ignore[arg-type]
+    )
+
+    events = await _read_sse_events(response)
+    assert captured["rag_called"] is False
+    metadata = events[0][1]
+    assert metadata["clarification_questions"][0]["question"] == "Achievement yang dimaksud metrik apa?"
+    streamed_message = "".join(
+        payload["chunk"] for event_name, payload in events if event_name == "message"
+    )
+    assert streamed_message == "Achievement yang dimaksud metrik apa?"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_passes_authority_role_to_service(monkeypatch):
+    captured = {}
+    expected = ChatResponse(
+        session_id=SESSION_STREAM_CHAT,
+        message="OK",
+    )
+
+    class FakeChatService:
+        def __init__(self, db):
+            self.db = db
+
+        async def process_query(self, **kwargs):
+            captured.update(kwargs)
+            return expected
+
+    monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
+
+    controller = ChatController(db=None)  # type: ignore[arg-type]
+    await controller.handle_chat(
+        request=ChatRequest(message="Tampilkan KPI saya"),
+        current_user=_fake_user(role="karyawan"),  # type: ignore[arg-type]
+    )
+
+    assert captured["user_role"] == "karyawan"
