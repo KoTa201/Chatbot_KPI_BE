@@ -1,11 +1,16 @@
 from types import SimpleNamespace
 from uuid import UUID
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
+from fastapi import HTTPException
 
 from model.Chatbot import AuthorityEnum, Chatbot
 from repository.chatbotRepository import ChatbotRepository
+import service.chatService as chat_service_module
+from service.chatService import ChatService
+from schema.chatSchema import ChatResponse
 
 pytestmark = pytest.mark.asyncio
 
@@ -66,14 +71,6 @@ async def test_get_active_by_authority_accepts_role_string():
     assert result is chatbot
     compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
     assert "chatbots.authority = 'kepala_divisi'" in compiled
-
-
-from fastapi import HTTPException
-from unittest.mock import AsyncMock
-
-import service.chatService as chat_service_module
-from service.chatService import ChatService
-from schema.chatSchema import ChatResponse
 
 
 async def test_process_query_fails_when_no_active_chatbot(monkeypatch):
