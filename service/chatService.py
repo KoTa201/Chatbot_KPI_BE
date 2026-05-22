@@ -102,6 +102,7 @@ class ChatService:
                     user_role=user_role,
                     session_id=session_id,
                     clarification_count=clarification_count,
+                    addon_prompt=addon_prompt,
                 )
 
                 if clarification_response is not None:
@@ -134,6 +135,7 @@ class ChatService:
                     user_role=user_role,
                     user_divisi=user_divisi,
                     pipeline=pipeline,
+                    addon_prompt=addon_prompt,
                 )
             except HTTPException as error:
                 if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
@@ -190,6 +192,7 @@ class ChatService:
                 executed_sql=sanitized_sql or "",
                 query_result=query_result,
                 rows_count=rows_count,
+                addon_prompt=addon_prompt,
             )
 
             total_ms = int((time.monotonic() - total_start) * 1000)
@@ -289,6 +292,7 @@ class ChatService:
         user_role: str,
         user_divisi: str | None,
         pipeline: dict[str, Any],
+        addon_prompt: str | None = None,
     ) -> tuple[str, VisualizationDecision]:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
@@ -297,6 +301,7 @@ class ChatService:
                 user_id=user_id,
                 user_role=user_role,
                 divisi=user_divisi,
+                addon_prompt=addon_prompt,
             )
             generated_sql = await llm.generate_sql(nl_prompt)
 
@@ -385,6 +390,7 @@ class ChatService:
         executed_sql: str,
         query_result: list[dict],
         rows_count: int,
+        addon_prompt: str | None = None,
     ) -> str:
         stage = self._start_stage(stages, "result_analysis")
         analysis_prompt = build_analysis_prompt(
@@ -392,6 +398,7 @@ class ChatService:
             executed_sql=executed_sql,
             query_result=query_result,
             rows_count=rows_count,
+            addon_prompt=addon_prompt,
         )
         try:
             narrative = await llm.analyze_result(analysis_prompt)

@@ -69,11 +69,11 @@ async def test_get_active_by_authority_accepts_role_string():
 
 
 from fastapi import HTTPException
+from unittest.mock import AsyncMock
 
 import service.chatService as chat_service_module
 from service.chatService import ChatService
 from schema.chatSchema import ChatResponse
-from unittest.mock import AsyncMock
 
 
 async def test_process_query_fails_when_no_active_chatbot(monkeypatch):
@@ -147,3 +147,64 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
     assert isinstance(response, ChatResponse)
     assert events[0][0] == "chatbot_lookup"
     assert events[1][0] == "session_create"
+
+
+async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch):
+    captured = {}
+
+    class FakeChatbotRepo:
+        def __init__(self, db):
+            pass
+
+        async def get_active_by_authority(self, authority):
+            return SimpleNamespace(addon_prompt="Gunakan bahasa formal.")
+
+    class FakeSessionService:
+        def __init__(self, db):
+            pass
+
+        async def create_session_if_missing(self, **kwargs):
+            return None
+
+    class FakeClarificationService:
+        def __init__(self, db):
+            pass
+
+        async def get_clarification_count_in_session(self, session_id):
+            return 0
+
+        async def process_user_query(self, **kwargs):
+            captured["clarification_addon_prompt"] = kwargs.get("addon_prompt")
+            return None
+
+    async def fake_nl_to_sql(self, **kwargs):
+        captured["nl_addon_prompt"] = kwargs.get("addon_prompt")
+        return "SELECT 1;", SimpleNamespace(is_visualize=False, chart_type=None)
+
+    async def fake_analysis(self, **kwargs):
+        captured["analysis_addon_prompt"] = kwargs.get("addon_prompt")
+        return "Narasi hasil."
+
+    monkeypatch.setattr(chat_service_module, "ChatbotRepository", FakeChatbotRepo)
+    monkeypatch.setattr(chat_service_module, "ChatSessionService", FakeSessionService)
+    monkeypatch.setattr("service.clarificationService.ClarificationService", FakeClarificationService)
+    monkeypatch.setattr(ChatService, "_run_nl_to_sql_stage", fake_nl_to_sql)
+    monkeypatch.setattr(ChatService, "_run_sql_validation_stage", lambda self, **kwargs: SimpleNamespace(is_valid=True, sanitized_sql="SELECT 1;", reason=None))
+    monkeypatch.setattr(ChatService, "_run_sql_execution_stage", AsyncMock(return_value=([{"value": 1}], 1)))
+    monkeypatch.setattr(ChatService, "_run_result_analysis_stage", fake_analysis)
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    response = await service.process_query(
+        user_message="Tampilkan KPI saya",
+        user_id=UUID("00000000-0000-0000-0000-000000000403"),
+        user_role="karyawan",
+        user_divisi=None,
+        session_id=UUID("00000000-0000-0000-0000-000000000404"),
+    )
+
+    assert response.message == "Narasi hasil."
+    assert captured == {
+        "clarification_addon_prompt": "Gunakan bahasa formal.",
+        "nl_addon_prompt": "Gunakan bahasa formal.",
+        "analysis_addon_prompt": "Gunakan bahasa formal.",
+    }
