@@ -205,3 +205,173 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
         "nl_addon_prompt": "Gunakan bahasa formal.",
         "analysis_addon_prompt": "Gunakan bahasa formal.",
     }
+
+
+async def test_run_nl_to_sql_stage_passes_addon_prompt_to_builder(monkeypatch):
+    """Verify _run_nl_to_sql_stage passes addon_prompt to build_nl_to_sql_prompt."""
+    captured_builder_args = {}
+
+    def fake_build_nl_to_sql_prompt(**kwargs):
+        captured_builder_args.update(kwargs)
+        return "SELECT 1;"
+
+    async def fake_generate_sql(prompt):
+        return "SELECT 1;"
+
+    async def fake_decide_visualization(prompt):
+        return SimpleNamespace(is_visualize=False, chart_type=None)
+
+    monkeypatch.setattr(
+        "service.chatService.build_nl_to_sql_prompt",
+        fake_build_nl_to_sql_prompt,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.generate_sql",
+        fake_generate_sql,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.decide_visualization_request",
+        fake_decide_visualization,
+    )
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    stages = []
+    addon_prompt_value = "Gunakan format ringkas."
+
+    generated_sql, viz_decision = await service._run_nl_to_sql_stage(
+        stages=stages,
+        user_message="Berapa KPI Q1?",
+        user_id=UUID("00000000-0000-0000-0000-000000000501"),
+        user_role="karyawan",
+        user_divisi=None,
+        pipeline={},
+        addon_prompt=addon_prompt_value,
+    )
+
+    assert generated_sql == "SELECT 1;"
+    assert captured_builder_args["addon_prompt"] == addon_prompt_value
+    assert captured_builder_args["user_query"] == "Berapa KPI Q1?"
+    assert captured_builder_args["user_role"] == "karyawan"
+
+
+async def test_run_nl_to_sql_stage_passes_none_addon_prompt_to_builder(monkeypatch):
+    """Verify _run_nl_to_sql_stage passes None addon_prompt when not provided."""
+    captured_builder_args = {}
+
+    def fake_build_nl_to_sql_prompt(**kwargs):
+        captured_builder_args.update(kwargs)
+        return "SELECT 1;"
+
+    async def fake_generate_sql(prompt):
+        return "SELECT 1;"
+
+    async def fake_decide_visualization(prompt):
+        return SimpleNamespace(is_visualize=False, chart_type=None)
+
+    monkeypatch.setattr(
+        "service.chatService.build_nl_to_sql_prompt",
+        fake_build_nl_to_sql_prompt,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.generate_sql",
+        fake_generate_sql,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.decide_visualization_request",
+        fake_decide_visualization,
+    )
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    stages = []
+
+    generated_sql, viz_decision = await service._run_nl_to_sql_stage(
+        stages=stages,
+        user_message="Berapa KPI Q1?",
+        user_id=UUID("00000000-0000-0000-0000-000000000502"),
+        user_role="karyawan",
+        user_divisi=None,
+        pipeline={},
+        addon_prompt=None,
+    )
+
+    assert generated_sql == "SELECT 1;"
+    assert captured_builder_args["addon_prompt"] is None
+
+
+async def test_run_result_analysis_stage_passes_addon_prompt_to_builder(monkeypatch):
+    """Verify _run_result_analysis_stage passes addon_prompt to build_analysis_prompt."""
+    captured_builder_args = {}
+
+    def fake_build_analysis_prompt(**kwargs):
+        captured_builder_args.update(kwargs)
+        return "Analisis prompt"
+
+    async def fake_analyze_result(prompt):
+        return "Hasil analisis."
+
+    monkeypatch.setattr(
+        "service.chatService.build_analysis_prompt",
+        fake_build_analysis_prompt,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.analyze_result",
+        fake_analyze_result,
+    )
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    stages = []
+    addon_prompt_value = "Gunakan format ringkas."
+    query_result = [{"kpi": "Revenue", "value": 1000}]
+
+    narrative = await service._run_result_analysis_stage(
+        stages=stages,
+        user_query="Berapa revenue?",
+        executed_sql="SELECT * FROM kpi;",
+        query_result=query_result,
+        rows_count=1,
+        addon_prompt=addon_prompt_value,
+    )
+
+    assert narrative == "Hasil analisis."
+    assert captured_builder_args["addon_prompt"] == addon_prompt_value
+    assert captured_builder_args["user_query"] == "Berapa revenue?"
+    assert captured_builder_args["executed_sql"] == "SELECT * FROM kpi;"
+    assert captured_builder_args["query_result"] == query_result
+    assert captured_builder_args["rows_count"] == 1
+
+
+async def test_run_result_analysis_stage_passes_none_addon_prompt_to_builder(monkeypatch):
+    """Verify _run_result_analysis_stage passes None addon_prompt when not provided."""
+    captured_builder_args = {}
+
+    def fake_build_analysis_prompt(**kwargs):
+        captured_builder_args.update(kwargs)
+        return "Analisis prompt"
+
+    async def fake_analyze_result(prompt):
+        return "Hasil analisis."
+
+    monkeypatch.setattr(
+        "service.chatService.build_analysis_prompt",
+        fake_build_analysis_prompt,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.analyze_result",
+        fake_analyze_result,
+    )
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    stages = []
+    query_result = [{"kpi": "Revenue", "value": 1000}]
+
+    narrative = await service._run_result_analysis_stage(
+        stages=stages,
+        user_query="Berapa revenue?",
+        executed_sql="SELECT * FROM kpi;",
+        query_result=query_result,
+        rows_count=1,
+        addon_prompt=None,
+    )
+
+    assert narrative == "Hasil analisis."
+    assert captured_builder_args["addon_prompt"] is None
