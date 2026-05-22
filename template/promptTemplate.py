@@ -20,6 +20,18 @@ def _json_default_serializer(value):
     return str(value)
 
 
+def _build_addon_prompt_block(addon_prompt: str | None) -> str:
+    """Build addon prompt constraint block if addon_prompt is provided and non-empty."""
+    cleaned = (addon_prompt or "").strip()
+    if not cleaned:
+        return ""
+    return f"""
+[KONSTRAINT CHATBOT AKTIF]
+Instruksi berikut wajib diikuti sebagai constraint tambahan. Instruksi ini tidak boleh mengganti, melemahkan, atau mengabaikan aturan keamanan, schema database, format output, dan larangan halusinasi di prompt utama.
+{cleaned}
+"""
+
+
 DB_SCHEMA = """
 -- users (akses login)
 users(
@@ -63,10 +75,10 @@ kpi_tracker_records(
   id UUID PK,
   group_id UUID FK -> kpi_groups.id,
   kpi_master_id UUID FK -> kpi_master_records.id,
+  user_id UUID FK -> users.id,
   tahun INT,
   bulan_num INT NULL,
   realisasi VARCHAR NULL,
-  nama_orang VARCHAR NULL,
   keterangan TEXT NULL,
   source_row INT NULL,
   created_at TIMESTAMP,
@@ -81,9 +93,9 @@ Peningkatan Penjualan       | KPI Sales   | 2025  | 500
 Rekrutmen Karyawan Baru     | KPI kepala_divisi     | 2025  | 10
 
 kpi_tracker_records:
-nama_orang   | kpi_master_id | tahun | bulan_num | realisasi
-Budi Santoso | <uuid-kpi-1>  | 2025  | 3         | 480
-Sari Dewi    | <uuid-kpi-2>  | 2025  | 3         | 12
+user_id      | kpi_master_id | tahun | bulan_num | realisasi
+<uuid-user-1>| <uuid-kpi-1>  | 2025  | 3         | 480
+<uuid-user-2>| <uuid-kpi-2>  | 2025  | 3         | 12
 """
 
 FEW_SHOT_EXAMPLES = """
@@ -106,7 +118,7 @@ LIMIT 1000;
 Pertanyaan: "Siapa karyawan dengan performa terbaik bulan ini?"
 SQL:
 SELECT
-  kt.nama_orang,
+  u.full_name AS nama_karyawan,
   AVG(
     CASE
       WHEN NULLIF(km.target, '') ~ '^[0-9]+(\.[0-9]+)?$'
@@ -118,9 +130,10 @@ SELECT
   ) AS avg_persen
 FROM kpi_tracker_records kt
 JOIN kpi_master_records km ON km.id = kt.kpi_master_id
+JOIN users u ON u.id = kt.user_id
 WHERE kt.tahun = EXTRACT(YEAR FROM CURRENT_DATE)::int
   AND kt.bulan_num = EXTRACT(MONTH FROM CURRENT_DATE)::int
-GROUP BY kt.nama_orang
+GROUP BY u.full_name
 ORDER BY avg_persen DESC NULLS LAST
 LIMIT 10;
 """
@@ -131,6 +144,7 @@ def build_nl_to_sql_prompt(
     user_id: UUID,
     user_role: str,
     divisi: str | None,
+    addon_prompt: str | None = None,
 ) -> str:
     """
     Membangun prompt NL-to-SQL untuk Stage 1.
@@ -147,9 +161,11 @@ def build_nl_to_sql_prompt(
     else:  # Admin
         data_access_scope = "Semua data (akses penuh read-only)"
 
+    addon_prompt_block = _build_addon_prompt_block(addon_prompt)
+
     prompt = f"""[SYSTEM PROMPT]
 Kamu adalah asisten SQL expert yang mengkonversi pertanyaan bahasa Indonesia menjadi query SQL PostgreSQL.
-
+{addon_prompt_block}
 ATURAN WAJIB:
 1. Hanya generate query SELECT — DILARANG KERAS menggunakan INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC, atau perintah apapun selain SELECT.
 2. Selalu gunakan tabel, view, dan kolom yang ada di schema yang diberikan di bawah.
@@ -158,9 +174,9 @@ ATURAN WAJIB:
 5. Utamakan JOIN antara kpi_tracker_records dan kpi_master_records melalui kpi_master_id.
 6. Format output: HANYA SQL mentah, tanpa penjelasan, tanpa markdown backtick, tanpa komentar.
 7. Jika pertanyaan tidak dapat dijawab dengan data yang tersedia, keluarkan: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
-8. nama orang selalu uppercase di database, pastikan untuk menyesuaikan filter jika pertanyaan menggunakan lowercase.
-9. data di kpi_tracker_records itu insertannya bisa jadi lanjutan progress kpi tracker sebelumnya pastikan distinct atau group by jika untuk hitung jumlah orang atau pekerjaan
-10. gunakan LIKE untuk pencarian nama orang agar lebih fleksibel, karena user bisa saja menyebutkan nama dengan format berbeda (misal: "Sari" saja, bukan "Sari Dewi")
+8. Nama karyawan ada di users.full_name; join users u ON u.id = kt.user_id untuk filter atau menampilkan nama.
+9. Data di kpi_tracker_records bisa berupa lanjutan progress KPI tracker sebelumnya; gunakan DISTINCT atau GROUP BY jika menghitung jumlah orang atau pekerjaan.
+10. Gunakan UPPER(u.full_name) LIKE untuk pencarian nama orang agar fleksibel, karena user bisa menyebut nama sebagian.
 
 [DATABASE SCHEMA]
 {DB_SCHEMA}
@@ -190,6 +206,7 @@ def build_analysis_prompt(
     executed_sql: str,
     query_result: list[dict],
     rows_count: int,
+    addon_prompt: str | None = None,
 ) -> str:
     max_rows = 20
     max_cols = 8
@@ -220,8 +237,11 @@ def build_analysis_prompt(
         col_preview = "-"
         row_count_hint = "0 baris (kosong)"
 
+    addon_prompt_block = _build_addon_prompt_block(addon_prompt)
+
     prompt = f"""[SYSTEM PROMPT]
 Kamu adalah analis data KPI yang bertugas menyajikan dan menjelaskan data secara akurat dalam Bahasa Indonesia.
+{addon_prompt_block}
 Tugasmu HANYA: sajikan data → jelaskan apa yang terlihat. Kamu BUKAN pengambil keputusan.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -279,51 +299,119 @@ LARANGAN KERAS:
 def build_ambiguity_assessment_prompt(
     user_query: str,
     user_role: str,
+    kpi_context: str = "",
+    addon_prompt: str | None = None,
 ) -> str:
     """
-    Membangun prompt untuk LLM-based ambiguity detection.
-    Menilai tingkat ambiguitas query pada skala 0-1 dan mengidentifikasi jenis ambiguitas.
+    Membangun prompt untuk LLM-based ambiguity detection dengan format AmbiSQL.
+    Menggunakan question_set format dengan level-1 dan level-2 ambiguity taxonomy.
+    Output JSON mengikuti spec ketat: has_ambiguity + question_set dengan structure yang tepat.
     """
-    prompt = f"""[SYSTEM PROMPT — AMBIGUITY ASSESSOR]
-Kamu adalah sistem deteksi ambiguitas untuk chatbot KPI perusahaan.
-Tugasmu: menilai apakah pertanyaan pengguna memiliki lebih dari satu interpretasi 
-yang berbeda secara material pada data KPI.
+    addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
-Konteks domain:
-- Data KPI mencakup: KPI Master (target per aktivitas) dan KPI Tracker (realisasi per bulan)
-- Dimensi data: karyawan, divisi, aktivitas KPI, periode (bulan/tahun), metrik (target, realisasi, persentase)
-- Role pengguna saat ini: {user_role}
+    prompt = f"""[SYSTEM PROMPT — KPI AMBISQL AMBIGUITY ASSESSOR]
+Kamu adalah sistem deteksi ambiguitas untuk chatbot KPI Text-to-SQL menggunakan AmbiSQL framework.
+Tugasmu: identifikasi SEMUA frasa ambigu yang dapat mengubah SQL atau hasil KPI secara material.
+{addon_prompt_block}
+════════════════════════════════════════════════════════════════
+INPUT ELEMENTS:
+════════════════════════════════════════════════════════════════
 
-Jenis ambiguitas yang mungkin:
-- "temporal": periode waktu tidak jelas (bulan ini vs. bulan terakhir data, tahun ini vs. tahun lalu, dll)
-- "scope": entitas/siapa/apa yang ditampilkan tidak jelas (per individu vs. per divisi, semua vs. subset)
-- "aggregation": cara menggabungkan data tidak jelas (total vs. rata-rata, sum vs. count)
-- "metric": metrik mana yang diminta tidak jelas (target vs. realisasi, persentase vs. nilai absolut)
-- "referential": referensi orang/divisi tidak jelas (divisi saya vs. semua divisi, KPI saya vs. semua KPI)
+Question: "{user_query}"
+Role: {user_role}
+Schema: {DB_SCHEMA}
+Evidence: {kpi_context}
 
-Pertanyaan pengguna: "{user_query}"
+════════════════════════════════════════════════════════════════
+AMBIGUITY TAXONOMY (AmbiSQL):
+════════════════════════════════════════════════════════════════
 
-Evaluasi dengan menjawab JSON berikut (HANYA JSON, tidak ada penjelasan):
+LEVEL 1 — Ambiguity Source:
+- Database-sourced ambiguity: Ketidakjelasan berasal dari struktur/semantik database
+- LLM-sourced ambiguity: Ketidakjelasan berasal dari NL interpretation
+
+⚠️ CRITICAL: Data selalu bersumber dari database. Jangan membuat kategori pemilihan sumber data.
+
+LEVEL 2 — Ambiguity Type:
+- AmbiSchema: Frasa dapat merujuk ke >1 tabel/kolom/metrik KPI
+  Contoh: "terbaik" = achievement%, realisasi, target, atau score
+- AmbiValue: Nilai user tidak jelas atau tidak cocok dengan data aktual
+  Contoh: nama divisi, KPI, karyawan, status, periode
+- AmbiIntent: Operasi bisnis tidak jelas
+  Contoh: daftar vs ranking vs grouping vs filter vs perbandingan vs total vs rata-rata
+- AmbiContext: Konteks bisnis kurang
+  Contoh: cakupan aktif/nonaktif, mata uang, organisasi, aturan KPI
+- AmbiFallacy: Asumsi user bertentangan dengan data tersedia
+  Contoh: mereferensi data yang tidak ada atau karyawan yang tidak aktif
+- AmbiRef: Referensi temporal/spasial tidak spesifik
+  Contoh: bulan ini, tahun lalu, Q3, awal tahun, setelah target tercapai
+
+════════════════════════════════════════════════════════════════
+INSTRUCTIONS:
+════════════════════════════════════════════════════════════════
+
+1. Identifikasi maksimal 5 ambiguitas, urutkan dari dampak terbesar ke SQL
+2. Untuk setiap ambiguitas, tentukan Level 1 dan Level 2 type
+3. Untuk setiap ambiguity, sediakan 2-5 interpretasi konkret (opsi jawaban)
+4. Gunakan Bahasa Indonesia bisnis, bukan istilah SQL, untuk clarifying questions
+5. Jika ambiguitas tidak ada, return has_ambiguity=false dan question_set kosong array
+6. Jika user memilih Abstain pada ambiguitas sebelumnya, jangan identifikasi lagi
+
+════════════════════════════════════════════════════════════════
+OUTPUT FORMAT (Strict JSON — FOLLOW EXACTLY):
+════════════════════════════════════════════════════════════════
+
+CONTOH OUTPUT AMBIGUOUS:
 {{
-  "ambiguity_score": <float 0.0-1.0>,
-  "is_ambiguous": <boolean>,
-  "ambiguity_type": <string dari daftar di atas, atau "none">,
-  "possible_interpretations": [
-    {{"interpretation": "deskripsi interpretasi 1", "sql_dimension": "dimensi yang berbeda"}},
-    {{"interpretation": "deskripsi interpretasi 2", "sql_dimension": "dimensi yang berbeda"}}
-  ],
-  "suggested_clarifying_question": <string atau null>,
-  "answer_options": [<list string dengan 2-4 opsi>]
+  "has_ambiguity": true,
+  "question_set": [
+    {{
+      "question": "Progress KPI Akmal ingin dilihat dari sisi apa?",
+      "level_1_label": "LLM-sourced ambiguity",
+      "level_2_label": "AmbiIntent",
+      "description": {{
+        "options": [
+          "Realisasi KPI terbaru",
+          "Persentase pencapaian terhadap target",
+          "Tren progress dari waktu ke waktu"
+        ]
+      }}
+    }},
+    {{
+      "question": "Akmal merujuk ke karyawan atau KPI yang mana?",
+      "level_1_label": "Database-sourced ambiguity",
+      "level_2_label": "AmbiValue",
+      "description": {{
+        "options": [
+          "Karyawan bernama Akmal",
+          "KPI yang mengandung kata Akmal"
+        ]
+      }}
+    }}
+  ]
 }}
 
-ATURAN PENILAIAN:
-- Skor ≥ 0.7: jelas ambigu, perlu klarifikasi
-- Skor 0.55–0.69: borderline, default ke TIDAK ambigu (langsung jawab)
-- Skor < 0.55: tidak ambigu
-- Jika role=Karyawan dan query menyebut "saya"/"milik saya", anggap TIDAK ambigu (scope sudah terbatas)
-- Jika query menyebutkan bulan/tahun eksplisit, anggap temporal TIDAK ambigu
+CONTOH OUTPUT TIDAK AMBIGUOUS:
+{{
+  "has_ambiguity": false,
+  "question_set": []
+}}
 
-HANYA BERIKAN JSON, TANPA PENJELASAN LAIN."""
+CRITICAL JSON STRUCTURE RULES:
+- NO top-level "ambiguity_score" field
+- NO per-item "ambiguity_score" field
+- NO per-item "metadata" field
+- "description" MUST be an object with ONLY "options" key containing array of strings
+- "options" array contains ONLY the clarifying options (2-5 items)
+- question_set is array of objects, each with exactly: question, level_1_label, level_2_label, description
+
+════════════════════════════════════════════════════════════════
+REMEMBER:
+════════════════════════════════════════════════════════════════
+- Data source ALWAYS database. DO NOT create source-selection ambiguity category.
+- "Abstain" means: skip that ambiguity type and do not identify it again in future queries
+- Return ONLY valid JSON. NO markdown, NO explanation, NO comments.
+- Respect the strict JSON shape above. Do not add extra fields."""
 
     return prompt
 
@@ -339,7 +427,7 @@ def build_clarifying_question_prompt(
     Menghasilkan satu pertanyaan spesifik dengan 2-4 pilihan konkret.
     """
     interpretations_str = "\n".join(
-        f"  {i+1}. {interp['interpretation']}"
+        f"  {i+1}. {interp.get('interpretation') or interp.get('label') or interp if isinstance(interp, dict) else interp}"
         for i, interp in enumerate(possible_interpretations)
     )
 
@@ -377,29 +465,83 @@ Jawab HANYA dalam format JSON (TANPA PENJELASAN LAIN):
 
 def build_query_disambiguation_prompt(
     original_query: str,
-    clarifying_question: str,
-    clarification_answer: str,
+    clarification_answers: list,
+    additional_constraints: str | None = None,
+    additional_information: str | None = None,
 ) -> str:
-    """
-    Membangun prompt untuk query disambiguator.
-    Menggabungkan query asal dengan jawaban klarifikasi menjadi query yang lebih jelas.
-    """
-    prompt = f"""[SYSTEM PROMPT — QUERY DISAMBIGUATOR]
-Pengguna awalnya bertanya: "{original_query}"
-Pertanyaan klarifikasi yang diajukan: "{clarifying_question}"
-Jawaban klarifikasi pengguna: "{clarification_answer}"
+    if additional_information is None:
+        answer_lines = []
+        for answer in clarification_answers:
+            selected = getattr(answer, "selected_option", None) or answer.get("selected_option")
+            free_text = getattr(answer, "free_text", None) if not isinstance(answer, dict) else answer.get("free_text")
+            question_id = getattr(answer, "question_id", None) or answer.get("question_id")
+            effective_answer = free_text if selected == "Lainnya" and free_text else selected
+            if effective_answer == "Lewati":
+                continue
+            answer_lines.append(f"- {question_id}: {effective_answer}")
+        if additional_constraints:
+            answer_lines.append(f"- Constraint tambahan: {additional_constraints}")
+        additional_information = "\n".join(answer_lines) if answer_lines else "Tidak ada informasi tambahan."
 
-Buat query yang sudah disambiguasi (satu kalimat, dalam Bahasa Indonesia) yang 
-menggabungkan pertanyaan asal dengan jawaban klarifikasi secara eksplisit dan spesifik.
+    return f'''## Task
+To combine an `original_question` with `additional_information` into a single, coherent, and complete new question that is logically sound and easy to understand.
 
-CONTOH:
-- Asal: "Siapa yang performanya paling bagus?"
-- Klarifikasi: "Maksudnya bulan ini saja"
-- Disambiguasi: "Tampilkan karyawan dengan persentase pencapaian KPI tertinggi pada bulan April 2025"
+## Core Principles
+1.  **Absolute Preservation**: You MUST preserve ALL constraints, details, and intents from the `original_question`. Nothing from the original should be omitted or altered unless it is directly and explicitly contradicted by the `additional_information`.
+2.  **Full Integration**: You MUST seamlessly integrate ALL new requirements and constraints from the `additional_information` into the new question.
+3.  **Conflict Resolution**: If a piece of `additional_information` directly conflicts with a part of the `original_question`, the `additional_information` takes precedence and should be used to update or replace the conflicting part. This is the **only** scenario where original information may be modified.
+4.  **Natural Language**: The final output must be a single, natural-sounding question, not a list of criteria.
 
-Jawab HANYA dengan kalimat query yang sudah disambiguasi, TANPA JSON, TANPA penjelasan lain."""
+## Examples
+Original question: List all novels published after 2000 that won a Booker Prize.
+Additional information: Only include novels published after 2010 that were also adapted into movies and written by female authors.
+Rewritten question: List all novels published after 2010 that won a Booker Prize, were adapted into movies, and were written by female authors.
 
-    return prompt
+Original question: Which Asian countries have a GDP per capita above $30,000 and a population under 10 million?
+Additional information: Exclude countries that are island nations and with a population more than 10 million.
+Rewritten question: Which Asian countries that are not island nations have a GDP per capita above $30,000 and a population more than 10 million?
+
+Original question: Provide the list of Olympic gold medalists in swimming events for the last three Summer Olympics, including their ages at the time of winning.
+Additional information: I am only interested in male athletes from North America, and only in individual events.
+Rewritten question: Provide the list of male North American Olympic gold medalists in individual swimming events for the last three Summer Olympics, including their ages at the time of winning.
+
+## Response Format
+- Return **only** the text of the rewritten question.
+- Do not include any preamble, labels (like "Rewritten question:"), or explanations.
+
+---
+**Input:**
+Original question: {original_query}
+Additional information: {additional_information}
+
+The rewritten question is:
+'''
+
+
+def build_node_merge_prompt(old_list: list[dict], new_pair: dict) -> str:
+    import json
+
+    return f'''## Task
+Merge a new question-answer pair into an existing list of question-answer pairs.
+
+## Input
+- old_list: existing list of objects, each with a `question` and `answer` field.
+- new_pair: object with a `question` and `answer` field.
+
+old_list:
+{json.dumps(old_list, ensure_ascii=False)}
+
+new_pair:
+{json.dumps(new_pair, ensure_ascii=False)}
+
+## Merge Instructions
+1. Compare the `question` field of `new_pair` with each item in `old_list`. If any question in `old_list` has the same or highly similar meaning as `new_pair` (same intent, possibly different wording), treat it as a conflict.
+2. If there is a conflict, remove the conflicting item and replace it with `new_pair`.
+3. If there is no conflict, append `new_pair` at the end.
+4. Ensure the output list contains no duplicate questions by meaning.
+5. Return ONLY the merged list as a valid JSON array: [{{"question": "...", "answer": "..."}}, ...]
+6. Do NOT return any explanation or text outside the JSON array.
+'''
 
 
 def build_graphic_generation_prompt(
@@ -427,3 +569,21 @@ Output JSON wajib:
 {{"is_visualize": true|false, "chart_type": "bar"|"pie"|"donut"|null}}"""
 
     return prompt
+
+
+def build_context() -> str:
+    """
+    Membangun KPI domain context string untuk digunakan oleh LLM ambiguity detection.
+    """
+    return """
+        Domain KPI chatbot:
+        - KPI Master: definisi KPI, aktivitas, kategori, target, satuan, dan operational definition.
+        - KPI Tracker: realisasi KPI per bulan/tahun, status pencapaian, nilai aktual, dan persentase achievement.
+        - Dimensi organisasi: karyawan, kepala divisi, divisi/departemen, dan cakupan seluruh organisasi.
+        - Dimensi waktu: bulan, tahun, kuartal, tahun berjalan, tahun lalu, bulan ini, dan bulan terakhir data.
+        - Metrik umum: target, realisasi, achievement percentage, performance score, jumlah KPI, total, rata-rata.
+        - Status umum: achieved, partial, failed, tercapai, belum tercapai.
+        AmbiSchema candidates: kata seperti terbaik/performa/nilai dapat merujuk ke achievement percentage, realisasi, target, atau score.
+        AmbiValue candidates: nama divisi, nama KPI, kategori KPI, nama karyawan, periode, dan status harus cocok dengan nilai data aktual bila tersedia.
+        AmbiIntent candidates: tampilkan dapat berarti list, ranking, filter, grouping, comparison, atau aggregation.
+        """.strip()
