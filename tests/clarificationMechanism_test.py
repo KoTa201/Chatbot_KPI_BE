@@ -985,6 +985,60 @@ def test_ambiguity_prompt_omits_empty_addon_prompt():
     assert "[KONSTRAINT CHATBOT AKTIF]" not in prompt
 
 
+@pytest.mark.asyncio
+async def test_ambiguity_detector_passes_addon_prompt_to_prompt_builder(monkeypatch):
+    detector = AmbiguityDetectorService()
+    captured = {}
+
+    def fake_builder(user_query, user_role, kpi_context="", addon_prompt=None):
+        captured["addon_prompt"] = addon_prompt
+        return "prompt"
+
+    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_builder)
+
+    with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = '{"has_ambiguity": false, "question_set": []}'
+        await detector.detect_ambiguity(
+            "KPI terbaik?",
+            "Karyawan",
+            "KPI context",
+            addon_prompt="Gunakan constraint bot.",
+        )
+
+    assert captured["addon_prompt"] == "Gunakan constraint bot."
+
+
+@pytest.mark.asyncio
+async def test_clarification_service_passes_addon_prompt_to_detector(monkeypatch):
+    service = ClarificationService(db=None)
+    service.repo.create = AsyncMock()
+    service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
+        is_ambiguous=False,
+        ambiguity_type="none",
+        ambiguity_score=0.0,
+        detection_source="llm",
+        detected_ambiguities=[],
+    ))
+
+    monkeypatch.setattr("service.clarificationService.build_context", lambda: "KPI context")
+
+    result = await service.process_user_query(
+        user_query="Tampilkan KPI saya",
+        user_role="Karyawan",
+        session_id=SESSION_TEST_1,
+        clarification_count=0,
+        addon_prompt="Gunakan constraint bot.",
+    )
+
+    assert result is None
+    service.ambiguity_detector.detect_ambiguity.assert_awaited_once_with(
+        "Tampilkan KPI saya",
+        "Karyawan",
+        "KPI context",
+        addon_prompt="Gunakan constraint bot.",
+    )
+
+
 class TestKPIPrompts:
     def test_ambiguity_prompt_uses_ambisql_question_set_format(self):
         prompt = build_ambiguity_assessment_prompt(

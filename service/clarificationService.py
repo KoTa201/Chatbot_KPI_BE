@@ -4,6 +4,7 @@ Orchestrator untuk seluruh clarification mechanism.
 Mengkoordinasikan: ambiguity detection → question generation → response handling.
 """
 
+import json
 import logging
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,15 +12,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from schema.clarificationSchema import (
     QueryDisambiguationResult,
     ClarificationMessageResponse,
+    ClarificationQuestionResponse,
+    ClarificationAnswerItem,
 )
 from service.ambiguityDetectorService import AmbiguityDetectorService
-from service.clarificationQuestionGeneratorService import (
-    ClarificationQuestionGeneratorService,
-)
 from service.llmService import LLMService
+from service.preferenceTreeService import PreferenceTree, QAPair
 from repository.clarificationRepository import ClarificationRepository
-from template.promptTemplate import build_query_disambiguation_prompt
+from template.promptTemplate import build_query_disambiguation_prompt, build_context
 from configCredidential import get_settings
+from collections.abc import Mapping
+from typing import Optional
+
+from schema.clarificationSchema import ClarifyingQuestionData
 
 logger = logging.getLogger(__name__)
 
@@ -32,17 +37,17 @@ class ClarificationService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.ambiguity_detector = AmbiguityDetectorService()
-        self.question_generator = ClarificationQuestionGeneratorService()
         self.llm = LLMService()
         self.repo = ClarificationRepository(db)
+        self.MAX_QUESTIONS_PER_BATCH = 3
 
     async def process_user_query(
         self,
         user_query: str,
-        user_id: UUID,
         user_role: str,
         session_id: UUID,
         clarification_count: int = 0,
+        addon_prompt: str | None = None,
     ) -> ClarificationMessageResponse | None:
         """
         Process query dan tentukan: clarify atau direct?
@@ -53,8 +58,9 @@ class ClarificationService:
         """
 
         # STEP 1: Detect ambiguity
+        kpi_context = build_context()
         ambiguity_result = await self.ambiguity_detector.detect_ambiguity(
-            user_query, user_role
+            user_query, user_role, kpi_context, addon_prompt=addon_prompt
         )
         logger.info(
             f"[ClarificationService] Ambiguity detected: score={ambiguity_result.ambiguity_score}, "
@@ -71,100 +77,122 @@ class ClarificationService:
             # Log keputusan ke database
             await self.repo.create(
                 session_id=session_id,
-                user_id=user_id,
-                user_role=user_role,
                 original_query=user_query,
-                ambiguity_score=ambiguity_result.ambiguity_score,
                 ambiguity_type=ambiguity_result.ambiguity_type,
-                decision="direct",
-                decision_source=ambiguity_result.detection_source,
             )
 
             return None  # Tidak perlu klarifikasi, lanjut ke pipeline RAG
 
-        # STEP 3: Generate clarifying question
         logger.info("[ClarificationService] Decision: CLARIFY")
-        clarifying_q = await self.question_generator.generate_clarifying_question(
-            user_query=user_query,
-            ambiguity_type=ambiguity_result.ambiguity_type,
-            possible_interpretations=ambiguity_result.possible_interpretations,
-            suggested_question=ambiguity_result.suggested_clarifying_question,
-            suggested_options=ambiguity_result.answer_options,
-            user_role=user_role,
-        )
 
-        # STEP 4: Log clarification request
-        log = await self.repo.create(
+        return await self._build_clarification_response_from_detection(
             session_id=session_id,
-            user_id=user_id,
-            user_role=user_role,
             original_query=user_query,
-            ambiguity_score=ambiguity_result.ambiguity_score,
-            ambiguity_type=ambiguity_result.ambiguity_type,
-            decision="clarify",
-            decision_source=ambiguity_result.detection_source,
-            clarifying_question=clarifying_q.clarifying_question,
-        )
-        logger.info(f"[ClarificationService] Clarification logged: {log.clarification_question_id}")
-
-        # STEP 5: Return response untuk ditampilkan ke user
-        return ClarificationMessageResponse(
-            session_id=session_id,
-            message_type="clarification",
-            clarifying_question=clarifying_q.clarifying_question,
-            options=clarifying_q.options,
+            ambiguity_result=ambiguity_result,
         )
 
     async def handle_clarification_response(
         self,
         session_id: UUID,
-        clarification_answer: str,
+        clarification_answers: list[ClarificationAnswerItem],
+        additional_constraints: str | None = None,
+        original_query: str | None = None,
+        refinement_round: int = 1,
     ) -> QueryDisambiguationResult:
         """
         Handle jawaban klarifikasi dari pengguna.
         Return: query yang sudah disambiguasi.
         """
-        # STEP 1: Ambil log clarification terakhir di session ini
-        last_log = await self.repo.get_last_clarification(session_id)
-        if not last_log:
+        logs = await self.repo.get_by_session(session_id)
+        if not logs:
             raise ValueError(
                 f"Tidak ada pertanyaan klarifikasi untuk session {session_id}")
 
-        original_query = last_log.ambiguous_phrase or ""
-        clarifying_question = last_log.clarification_question
+        log_by_id = {str(log.clarification_question_id): log for log in logs}
+        missing = [
+            answer.question_id for answer in clarification_answers if answer.question_id not in log_by_id]
+        if missing:
+            raise ValueError(
+                f"Pertanyaan klarifikasi tidak ditemukan: {', '.join(missing)}")
 
-        if not clarifying_question:
-            raise ValueError(f"Log tidak memiliki clarifying_question")
+        source_query = original_query or logs[-1].ambiguous_phrase or ""
+        qa_set = self._build_qa_set(clarification_answers, log_by_id)
+        preference_tree = PreferenceTree(llm=self.llm)
+        await preference_tree.update_tree(qa_set)
+        additional_information = preference_tree.build_additional_information(
+            qa_set=qa_set,
+            additional_constraints=additional_constraints,
+        )
 
-        # STEP 2: Disambiguasi query menggunakan LLM
         logger.info("[ClarificationService] Disambiguating query...")
         disambiguated_query = await self._disambiguate_query(
-            original_query, clarifying_question, clarification_answer
+            original_query=source_query,
+            clarification_answers=clarification_answers,
+            additional_constraints=additional_constraints,
+            additional_information=additional_information,
         )
 
-        # STEP 3: Update log dengan jawaban dan disambiguated query
-        await self.repo.update_with_answer(
-            log_id=last_log.clarification_question_id,
-            clarification_answer=clarification_answer,
-            disambiguated_query=disambiguated_query,
-        )
-        logger.info(
-            f"[ClarificationService] Clarification response recorded: {last_log.clarification_question_id}"
-        )
+        for answer in clarification_answers:
+            effective_answer = answer.free_text if answer.selected_option == "Lainnya" and answer.free_text else answer.selected_option
+            await self.repo.update_with_answer(
+                log_id=answer.question_id,
+                clarification_answer=effective_answer,
+                disambiguated_query=disambiguated_query,
+                free_text_answer=answer.free_text,
+            )
 
-        # STEP 4: Return result untuk next step (pipeline RAG)
+        recheck_result = await self._recheck_ambiguity_after_refinement(
+            rewritten_query=disambiguated_query,
+            user_role="User",
+            preference_tree=preference_tree,
+            refinement_round=refinement_round,
+        )
+        next_clarification = None
+        if recheck_result and recheck_result.is_ambiguous and refinement_round < 3:
+            next_clarification = await self._build_clarification_response_from_detection(
+                session_id=session_id,
+                original_query=disambiguated_query,
+                ambiguity_result=recheck_result,
+            )
+
         return QueryDisambiguationResult(
-            original_query=original_query,
-            clarifying_question=clarifying_question,
-            clarification_answer=clarification_answer,
+            original_query=source_query,
+            clarification_answers=clarification_answers,
             disambiguated_query=disambiguated_query,
+            additional_constraints=additional_constraints,
+            needs_more_clarification=next_clarification is not None,
+            clarification_message=next_clarification,
+            preference_tree=preference_tree.serialize(),
+            refinement_round=refinement_round,
         )
+
+    @staticmethod
+    def _build_qa_set(
+        clarification_answers: list[ClarificationAnswerItem],
+        log_by_id: Mapping[str, object],
+    ) -> list[QAPair]:
+        qa_set: list[QAPair] = []
+        for answer in clarification_answers:
+            log = log_by_id[answer.question_id]
+            effective_answer = answer.free_text if answer.selected_option == "Lainnya" and answer.free_text else answer.selected_option
+            qa_set.append(
+                QAPair(
+                    level1=getattr(log, "ambiguity_type", None) or "unknown",
+                    level2=getattr(log, "ambiguous_phrase", None) or getattr(
+                        log, "clarification_question", None) or answer.question_id,
+                    question=getattr(log, "clarification_question",
+                                     None) or answer.question_id,
+                    answer=effective_answer,
+                )
+            )
+        return qa_set
 
     async def _disambiguate_query(
         self,
         original_query: str,
-        clarifying_question: str,
-        clarification_answer: str,
+        clarification_answers: list[ClarificationAnswerItem],
+        additional_constraints: str | None = None,
+        additional_information: str | None = None,
     ) -> str:
         """
         Gunakan LLM untuk mengkombinasikan query asal + jawaban klarifikasi
@@ -174,7 +202,10 @@ class ClarificationService:
         """
         try:
             prompt = build_query_disambiguation_prompt(
-                original_query, clarifying_question, clarification_answer
+                original_query=original_query,
+                clarification_answers=clarification_answers,
+                additional_constraints=additional_constraints,
+                additional_information=additional_information,
             )
 
             response = await self.llm._call_llm(
@@ -198,50 +229,146 @@ class ClarificationService:
             )
             # Fallback strategy: Gunakan smart combination tanpa LLM
             return self._build_fallback_disambiguated_query(
-                original_query, clarification_answer
+                original_query, clarification_answers, additional_constraints
             )
 
-    def _build_fallback_disambiguated_query(
+    async def _recheck_ambiguity_after_refinement(
         self,
-        original_query: str,
-        clarification_answer: str,
+        rewritten_query: str,
+        user_role: str,
+        preference_tree: PreferenceTree,
+        refinement_round: int,
+    ):
+        evidence_context = (
+            f"Refinement round: {refinement_round}\n"
+            f"Serialized preference tree: {json.dumps(preference_tree.serialize(), ensure_ascii=False)}"
+        )
+        try:
+            return await self.ambiguity_detector.detect_ambiguity(
+                rewritten_query,
+                user_role,
+                evidence_context,
+            )
+        except Exception as exc:
+            logger.warning(
+                "[ClarificationService] Ambiguity re-check failed: %s", exc)
+            return None
+
+    @staticmethod
+    def _build_fallback_disambiguated_query(
+            original_query: str,
+        clarification_answers: list[ClarificationAnswerItem],
+        additional_constraints: str | None = None,
     ) -> str:
         """
         Fallback untuk disambiguasi query ketika LLM tidak available.
         Menggunakan strategi deterministic untuk mengkombinasikan query dengan jawaban.
         """
-        # Cleanup inputs
         query = original_query.strip()
-        answer = clarification_answer.strip()
+        additions: list[str] = []
+        for answer in clarification_answers:
+            if answer.selected_option == "Lewati":
+                continue
+            if answer.selected_option == "Lainnya" and answer.free_text:
+                additions.append(answer.free_text.strip())
+            else:
+                additions.append(answer.selected_option.strip())
+        if additional_constraints:
+            additions.append(additional_constraints.strip())
+        if not additions:
+            return query
+        return f"{query} ({'; '.join(additions)})"
 
-        # Strategy: Smart combination based on answer type
-        # Detect answer characteristics
-        answer_lower = answer.lower()
+    async def _build_clarification_response_from_detection(
+        self,
+        session_id: UUID,
+        original_query: str,
+        ambiguity_result,
+    ) -> ClarificationMessageResponse | None:
+        if not ambiguity_result or not ambiguity_result.is_ambiguous:
+            return None
 
-        # Temporal answers (bulan, tahun, periode)
-        if any(x in answer_lower for x in ["bulan", "tahun", "week", "hari", "january", "februari", "maret", "april", "mei", "juni", "juli", "agustus", "september", "oktober", "november", "desember", "2025", "2024", "2026"]):
-            # Temporal answer: append period ke query
-            result = f"{query} untuk {answer}"
-        # Scope answers (individu, divisi, keseluruhan)
-        elif any(x in answer_lower for x in ["individu", "divisi", "keseluruhan", "semua", "tim", "departemen", "perusahaan"]):
-            # Scope answer: specify scope
-            result = f"{query} per {answer}"
-        # Metric answers (persentase, nilai, jumlah)
-        elif any(x in answer_lower for x in ["persentase", "nilai", "jumlah", "rata-rata", "total", "count", "sum", "average"]):
-            # Metric answer: specify metric
-            result = f"{query} dalam bentuk {answer}"
-        # Status answers (achieve, partial, fail)
-        elif any(x in answer_lower for x in ["achieve", "partial", "fail", "tercapai", "sebagian", "gagal"]):
-            # Status answer: filter by status
-            result = f"{query} dengan status {answer}"
-        else:
-            # Generic: simple combination
-            result = f"{query} ({answer})"
+        detected = sorted(
+            ambiguity_result.detected_ambiguities,
+            key=lambda item: item.ambiguity_score,
+            reverse=True,
+        )[: self.MAX_QUESTIONS_PER_BATCH]
+        if not detected:
+            return None
 
-        logger.info(
-            f"[ClarificationService] Fallback disambiguated: '{query}' + '{answer}' → '{result}'"
+        questions: list[ClarificationQuestionResponse] = []
+        for ambiguity in detected:
+            clarifying_q = await self._generate_clarifying_question(
+                ambiguity_type=ambiguity.ambiguity_type,
+                suggested_question=ambiguity.suggested_clarifying_question,
+                suggested_options=ambiguity.answer_options,
+                ambiguous_phrase=ambiguity.ambiguous_phrase,
+                metadata=ambiguity.metadata,
+            )
+            log = await self.repo.create(
+                session_id=session_id,
+                original_query=original_query,
+                ambiguity_type=ambiguity.ambiguity_type,
+                is_ambiguity_level1_type_llm=ambiguity.metadata.get(
+                    "is_ambiguity_level1_type_llm"),
+                clarifying_question=clarifying_q.clarifying_question,
+                answer_options=clarifying_q.options,
+                ambiguous_phrase=clarifying_q.ambiguous_phrase,
+            )
+            questions.append(
+                ClarificationQuestionResponse(
+                    id=str(log.clarification_question_id),
+                    ambiguous_phrase=clarifying_q.ambiguous_phrase or ambiguity.ambiguous_phrase,
+                    ambiguity_type=clarifying_q.ambiguity_type or ambiguity.ambiguity_type,
+                    question=clarifying_q.clarifying_question,
+                    options=clarifying_q.options,
+                    metadata=getattr(clarifying_q, "metadata", {}),
+                )
+            )
+
+        return ClarificationMessageResponse(
+            session_id=session_id,
+            message_type="clarification",
+            clarifying_question=questions[0].question if questions else None,
+            options=questions[0].options if questions else None,
+            questions=questions,
         )
-        return result
+
+    @staticmethod
+    async def _generate_clarifying_question(
+            ambiguity_type: str,
+        suggested_question: Optional[str],
+        suggested_options: Optional[list[str]],
+        ambiguous_phrase: str | None = None,
+        metadata: dict | None = None,
+    ) -> ClarifyingQuestionData:
+        if suggested_question and suggested_options:
+            logger.info(
+                "[ClarificationGenerator] Formatting detector question")
+            default_options = ["Lewati", "Lainnya"]
+            raw_options = [
+                option for option in suggested_options if option not in default_options]
+            options = raw_options[:5] + default_options
+            return ClarifyingQuestionData(
+                clarifying_question=suggested_question,
+                options=options,
+                default_if_no_answer="Lewati",
+                ambiguity_type=ambiguity_type,
+                ambiguous_phrase=ambiguous_phrase,
+                metadata=metadata or {},
+            )
+
+        logger.warning(
+            "[ClarificationGenerator] Detector did not provide a complete clarification question"
+        )
+        return ClarifyingQuestionData(
+            clarifying_question="",
+            options=["Lewati", "Lainnya"],
+            default_if_no_answer="Lewati",
+            ambiguity_type=ambiguity_type,
+            ambiguous_phrase=ambiguous_phrase,
+            metadata=metadata or {},
+        )
 
     async def get_session_clarification_history(
         self, session_id: UUID
@@ -262,14 +389,3 @@ class ClarificationService:
     async def get_clarification_count_in_session(self, session_id: UUID) -> int:
         """Hitung jumlah clarification dalam satu session."""
         return await self.repo.get_clarify_decisions_count(session_id)
-
-    async def record_feedback(
-        self,
-        log_id: UUID,
-        user_feedback: bool,
-        needed_correction: bool | None = None,
-    ) -> None:
-        """Record feedback pengguna untuk evaluasi."""
-        await self.repo.update_feedback(log_id, user_feedback, needed_correction)
-        logger.info(
-            f"[ClarificationService] Feedback recorded for log {log_id}")
