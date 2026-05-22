@@ -66,3 +66,84 @@ async def test_get_active_by_authority_accepts_role_string():
     assert result is chatbot
     compiled = str(db.statement.compile(compile_kwargs={"literal_binds": True}))
     assert "chatbots.authority = 'kepala_divisi'" in compiled
+
+
+from fastapi import HTTPException
+
+import service.chatService as chat_service_module
+from service.chatService import ChatService
+from schema.chatSchema import ChatResponse
+from unittest.mock import AsyncMock
+
+
+async def test_process_query_fails_when_no_active_chatbot(monkeypatch):
+    class FakeChatbotRepo:
+        def __init__(self, db):
+            pass
+
+        async def get_active_by_authority(self, authority):
+            return None
+
+    monkeypatch.setattr(chat_service_module, "ChatbotRepository", FakeChatbotRepo)
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+
+    with pytest.raises(HTTPException) as exc:
+        await service.process_query(
+            user_message="Tampilkan KPI saya",
+            user_id=UUID("00000000-0000-0000-0000-000000000401"),
+            user_role="karyawan",
+            user_divisi=None,
+            session_id=None,
+        )
+
+    assert exc.value.status_code == 404
+    assert "Tidak ada chatbot aktif" in exc.value.detail
+
+
+async def test_process_query_resolves_chatbot_before_session_creation(monkeypatch):
+    events = []
+
+    class FakeChatbotRepo:
+        def __init__(self, db):
+            pass
+
+        async def get_active_by_authority(self, authority):
+            events.append(("chatbot_lookup", authority))
+            return SimpleNamespace(addon_prompt="Gunakan constraint bot.")
+
+    class FakeSessionService:
+        def __init__(self, db):
+            pass
+
+        async def create_session_if_missing(self, **kwargs):
+            events.append(("session_create", kwargs["session_id"]))
+
+    class FakeClarificationService:
+        def __init__(self, db):
+            pass
+
+        async def get_clarification_count_in_session(self, session_id):
+            return 0
+
+        async def process_user_query(self, **kwargs):
+            return None
+
+    monkeypatch.setattr(chat_service_module, "ChatbotRepository", FakeChatbotRepo)
+    monkeypatch.setattr(chat_service_module, "ChatSessionService", FakeSessionService)
+    monkeypatch.setattr("service.clarificationService.ClarificationService", FakeClarificationService)
+    monkeypatch.setattr(ChatService, "_run_nl_to_sql_stage", AsyncMock(return_value=("SELECT 1;", SimpleNamespace(is_visualize=False, chart_type=None))))
+    monkeypatch.setattr(ChatService, "_run_sql_validation_stage", lambda self, **kwargs: SimpleNamespace(is_valid=False, sanitized_sql=None, reason="blocked"))
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    response = await service.process_query(
+        user_message="Tampilkan KPI saya",
+        user_id=UUID("00000000-0000-0000-0000-000000000402"),
+        user_role="karyawan",
+        user_divisi=None,
+        session_id=None,
+    )
+
+    assert isinstance(response, ChatResponse)
+    assert events[0][0] == "chatbot_lookup"
+    assert events[1][0] == "session_create"

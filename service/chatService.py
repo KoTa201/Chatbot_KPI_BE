@@ -19,11 +19,12 @@ from fastapi import HTTPException, status
 from configCredidential import get_settings
 from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
-from service.sqlWireguardService import SQLWireguardService
+from service.sqlGuardRailsService import SQLWireguardService
 from service.chatSessionService import ChatSessionService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
+from repository.chatbotRepository import ChatbotRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
 
 settings = get_settings()
@@ -41,7 +42,7 @@ class ChatService:
         self.session_service = ChatSessionService(db)
         self.clarification_repo = ClarificationRepository(db)
         self.query_repo = ChatQueryRepository(db)
-
+        self.chatbot_repo = ChatbotRepository(db)
 
     async def process_query(
         self,
@@ -65,6 +66,9 @@ class ChatService:
         """
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
+
+        active_chatbot = await self._get_active_chatbot_for_role(user_role)
+        addon_prompt = getattr(active_chatbot, "addon_prompt", None)
 
         session_id = session_id or uuid.uuid4()
         await self.session_service.create_session_if_missing(
@@ -95,7 +99,6 @@ class ChatService:
 
                 clarification_response = await clarification_service.process_user_query(
                     user_query=user_message,
-                    user_id=user_id,
                     user_role=user_role,
                     session_id=session_id,
                     clarification_count=clarification_count,
@@ -108,8 +111,9 @@ class ChatService:
 
                     return ChatResponse(
                         session_id=session_id,
-                        message=clarification_response.clarifying_question or "",
+                        message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
                         clarification_message_answer_options=clarification_response.options,
+                        clarification_questions=clarification_response.questions,
                         pipeline_stages=stages,
                     )
                 else:
@@ -204,6 +208,15 @@ class ChatService:
         except Exception as error:
             raise await self._handle_pipeline_error(pipeline, error)
 
+    async def _get_active_chatbot_for_role(self, user_role: str):
+        chatbot = await self.chatbot_repo.get_active_by_authority(user_role)
+        if chatbot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
+            )
+        return chatbot
+
     @staticmethod
     def _build_pipeline_context(
         session_id: UUID,
@@ -287,7 +300,8 @@ class ChatService:
             )
             generated_sql = await llm.generate_sql(nl_prompt)
 
-            n2_prompt = build_graphic_generation_prompt(user_query=user_message)
+            n2_prompt = build_graphic_generation_prompt(
+                user_query=user_message)
             visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
             pipeline["generated_sql"] = generated_sql
 
@@ -308,7 +322,8 @@ class ChatService:
                     "SQL tidak dapat digenerate karena layanan AI sedang tidak tersedia.",
                 )
             else:
-                self._complete_stage(stage, "failed", "Gagal melakukan proses NL-to-SQL.")
+                self._complete_stage(
+                    stage, "failed", "Gagal melakukan proses NL-to-SQL.")
             raise
 
     def _run_sql_validation_stage(
@@ -445,4 +460,3 @@ class ChatService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Query tidak dapat dieksekusi. Silakan coba pertanyaan yang berbeda.",
             ) from e
-
