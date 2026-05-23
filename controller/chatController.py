@@ -13,9 +13,10 @@ from uuid import UUID
 from databaseConfig import get_db
 from service.authService import get_current_user
 from service.chatService import ChatService
+from service.chatSessionService import ChatSessionService
 from service.clarificationService import ClarificationService
-from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
-from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
+from schema.chatSchema import ChatRequest, ChatResponse
+from schema.sessionSchema import SessionDetailResponse, SessionResponse, UpdateSessionTitleRequest
 from model.User import User
 
 
@@ -71,10 +72,10 @@ class ChatController:
         2. Sistem disambiguasi query
         3. Query disambiguasi dikirim ke pipeline RAG biasa
         """
-        if not request.session_id or not request.clarification_answer:
+        if not request.session_id or not request.clarification_answers:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="session_id dan clarification_answer wajib disertakan",
+                detail="session_id dan clarification_answers wajib disertakan",
             )
 
         user_id = str(current_user.id)
@@ -93,13 +94,24 @@ class ChatController:
         try:
             disambiguation_result = await clarification_service.handle_clarification_response(
                 session_id=request.session_id,
-                clarification_answer=request.clarification_answer,
+                clarification_answers=request.clarification_answers,
+                additional_constraints=request.additional_constraints,
+                original_query=request.message,
             )
         except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=str(e),
             )
+
+        if getattr(disambiguation_result, "needs_more_clarification", False):
+            clarification_message = disambiguation_result.clarification_message
+            response = ChatResponse(
+                session_id=request.session_id,
+                message=clarification_message.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                clarification_questions=clarification_message.questions,
+            )
+            return self._build_streaming_response(response)
 
         # Lanjutkan ke pipeline RAG dengan query yang sudah disambiguasi
         service = ChatService(self.db)
@@ -114,83 +126,6 @@ class ChatController:
         )
         return self._build_streaming_response(response)
 
-    async def handle_get_history(
-        self,
-        skip: int = 0,
-        limit: int = 20,
-        current_user: User = Depends(get_current_user),
-    ) -> list[AuditLogResponse]:
-        """
-        Handle GET /chat/history — ambil riwayat query user dari audit log.
-        """
-        if limit > 100:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Limit maksimal adalah 100.",
-            )
-
-        user_id = str(current_user.id)
-        service = ChatService(self.db)
-        logs = await service.get_audit_history(
-            user_id=UUID(user_id),
-            skip=skip,
-            limit=limit,
-        )
-        return [AuditLogResponse.model_validate(log) for log in logs]
-
-    async def handle_get_audit_all(
-        self,
-        skip: int = 0,
-        limit: int = 50,
-        current_user: User = Depends(get_current_user),
-    ) -> list[AuditLogResponse]:
-        """
-        Handle GET /chat/audit — hanya untuk Admin/Kepala Divisi.
-        Ambil semua audit log yang gagal validasi SQLWireguard.
-        """
-        role_value = self._extract_role_value(current_user)
-        if role_value not in ("admin", "kepala_divisi"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Akses ditolak. Hanya Admin dan Kepala Divisi yang dapat melihat audit log.",
-            )
-
-        service = ChatService(self.db)
-        logs = await service.get_failed_wireguard_audit_logs(skip=skip, limit=limit)
-        return [AuditLogResponse.model_validate(log) for log in logs]
-
-    async def handle_get_sessions(
-        self,
-        current_user: User = Depends(get_current_user),
-    ) -> list[SessionResponse]:
-        user_id = str(current_user.id)
-        service = ChatService(self.db)
-        sessions = await service.get_sessions(user_id=UUID(user_id))
-        return [SessionResponse.model_validate(s) for s in sessions]
-
-    async def handle_delete_session(
-        self,
-        session_id: str,
-        current_user: User = Depends(get_current_user),
-    ) -> None:
-        user_id = str(current_user.id)
-        service = ChatService(self.db)
-        await service.delete_session(session_id=session_id, user_id=UUID(user_id))
-
-    async def handle_update_session_title(
-        self,
-        session_id: str,
-        request: UpdateSessionTitleRequest,
-        current_user: User = Depends(get_current_user),
-    ) -> SessionResponse:
-        user_id = str(current_user.id)
-        service = ChatService(self.db)
-        updated = await service.update_session_title(
-            session_id=session_id,
-            user_id=UUID(user_id),
-            title=request.title,
-        )
-        return SessionResponse.model_validate(updated)
 
     @staticmethod
     def _extract_role_value(current_user: User) -> str:
@@ -200,12 +135,7 @@ class ChatController:
 
     @staticmethod
     def _to_chat_role(role_value: str) -> str:
-        role_map = {
-            "admin": "Admin",
-            "kepala_divisi": "Kepala Divisi",
-            "karyawan": "Karyawan",
-        }
-        return role_map.get(role_value, role_value)
+        return role_value.strip().lower()
 
     @staticmethod
     def _message_chunks(message: str) -> list[str]:
@@ -221,8 +151,46 @@ class ChatController:
             chunks.append(f"{word} " if index < last_index else word)
         return chunks
 
+    async def handle_get_session_detail(
+        self,
+        session_id: UUID,
+        current_user: User = Depends(get_current_user),
+    ) -> SessionDetailResponse:
+        service = ChatSessionService(self.db)
+        return await service.get_session_detail(session_id=session_id, user_id=current_user.id)
+
+    async def handle_get_sessions(
+        self,
+        current_user: User = Depends(get_current_user),
+    ) -> list[SessionResponse]:
+        service = ChatSessionService(self.db)
+        sessions = await service.get_sessions(user_id=str(current_user.id))
+        return [SessionResponse.model_validate(s) for s in sessions]
+
+    async def handle_delete_session(
+        self,
+        session_id: UUID,
+        current_user: User = Depends(get_current_user),
+    ) -> None:
+        service = ChatSessionService(self.db)
+        await service.delete_session(session_id=session_id, user_id=current_user.id)
+
+    async def handle_update_session_title(
+        self,
+        session_id: UUID,
+        request: UpdateSessionTitleRequest,
+        current_user: User = Depends(get_current_user),
+    ) -> SessionResponse:
+        service = ChatSessionService(self.db)
+        updated = await service.update_session_title(
+            session_id=session_id,
+            user_id=current_user.id,
+            title=request.title,
+        )
+        return SessionResponse.model_validate(updated)
+
     def _build_streaming_response(self, response: ChatResponse) -> StreamingResponse:
-        payload = response.model_dump()
+        payload = response.model_dump(mode="json")
         metadata = {key: value for key,
                     value in payload.items() if key != "message"}
         message = payload.get("message") or ""

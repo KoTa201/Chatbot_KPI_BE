@@ -13,8 +13,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from model.Base import Base, RoleEnum
 from model.PasswordReset import PasswordReset
 if TYPE_CHECKING:
-    from model.ChatbotAuditLog import ChatbotAuditLog
-    from model.PasswordReset import PasswordReset
     from model.ChatSession import ChatSession
 
 
@@ -47,10 +45,6 @@ class User(Base):
 
     password_resets: Mapped[list["PasswordReset"]] = relationship(
         "PasswordReset", back_populates="user", cascade="all, delete-orphan"
-    )
-
-    audit_logs: Mapped[list["ChatbotAuditLog"]] = relationship(
-        "ChatbotAuditLog", back_populates="user"
     )
 
     sessions: Mapped[list["ChatSession"]] = relationship(

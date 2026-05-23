@@ -1,15 +1,18 @@
-import uuid
-from datetime import datetime
-from typing import Optional, List
-from pydantic import BaseModel, field_validator
+from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
+
+from schema.clarificationSchema import ClarificationAnswerItem, ClarificationQuestionResponse
 
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: str | None = None
+    session_id: UUID | None = None
     show_sql: bool = False  # Opsional: tampilkan SQL ke user
     # Jawaban atas pertanyaan klarifikasi
-    clarification_answer: Optional[str] = None
+    clarification_answers: list[ClarificationAnswerItem] = Field(default_factory=list)
+    additional_constraints: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -29,34 +32,19 @@ class PipelineStageInfo(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    session_id: str
+    session_id: UUID
     message: str                        # Jawaban naratif dari LLM
     # Jika ada pertanyaan klarifikasi
-    clarification_message_answer_options: List[str] | None = None
+    clarification_questions: list[ClarificationQuestionResponse] | None = None
     generated_sql: str | None = None    # Hanya ditampilkan jika show_sql=True
     graphic_chart_type: str | None = None
     graphic_image_base64: str | None = None
     rows_returned: int | None = None
     execution_time_ms: int | None = None
-    pipeline_stages: list[PipelineStageInfo] = []
+    pipeline_stages: list[PipelineStageInfo] = Field(default_factory=list)
 
 
 class ChatErrorResponse(BaseModel):
     error: str
     stage: str | None = None
     safe: bool = True
-
-
-class AuditLogResponse(BaseModel):
-    id: uuid.UUID
-    session_id: str | None
-    user_role: str | None
-    user_query: str | None
-    wireguard_status: str | None
-    wireguard_reason: str | None
-    execution_status: str | None
-    rows_returned: int | None
-    execution_time_ms: int | None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}

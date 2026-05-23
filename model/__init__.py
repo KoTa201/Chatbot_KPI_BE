@@ -3,10 +3,10 @@ from .KPITracker import KPITracker
 from .KPIGroup import KPIGroup
 from .IngestionLog import IngestionLogORM
 from .Chatbot import Chatbot
-from .ChatbotAuditLog import ChatbotAuditLog
 from .KPIMaster import KPIMaster
 from .ChatSession import ChatSession
-from .ClarificationLog import ClarificationLogORM
+from .ChatMessage import ChatMessage
+from .ClarificationQuestion import ClarificationQuestion
 from .PasswordReset import PasswordReset
 from .RevokedToken import RevokedToken
 from .SchedulerConfig import SchedulerConfigModel

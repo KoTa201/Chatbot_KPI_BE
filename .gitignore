@@ -82,3 +82,5 @@ CLAUDE_USER.md
 docs/
 
 .claude/
+
+.graphify-out/

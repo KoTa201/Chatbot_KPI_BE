@@ -3,13 +3,15 @@ Chat Router — mendefinisikan semua HTTP endpoint untuk chatbot KPI.
 Tanggung jawab: routing, HTTP method, status code, response model.
 Logika bisnis didelegasikan ke ChatController → ChatService.
 """
-from fastapi import APIRouter, Depends, Query, status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
 from service.authService import get_current_user
 from controller.chatController import ChatController
-from schema.chatSchema import ChatRequest, ChatResponse, AuditLogResponse
-from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
+from schema.chatSchema import ChatRequest, ChatResponse
+from schema.sessionSchema import SessionDetailResponse, SessionResponse, UpdateSessionTitleRequest
 from model.User import User
 
 
@@ -46,26 +48,6 @@ class ChatRouter:
             summary="Respond to clarification question (streaming message)",
         )
 
-        # ── History ─────────────────────────────────────────────────── #
-        self.router.add_api_route(
-            "/history",
-            self.get_my_history,
-            methods=["GET"],
-            response_model=list[AuditLogResponse],
-            status_code=status.HTTP_200_OK,
-            summary="Riwayat query chatbot milik user yang sedang login",
-        )
-
-        # ── Audit ───────────────────────────────────────────────────── #
-        self.router.add_api_route(
-            "/audit/failed",
-            self.get_failed_wireguard_logs,
-            methods=["GET"],
-            response_model=list[AuditLogResponse],
-            status_code=status.HTTP_200_OK,
-            summary="[Admin/kepala_divisi] Daftar query yang ditolak SQLWireguard",
-        )
-
         # ── Sessions ────────────────────────────────────────────────── #
         self.router.add_api_route(
             "/sessions",
@@ -74,6 +56,15 @@ class ChatRouter:
             response_model=list[SessionResponse],
             status_code=status.HTTP_200_OK,
             summary="Daftar semua session milik user yang sedang login",
+        )
+
+        self.router.add_api_route(
+            "/sessions/{session_id}",
+            self.get_session_detail,
+            methods=["GET"],
+            response_model=SessionDetailResponse,
+            status_code=status.HTTP_200_OK,
+            summary="Detail session beserta riwayat pesan dan pertanyaan klarifikasi",
         )
 
         self.router.add_api_route(
@@ -134,45 +125,7 @@ class ChatRouter:
         3. Sistem disambiguasi query berdasarkan jawaban
         4. Query yang sudah jelas diteruskan ke pipeline RAG biasa
         """
-        if not request.clarification_answer:
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=400,
-                detail="clarification_answer harus disertakan untuk endpoint ini"
-            )
         return await controller.handle_clarification(request=request, current_user=current_user)
-
-    async def get_my_history(
-        self,
-        skip: int = Query(
-            default=0, ge=0, description="Offset untuk pagination"),
-        limit: int = Query(default=20, ge=1, le=100,
-                           description="Jumlah data per halaman"),
-        current_user: User = Depends(get_current_user),
-        controller: ChatController = Depends(ChatController),
-    ):
-        """
-        Mengembalikan riwayat query chatbot (dari audit log) milik user yang sedang login.
-        Diurutkan dari yang terbaru.
-        """
-        return await controller.handle_get_history(
-            skip=skip, limit=limit, current_user=current_user
-        )
-
-    async def get_failed_wireguard_logs(
-        self,
-        skip: int = Query(default=0, ge=0),
-        limit: int = Query(default=50, ge=1, le=100),
-        current_user: User = Depends(get_current_user),
-        controller: ChatController = Depends(ChatController),
-    ):
-        """
-        Mengembalikan semua query yang gagal melewati validasi SQLWireguard.
-        Hanya dapat diakses oleh role **Admin** dan **kepala_divisi** untuk keperluan monitoring keamanan.
-        """
-        return await controller.handle_get_audit_all(
-            skip=skip, limit=limit, current_user=current_user
-        )
 
     async def get_sessions(
         self,
@@ -182,9 +135,20 @@ class ChatRouter:
         """Kembalikan semua session chatbot milik user yang sedang login."""
         return await controller.handle_get_sessions(current_user=current_user)
 
+    async def get_session_detail(
+        self,
+        session_id: UUID,
+        current_user: User = Depends(get_current_user),
+        controller: ChatController = Depends(ChatController),
+    ):
+        """Kembalikan detail session, pesan, dan pertanyaan klarifikasi per pesan."""
+        return await controller.handle_get_session_detail(
+            session_id=session_id, current_user=current_user
+        )
+
     async def delete_session(
         self,
-        session_id: str,
+        session_id: UUID,
         current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),
     ):
@@ -198,7 +162,7 @@ class ChatRouter:
 
     async def update_session_title(
         self,
-        session_id: str,
+        session_id: UUID,
         request: UpdateSessionTitleRequest,
         current_user: User = Depends(get_current_user),
         controller: ChatController = Depends(ChatController),

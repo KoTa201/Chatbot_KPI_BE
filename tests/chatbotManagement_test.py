@@ -343,17 +343,17 @@ class TestListChatbot:
 
         assert res.json()["total"] == 2
 
-    async def test_list_inactive_excluded(self, client: AsyncClient, db_session: AsyncSession):
-        """Chatbot dengan is_active=False tidak muncul di list default."""
+    async def test_list_includes_inactive(self, client: AsyncClient, db_session: AsyncSession):
+        """Chatbot dengan is_active=False tetap muncul di list default."""
         await seed_chatbot(db_session, chatbot_name="Aktif Bot")
         await seed_chatbot(db_session, chatbot_name="Nonaktif Bot", is_active=False)
 
         res = await client.get("/api/v1/chatbots/")
 
         body = res.json()
-        assert body["total"] == 1
+        assert body["total"] == 2
         names = {item["chatbot_name"] for item in body["data"]}
-        assert names == {"Aktif Bot"}
+        assert names == {"Aktif Bot", "Nonaktif Bot"}
 
     async def test_list_pagination_limit(self, client: AsyncClient, db_session: AsyncSession):
         """limit membatasi jumlah item per halaman."""
@@ -713,15 +713,16 @@ class TestSoftDeleteChatbot:
         assert res.status_code == 200
         assert res.json()["is_active"] is False
 
-    async def test_soft_delete_excluded_from_list(self, client: AsyncClient, db_session: AsyncSession):
-        """Setelah soft delete, chatbot tidak muncul di GET /."""
+    async def test_soft_delete_included_in_list(self, client: AsyncClient, db_session: AsyncSession):
+        """Setelah soft delete, chatbot tetap muncul di GET /."""
         chatbot = await seed_chatbot(db_session, chatbot_name="Hidden Bot")
 
         await client.delete(f"/api/v1/chatbots/{chatbot.id}")
         res = await client.get("/api/v1/chatbots/")
 
         data_by_id = {c["id"]: c for c in res.json()["data"]}
-        assert str(chatbot.id) not in data_by_id
+        assert str(chatbot.id) in data_by_id
+        assert data_by_id[str(chatbot.id)]["is_active"] is False
 
     async def test_soft_delete_not_found_returns_404(self, client: AsyncClient):
         """Soft delete chatbot yang tidak ada harus return 404."""

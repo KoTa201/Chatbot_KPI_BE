@@ -19,8 +19,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_column("kpi_master_records", "tahun")
-    op.drop_column("kpi_tracker_records", "tahun")
+    op.execute("ALTER TABLE kpi_master_records DROP COLUMN IF EXISTS tahun")
+    op.execute("ALTER TABLE kpi_tracker_records DROP COLUMN IF EXISTS tahun")
 
 
 def downgrade() -> None:

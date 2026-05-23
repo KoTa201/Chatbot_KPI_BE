@@ -19,12 +19,13 @@ from fastapi import HTTPException, status
 from configCredidential import get_settings
 from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
-from service.sqlWireguardService import SQLWireguardService
+from service.sqlGuardRailsService import SQLWireguardService
+from service.chatSessionService import ChatSessionService
+from service.columnStatisticsService import ColumnStatisticsService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
-from repository.chatbotAuditLogRepository import AuditLogRepository
-from repository.chatSessionRepository import ChatSessionRepository
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
+from repository.chatbotRepository import ChatbotRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
 
 settings = get_settings()
@@ -39,21 +40,10 @@ class ChatService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        self.audit_repo = AuditLogRepository(db)
-        self.session_repo = ChatSessionRepository(db)
+        self.session_service = ChatSessionService(db)
         self.clarification_repo = ClarificationRepository(db)
         self.query_repo = ChatQueryRepository(db)
-
-    async def create_session(
-        self, session_id: str, user_id: UUID, first_message: str
-    ) -> None:
-        existing = await self.session_repo.get_by_id(session_id)
-        if existing is None:
-            await self.session_repo.create(
-                session_id=session_id,
-                user_id=user_id,
-                title=first_message[:80].strip() or "New Chat",
-            )
+        self.chatbot_repo = ChatbotRepository(db)
 
     async def process_query(
         self,
@@ -61,7 +51,7 @@ class ChatService:
         user_id: UUID,
         user_role: str,
         user_divisi: str | None,
-        session_id: str | None,
+        session_id: UUID | None,
         show_sql: bool = False,
         context_from_clarification: Any = None,
     ) -> ChatResponse:
@@ -78,12 +68,22 @@ class ChatService:
         from service.clarificationService import ClarificationService
         from utils.sessionContextManager import SessionContextManager
 
-        session_id = session_id or str(uuid.uuid4())
-        await self.create_session(
+        active_chatbot = await self._get_active_chatbot_for_role(user_role)
+        addon_prompt = getattr(active_chatbot, "addon_prompt", None)
+
+        session_id = session_id or uuid.uuid4()
+        await self.session_service.create_session_if_missing(
             session_id=session_id,
             user_id=user_id,
             first_message=user_message,
+            chatbot_id=active_chatbot.id,
         )
+        user_chat_message = None
+        if context_from_clarification is None:
+            user_chat_message = await self.session_service.create_user_message(
+                session_id=session_id,
+                message=user_message,
+            )
         pipeline = self._build_pipeline_context(
             session_id=session_id,
             user_id=user_id,
@@ -107,10 +107,11 @@ class ChatService:
 
                 clarification_response = await clarification_service.process_user_query(
                     user_query=user_message,
-                    user_id=user_id,
                     user_role=user_role,
                     session_id=session_id,
                     clarification_count=clarification_count,
+                    addon_prompt=addon_prompt,
+                    message_id=user_chat_message.message_id if user_chat_message is not None else None,
                 )
 
                 if clarification_response is not None:
@@ -118,10 +119,15 @@ class ChatService:
                     self._complete_stage(
                         clarification_stage, "completed", "Clarification question generated")
 
+                    await self.session_service.create_chatbot_message(
+                        session_id=session_id,
+                        message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                    )
+                    await self.db.commit()
                     return ChatResponse(
                         session_id=session_id,
-                        message=clarification_response.clarifying_question or "",
-                        clarification_message_answer_options=clarification_response.options,
+                        message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                        clarification_questions=clarification_response.questions,
                         pipeline_stages=stages,
                     )
                 else:
@@ -142,11 +148,11 @@ class ChatService:
                     user_role=user_role,
                     user_divisi=user_divisi,
                     pipeline=pipeline,
+                    addon_prompt=addon_prompt,
                 )
             except HTTPException as error:
                 if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
                     pipeline["execution_status"] = "degraded"
-                    await self._write_audit(pipeline)
                     return ChatResponse(
                         session_id=session_id,
                         message="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
@@ -163,7 +169,6 @@ class ChatService:
                 pipeline=pipeline,
             )
             if not validation.is_valid:
-                await self._write_audit(pipeline)
                 return ChatResponse(
                     session_id=session_id,
                     message=(
@@ -200,10 +205,15 @@ class ChatService:
                 executed_sql=sanitized_sql or "",
                 query_result=query_result,
                 rows_count=rows_count,
+                addon_prompt=addon_prompt,
             )
 
             total_ms = int((time.monotonic() - total_start) * 1000)
-            await self._write_audit(pipeline)
+            await self.session_service.create_chatbot_message(
+                session_id=session_id,
+                message=narrative,
+            )
+            await self.db.commit()
 
             return ChatResponse(
                 session_id=session_id,
@@ -217,11 +227,21 @@ class ChatService:
             )
 
         except Exception as error:
+            await self.db.rollback()
             raise await self._handle_pipeline_error(pipeline, error)
+
+    async def _get_active_chatbot_for_role(self, user_role: str):
+        chatbot = await self.chatbot_repo.get_active_by_authority(user_role)
+        if chatbot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
+            )
+        return chatbot
 
     @staticmethod
     def _build_pipeline_context(
-        session_id: str,
+        session_id: UUID,
         user_id: UUID,
         user_role: str,
         user_message: str,
@@ -256,7 +276,6 @@ class ChatService:
         error: Exception,
     ) -> HTTPException:
         pipeline["execution_status"] = "error"
-        await self._write_audit(pipeline)
 
         if isinstance(error, HTTPException):
             if error.status_code in (
@@ -292,18 +311,26 @@ class ChatService:
         user_role: str,
         user_divisi: str | None,
         pipeline: dict[str, Any],
+        addon_prompt: str | None = None,
     ) -> tuple[str, VisualizationDecision]:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
+            logging.error("user_message: " + user_message + "")
+            column_statistics = await ColumnStatisticsService(self.db).build_nl_to_sql_statistics()
             nl_prompt = build_nl_to_sql_prompt(
                 user_query=user_message,
                 user_id=user_id,
                 user_role=user_role,
                 divisi=user_divisi,
+                addon_prompt=addon_prompt,
+                column_statistics=column_statistics,
             )
             generated_sql = await llm.generate_sql(nl_prompt)
 
-            n2_prompt = build_graphic_generation_prompt(user_query=user_message)
+            logging.error(f"Generated SQL: {generated_sql}")
+
+            n2_prompt = build_graphic_generation_prompt(
+                user_query=user_message)
             visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
             pipeline["generated_sql"] = generated_sql
 
@@ -324,7 +351,8 @@ class ChatService:
                     "SQL tidak dapat digenerate karena layanan AI sedang tidak tersedia.",
                 )
             else:
-                self._complete_stage(stage, "failed", "Gagal melakukan proses NL-to-SQL.")
+                self._complete_stage(
+                    stage, "failed", "Gagal melakukan proses NL-to-SQL.")
             raise
 
     def _run_sql_validation_stage(
@@ -386,6 +414,7 @@ class ChatService:
         executed_sql: str,
         query_result: list[dict],
         rows_count: int,
+        addon_prompt: str | None = None,
     ) -> str:
         stage = self._start_stage(stages, "result_analysis")
         analysis_prompt = build_analysis_prompt(
@@ -393,6 +422,7 @@ class ChatService:
             executed_sql=executed_sql,
             query_result=query_result,
             rows_count=rows_count,
+            addon_prompt=addon_prompt,
         )
         try:
             narrative = await llm.analyze_result(analysis_prompt)
@@ -461,68 +491,3 @@ class ChatService:
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Query tidak dapat dieksekusi. Silakan coba pertanyaan yang berbeda.",
             ) from e
-
-    async def _write_audit(self, pipeline: dict) -> None:
-        """Tulis hasil pipeline ke audit log (fire and forget — tidak raise error)."""
-        try:
-            await self.audit_repo.create(pipeline)
-        except Exception:
-            pass  # Audit log gagal tidak boleh mengganggu response utama
-
-    async def get_audit_history(
-        self,
-        user_id: UUID,
-        skip: int = 0,
-        limit: int = 20,
-    ):
-        """Ambil riwayat query dari audit log untuk user tertentu."""
-        import uuid as _uuid
-        return await self.audit_repo.get_by_user(
-            user_id=user_id,
-            skip=skip,
-            limit=limit,
-        )
-
-    async def get_failed_wireguard_audit_logs(
-        self,
-        skip: int = 0,
-        limit: int = 50,
-    ):
-        return await self.audit_repo.get_failed_wireguard(skip=skip, limit=limit)
-
-    async def get_sessions(self, user_id: UUID) -> list:
-        return await self.session_repo.get_by_user(user_id=user_id)
-
-    async def delete_session(self, session_id: str, user_id: UUID) -> None:
-        from fastapi import HTTPException, status
-        session = await self.session_repo.get_by_id(session_id)
-        if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session tidak ditemukan.",
-            )
-        if str(session.user_id) != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke session ini.",
-            )
-        await self.clarification_repo.delete_by_session(session_id)
-        await self.audit_repo.delete_by_session(session_id)
-        await self.session_repo.delete(session_id)
-
-    async def update_session_title(
-        self, session_id: str, user_id: UUID, title: str
-    ):
-        from fastapi import HTTPException, status
-        session = await self.session_repo.get_by_id(session_id)
-        if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session tidak ditemukan.",
-            )
-        if str(session.user_id) != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke session ini.",
-            )
-        return await self.session_repo.update_title(session_id, title)

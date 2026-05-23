@@ -1,10 +1,20 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
+from uuid import UUID
+
 
 import pytest
+
+SESSION_CLARIFY = UUID("00000000-0000-0000-0000-000000000001")
+SESSION_BLOCKED = UUID("00000000-0000-0000-0000-000000000002")
+SESSION_SUCCESS = UUID("00000000-0000-0000-0000-000000000003")
+SESSION_VISUAL = UUID("00000000-0000-0000-0000-000000000004")
+SESSION_RATE_LIMIT = UUID("00000000-0000-0000-0000-000000000005")
+SESSION_TIMEOUT = UUID("00000000-0000-0000-0000-000000000006")
+SESSION_LLM_DOWN = UUID("00000000-0000-0000-0000-000000000007")
 from fastapi import HTTPException, status
 
 import service.chatService as chat_service_module
-from schema.clarificationSchema import ClarificationMessageResponse
+from schema.clarificationSchema import ClarificationMessageResponse, ClarificationQuestionResponse
 from schema.wireguardSchema import ValidationResult
 from service.chatService import ChatService
 from service.graphicService import GraphicResult
@@ -16,16 +26,17 @@ def _patch_clarification_service(monkeypatch, clarification_response):
         def __init__(self, db):
             self.db = db
 
-        async def get_clarification_count_in_session(self, session_id: str) -> int:
+        async def get_clarification_count_in_session(self, session_id: UUID) -> int:
             return 0
 
         async def process_user_query(
             self,
             user_query: str,
-            user_id: str,
             user_role: str,
-            session_id: str,
+            session_id: UUID,
             clarification_count: int = 0,
+            addon_prompt: str | None = None,
+            message_id: str | None = None,
         ):
             return clarification_response
 
@@ -39,9 +50,19 @@ def _patch_clarification_service(monkeypatch, clarification_response):
 
 
 def _create_chat_service(monkeypatch) -> ChatService:
-    service = ChatService(db=None)
-    monkeypatch.setattr(service, "_write_audit", AsyncMock(return_value=None))
-    monkeypatch.setattr(service, "create_session", AsyncMock(return_value=None))
+    service = ChatService(db=Mock(commit=AsyncMock(), rollback=AsyncMock()))
+    service.session_service = Mock()
+    service.session_service.create_session_if_missing = AsyncMock(return_value=None)
+    service.session_service.create_user_message = AsyncMock(
+        return_value=Mock(message_id="00000000-0000-0000-0000-000000000301")
+    )
+    service.session_service.create_chatbot_message = AsyncMock(return_value=None)
+    service._get_active_chatbot_for_role = AsyncMock(
+        return_value=Mock(
+            id=UUID("00000000-0000-0000-0000-000000000901"),
+            addon_prompt="Prompt awal.",
+        )
+    )
     return service
 
 
@@ -52,10 +73,18 @@ def _stage_by_name(response, stage_name: str):
 @pytest.mark.asyncio
 async def test_process_query_returns_clarification_when_query_is_ambiguous(monkeypatch):
     clarification_response = ClarificationMessageResponse(
-        session_id="sess-clarify",
+        session_id=SESSION_CLARIFY,
         message_type="clarification",
         clarifying_question="Anda ingin data per individu atau per divisi?",
         options=["Per individu", "Per divisi"],
+        questions=[
+            ClarificationQuestionResponse(
+                id="q-scope",
+                ambiguity_type="AmbiSource",
+                question="Anda ingin data per individu atau per divisi?",
+                options=["Per individu", "Per divisi"],
+            )
+        ],
     )
     _patch_clarification_service(monkeypatch, clarification_response)
 
@@ -73,11 +102,19 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
         user_id="user-1",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-clarify",
+        session_id=SESSION_CLARIFY,
     )
 
+    service.session_service.create_session_if_missing.assert_awaited_once_with(
+        session_id=SESSION_CLARIFY,
+        user_id="user-1",
+        first_message="Siapa yang paling perform?",
+        chatbot_id=UUID("00000000-0000-0000-0000-000000000901"),
+    )
     assert response.message == "Anda ingin data per individu atau per divisi?"
-    assert response.clarification_message_answer_options == ["Per individu", "Per divisi"]
+    assert response.clarification_questions is not None
+    assert response.clarification_questions[0].options == ["Per individu", "Per divisi"]
+    assert not hasattr(response, "clarification_message_answer_options")
     assert generate_sql_mock.await_count == 0
     assert len(response.pipeline_stages) == 1
     assert response.pipeline_stages[0].stage == "Ambiguity Detection"
@@ -113,7 +150,7 @@ async def test_process_query_returns_security_message_when_sql_validation_fails(
         user_id="user-2",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-blocked",
+        session_id=SESSION_BLOCKED,
     )
 
     assert "alasan keamanan" in response.message.lower()
@@ -159,7 +196,7 @@ async def test_process_query_success_without_visualization(monkeypatch):
         user_id="user-3",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-success",
+        session_id=SESSION_SUCCESS,
         show_sql=True,
     )
 
@@ -219,7 +256,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
         user_id="user-4",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-visual",
+        session_id=SESSION_VISUAL,
     )
 
     assert response.message == "Analisa dengan grafik."
@@ -269,7 +306,7 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
         user_id="user-5",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-rate-limit",
+        session_id=SESSION_RATE_LIMIT,
     )
 
     assert "rate limit" in response.message.lower()
@@ -315,7 +352,7 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
             user_id="user-6",
             user_role="Owner",
             user_divisi=None,
-            session_id="sess-timeout",
+            session_id=SESSION_TIMEOUT,
         )
 
     assert error_info.value.status_code == status.HTTP_408_REQUEST_TIMEOUT
@@ -343,7 +380,7 @@ async def test_process_query_returns_fallback_message_when_llm_unavailable(monke
         user_id="user-7",
         user_role="Owner",
         user_divisi=None,
-        session_id="sess-llm-down",
+        session_id=SESSION_LLM_DOWN,
     )
 
     assert "sementara tidak tersedia" in response.message.lower()

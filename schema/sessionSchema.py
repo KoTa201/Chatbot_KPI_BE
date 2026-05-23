@@ -1,14 +1,38 @@
 from datetime import datetime
-from pydantic import BaseModel, field_validator
+from uuid import UUID
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class SessionResponse(BaseModel):
-    id: str
+    id: UUID
     title: str
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SessionClarificationQuestionResponse(BaseModel):
+    id: str
+    ambiguity_type: str | None = None
+    question: str
+    options: list[str] = Field(default_factory=list)
+    selected_answer: str | None = None
+    free_text_answer: str | None = None
+    created_at: datetime
+
+
+class SessionMessageResponse(BaseModel):
+    message_id: str
+    message: str
+    is_sender_chatbot: bool
+    send_at: datetime
+    clarification_questions: list[SessionClarificationQuestionResponse] = Field(default_factory=list)
+
+
+class SessionDetailResponse(SessionResponse):
+    messages: list[SessionMessageResponse] = Field(default_factory=list)
 
 
 class UpdateSessionTitleRequest(BaseModel):

@@ -43,9 +43,6 @@ def normalize_realisasi(val) -> Optional[str]:
     return cleaned if cleaned.lower() not in ("", "nan", "none") else None
 
 
-
-
-
 def parse_dataframe(
     df: pd.DataFrame,
     nama_orang: str,
