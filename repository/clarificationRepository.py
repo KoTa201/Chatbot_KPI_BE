@@ -14,29 +14,25 @@ class ClarificationRepository:
     async def create(
         self,
         session_id: UUID,
-        user_id: UUID,
-        user_role: str,
-        original_query: str,
-        ambiguity_score: float,
         ambiguity_type: str,
-        decision: str,
-        decision_source: str,
-        clarifying_question: str | None = None,
+        is_ambiguity_level1_type_llm: bool,
+        clarifying_question: str,
         clarification_answer: str | None = None,
-        disambiguated_query: str | None = None,
         answer_options: list[str] | None = None,
         message_id: str | None = None,
     ) -> ClarificationQuestion:
         question = ClarificationQuestion(
-            ambiguous_phrase=original_query[:255],
             ambiguity_type=ambiguity_type[:20] if ambiguity_type else None,
-            clarification_question=clarifying_question or original_query[:255],
-            answer_options=json.dumps(answer_options)[:255] if answer_options else None,
-            user_answer=self._parse_user_answer(clarification_answer),
+            is_ambiguity_level1_type_llm=is_ambiguity_level1_type_llm,
+            clarification_question=clarifying_question,
+            answer_options=self._serialize_options(answer_options),
+            selected_answer=self._serialize_answer(clarification_answer),
             message_id=message_id,
+            session_id=session_id,
         )
         self.db.add(question)
         await self.db.flush()
+        await self.db.commit()
         await self.db.refresh(question)
         return question
 
@@ -45,6 +41,7 @@ class ClarificationRepository:
         log_id: str,
         clarification_answer: str,
         disambiguated_query: str,
+        free_text_answer: str | None = None,
     ) -> ClarificationQuestion:
         stmt = select(ClarificationQuestion).where(
             ClarificationQuestion.clarification_question_id == str(log_id)
@@ -53,17 +50,21 @@ class ClarificationRepository:
         question = result.scalar_one_or_none()
 
         if not question:
-            raise ValueError(f"Clarification question {log_id} tidak ditemukan")
+            raise ValueError(
+                f"Clarification question {log_id} tidak ditemukan")
 
-        question.user_answer = self._parse_user_answer(clarification_answer)
+        question.selected_answer = self._serialize_answer(clarification_answer)
+        question.free_text_answer = self._serialize_answer(free_text_answer)
         self.db.add(question)
         await self.db.flush()
+        await self.db.commit()
         await self.db.refresh(question)
         return question
 
     async def get_by_session(self, session_id: UUID) -> list[ClarificationQuestion]:
         stmt = (
             select(ClarificationQuestion)
+            .where(ClarificationQuestion.session_id == session_id)
             .order_by(desc(ClarificationQuestion.created_at))
         )
         result = await self.db.execute(stmt)
@@ -72,6 +73,7 @@ class ClarificationRepository:
     async def get_last_clarification(self, session_id: UUID) -> ClarificationQuestion | None:
         stmt = (
             select(ClarificationQuestion)
+            .where(ClarificationQuestion.session_id == session_id)
             .order_by(desc(ClarificationQuestion.created_at))
             .limit(1)
         )
@@ -93,10 +95,13 @@ class ClarificationRepository:
         return 0
 
     @staticmethod
-    def _parse_user_answer(clarification_answer: str | None) -> int | None:
+    def _serialize_options(answer_options: list[str] | None) -> str | None:
+        if not answer_options:
+            return None
+        return json.dumps(answer_options, ensure_ascii=False)[:255]
+
+    @staticmethod
+    def _serialize_answer(clarification_answer: str | None) -> str | None:
         if clarification_answer is None:
             return None
-        try:
-            return int(clarification_answer)
-        except ValueError:
-            return None
+        return str(clarification_answer)[:255]

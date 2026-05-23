@@ -94,7 +94,7 @@ class LLMService:
             model=settings.LLM_MODEL_ANALYSIS,
             prompt=prompt,
             temperature=0.4,
-            max_output_tokens=2048,
+            max_output_tokens=3000,
         )
 
     async def decide_visualization_request(self, prompt: str) -> VisualizationDecision:

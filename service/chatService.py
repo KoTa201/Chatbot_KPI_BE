@@ -21,6 +21,7 @@ from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlGuardRailsService import SQLWireguardService
 from service.chatSessionService import ChatSessionService
+from service.columnStatisticsService import ColumnStatisticsService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
@@ -75,7 +76,14 @@ class ChatService:
             session_id=session_id,
             user_id=user_id,
             first_message=user_message,
+            chatbot_id=active_chatbot.id,
         )
+        user_chat_message = None
+        if context_from_clarification is None:
+            user_chat_message = await self.session_service.create_user_message(
+                session_id=session_id,
+                message=user_message,
+            )
         pipeline = self._build_pipeline_context(
             session_id=session_id,
             user_id=user_id,
@@ -103,6 +111,7 @@ class ChatService:
                     session_id=session_id,
                     clarification_count=clarification_count,
                     addon_prompt=addon_prompt,
+                    message_id=user_chat_message.message_id if user_chat_message is not None else None,
                 )
 
                 if clarification_response is not None:
@@ -110,10 +119,14 @@ class ChatService:
                     self._complete_stage(
                         clarification_stage, "completed", "Clarification question generated")
 
+                    await self.session_service.create_chatbot_message(
+                        session_id=session_id,
+                        message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                    )
+                    await self.db.commit()
                     return ChatResponse(
                         session_id=session_id,
                         message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
-                        clarification_message_answer_options=clarification_response.options,
                         clarification_questions=clarification_response.questions,
                         pipeline_stages=stages,
                     )
@@ -196,6 +209,11 @@ class ChatService:
             )
 
             total_ms = int((time.monotonic() - total_start) * 1000)
+            await self.session_service.create_chatbot_message(
+                session_id=session_id,
+                message=narrative,
+            )
+            await self.db.commit()
 
             return ChatResponse(
                 session_id=session_id,
@@ -209,6 +227,7 @@ class ChatService:
             )
 
         except Exception as error:
+            await self.db.rollback()
             raise await self._handle_pipeline_error(pipeline, error)
 
     async def _get_active_chatbot_for_role(self, user_role: str):
@@ -296,14 +315,19 @@ class ChatService:
     ) -> tuple[str, VisualizationDecision]:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
+            logging.error("user_message: " + user_message + "")
+            column_statistics = await ColumnStatisticsService(self.db).build_nl_to_sql_statistics()
             nl_prompt = build_nl_to_sql_prompt(
                 user_query=user_message,
                 user_id=user_id,
                 user_role=user_role,
                 divisi=user_divisi,
                 addon_prompt=addon_prompt,
+                column_statistics=column_statistics,
             )
             generated_sql = await llm.generate_sql(nl_prompt)
+
+            logging.error(f"Generated SQL: {generated_sql}")
 
             n2_prompt = build_graphic_generation_prompt(
                 user_query=user_message)

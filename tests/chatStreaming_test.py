@@ -100,7 +100,6 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
     expected = ChatResponse(
         session_id=SESSION_STREAM_CLARIFICATION,
         message="Baik, saya tampilkan KPI per divisi untuk bulan Januari.",
-        clarification_message_answer_options=None,
         rows_returned=5,
         pipeline_stages=[PipelineStageInfo(stage="result_analysis", status="success")],
     )
@@ -174,7 +173,6 @@ async def test_handle_clarification_streams_next_clarification_without_rag(monke
                     questions=[
                         ClarificationQuestionResponse(
                             id="q-next",
-                            ambiguous_phrase="achievement",
                             ambiguity_type="AmbiSchema",
                             question="Achievement yang dimaksud metrik apa?",
                             options=["Achievement %", "Weighted score", "Lewati", "Lainnya"],
@@ -209,6 +207,7 @@ async def test_handle_clarification_streams_next_clarification_without_rag(monke
     events = await _read_sse_events(response)
     assert captured["rag_called"] is False
     metadata = events[0][1]
+    assert "clarification_message_answer_options" not in metadata
     assert metadata["clarification_questions"][0]["question"] == "Achievement yang dimaksud metrik apa?"
     streamed_message = "".join(
         payload["chunk"] for event_name, payload in events if event_name == "message"

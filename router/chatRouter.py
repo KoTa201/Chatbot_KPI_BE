@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from service.authService import get_current_user
 from controller.chatController import ChatController
 from schema.chatSchema import ChatRequest, ChatResponse
-from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
+from schema.sessionSchema import SessionDetailResponse, SessionResponse, UpdateSessionTitleRequest
 from model.User import User
 
 
@@ -56,6 +56,15 @@ class ChatRouter:
             response_model=list[SessionResponse],
             status_code=status.HTTP_200_OK,
             summary="Daftar semua session milik user yang sedang login",
+        )
+
+        self.router.add_api_route(
+            "/sessions/{session_id}",
+            self.get_session_detail,
+            methods=["GET"],
+            response_model=SessionDetailResponse,
+            status_code=status.HTTP_200_OK,
+            summary="Detail session beserta riwayat pesan dan pertanyaan klarifikasi",
         )
 
         self.router.add_api_route(
@@ -116,12 +125,6 @@ class ChatRouter:
         3. Sistem disambiguasi query berdasarkan jawaban
         4. Query yang sudah jelas diteruskan ke pipeline RAG biasa
         """
-        if not request.clarification_answer:
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=400,
-                detail="clarification_answer harus disertakan untuk endpoint ini"
-            )
         return await controller.handle_clarification(request=request, current_user=current_user)
 
     async def get_sessions(
@@ -131,6 +134,17 @@ class ChatRouter:
     ):
         """Kembalikan semua session chatbot milik user yang sedang login."""
         return await controller.handle_get_sessions(current_user=current_user)
+
+    async def get_session_detail(
+        self,
+        session_id: UUID,
+        current_user: User = Depends(get_current_user),
+        controller: ChatController = Depends(ChatController),
+    ):
+        """Kembalikan detail session, pesan, dan pertanyaan klarifikasi per pesan."""
+        return await controller.handle_get_session_detail(
+            session_id=session_id, current_user=current_user
+        )
 
     async def delete_session(
         self,

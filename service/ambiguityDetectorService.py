@@ -54,8 +54,7 @@ class AmbiguityDetectorService:
 
             logger.info(
                 f"[AmbiguityDetector] Ambiguity assessment: "
-                f"score={result.ambiguity_score}, is_ambiguous={result.is_ambiguous}, "
-                f"type={result.ambiguity_type}"
+                f"is_ambiguous={result.is_ambiguous}, type={result.ambiguity_type}"
             )
             return result
 
@@ -66,7 +65,6 @@ class AmbiguityDetectorService:
             )
             # Safe fallback: treat as NOT ambiguous when LLM fails
             return AmbiguityAssessmentResult(
-                ambiguity_score=0.3,
                 is_ambiguous=False,
                 ambiguity_type="none",
                 possible_interpretations=[],
@@ -94,7 +92,7 @@ class AmbiguityDetectorService:
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError:
-            match = re.search(r"\{[\s\S]*\}", cleaned)
+            match = re.search(r"\{[\s\S]*}", cleaned)
             if not match:
                 raise
             parsed = json.loads(match.group(0))
@@ -129,7 +127,7 @@ class AmbiguityDetectorService:
     @staticmethod
     def _extract_description_options(description) -> list[str]:
         """
-        Extract options from description field.
+        Extract options from the description field.
 
         Args:
             description: Can be dict with "options" key, or other types
@@ -216,9 +214,7 @@ class AmbiguityDetectorService:
                     # Create DetectedAmbiguity
                     detected_ambiguities.append(
                         DetectedAmbiguity(
-                            ambiguous_phrase=None,  # Not provided in question_set format
-                            ambiguity_type=level_2_label,
-                            ambiguity_score=0.9,  # Default high score for strict paper output
+                            ambiguity_type=str(level_2_label),
                             possible_interpretations=possible_interpretations,
                             suggested_clarifying_question=item.get("question"),
                             answer_options=options,  # Raw options, no normalization here
@@ -236,7 +232,6 @@ class AmbiguityDetectorService:
                     primary = detected_ambiguities[0]
 
                     return AmbiguityAssessmentResult(
-                        ambiguity_score=primary.ambiguity_score,
                         is_ambiguous=is_ambiguous,
                         ambiguity_type=primary.ambiguity_type,
                         possible_interpretations=primary.possible_interpretations,
@@ -244,11 +239,12 @@ class AmbiguityDetectorService:
                         answer_options=primary.answer_options,
                         detection_source="llm",
                         detected_ambiguities=detected_ambiguities,
+                        is_ambiguous_level1_type_llm=primary.metadata.get(
+                            "is_ambiguity_level1_type_llm"),
                     )
                 else:
                     # No valid items in question_set, return not ambiguous
                     return AmbiguityAssessmentResult(
-                        ambiguity_score=0.0,
                         is_ambiguous=False,
                         ambiguity_type="none",
                         possible_interpretations=[],
@@ -258,21 +254,13 @@ class AmbiguityDetectorService:
                         detected_ambiguities=[],
                     )
 
-            # LEGACY: Parse old detected_ambiguities format (fallback)
-            ambiguity_score = float(result_dict.get("ambiguity_score", 0.0))
             detected_items = result_dict.get("detected_ambiguities", []) or []
             detected_ambiguities = [
                 DetectedAmbiguity(
-                    ambiguous_phrase=item.get("ambiguous_phrase"),
                     ambiguity_type=item.get("ambiguity_type", "none"),
-                    ambiguity_score=float(
-                        item.get("ambiguity_score", ambiguity_score)),
-                    possible_interpretations=item.get(
-                        "possible_interpretations", []) or [],
-                    suggested_clarifying_question=item.get(
-                        "suggested_clarifying_question"),
-                    answer_options=item.get("answer_options") or item.get(
-                        "suggested_options", []) or [],
+                    possible_interpretations=item.get("possible_interpretations", []) or [],
+                    suggested_clarifying_question=item.get("suggested_clarifying_question"),
+                    answer_options=item.get("answer_options") or item.get("suggested_options", []) or [],
                     metadata=item.get("metadata", {}) or {},
                 )
                 for item in detected_items
@@ -280,25 +268,18 @@ class AmbiguityDetectorService:
             ]
 
             if not detected_ambiguities:
-                interpretations = result_dict.get(
-                    "possible_interpretations", [])
+                interpretations = result_dict.get("possible_interpretations", [])
                 if interpretations and isinstance(interpretations[0], str):
-                    possible_interpretations = [
-                        {"text": interp} for interp in interpretations]
+                    possible_interpretations = [{"text": interp} for interp in interpretations]
                 else:
                     possible_interpretations = interpretations or []
                 if result_dict.get("ambiguity_type", "none") != "none":
                     detected_ambiguities = [
                         DetectedAmbiguity(
-                            ambiguous_phrase=None,
-                            ambiguity_type=result_dict.get(
-                                "ambiguity_type", "none"),
-                            ambiguity_score=ambiguity_score,
+                            ambiguity_type=result_dict.get("ambiguity_type", "none"),
                             possible_interpretations=possible_interpretations,
-                            suggested_clarifying_question=result_dict.get(
-                                "suggested_clarifying_question"),
-                            answer_options=result_dict.get("answer_options") or result_dict.get(
-                                "suggested_options", []) or [],
+                            suggested_clarifying_question=result_dict.get("suggested_clarifying_question"),
+                            answer_options=result_dict.get("answer_options") or result_dict.get("suggested_options", []) or [],
                         )
                     ]
 
@@ -307,16 +288,11 @@ class AmbiguityDetectorService:
             primary = detected_ambiguities[0] if detected_ambiguities else None
 
             return AmbiguityAssessmentResult(
-                ambiguity_score=ambiguity_score,
                 is_ambiguous=is_ambiguous,
-                ambiguity_type=primary.ambiguity_type if primary else result_dict.get(
-                    "ambiguity_type", "none"),
-                possible_interpretations=primary.possible_interpretations if primary else result_dict.get(
-                    "possible_interpretations", []) or [],
-                suggested_clarifying_question=primary.suggested_clarifying_question if primary else result_dict.get(
-                    "suggested_clarifying_question"),
-                answer_options=primary.answer_options if primary else result_dict.get(
-                    "answer_options", []) or [],
+                ambiguity_type=primary.ambiguity_type if primary else result_dict.get("ambiguity_type", "none"),
+                possible_interpretations=primary.possible_interpretations if primary else result_dict.get("possible_interpretations", []) or [],
+                suggested_clarifying_question=primary.suggested_clarifying_question if primary else result_dict.get("suggested_clarifying_question"),
+                answer_options=primary.answer_options if primary else result_dict.get("answer_options", []) or [],
                 detection_source="llm",
                 detected_ambiguities=detected_ambiguities,
             )

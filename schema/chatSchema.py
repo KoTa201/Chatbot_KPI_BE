@@ -1,7 +1,9 @@
-from typing import Optional, List
+from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
+
+from schema.clarificationSchema import ClarificationAnswerItem, ClarificationQuestionResponse
 
 
 class ChatRequest(BaseModel):
@@ -9,7 +11,8 @@ class ChatRequest(BaseModel):
     session_id: UUID | None = None
     show_sql: bool = False  # Opsional: tampilkan SQL ke user
     # Jawaban atas pertanyaan klarifikasi
-    clarification_answer: Optional[str] = None
+    clarification_answers: list[ClarificationAnswerItem] = Field(default_factory=list)
+    additional_constraints: str | None = None
 
     @field_validator("message")
     @classmethod
@@ -32,13 +35,13 @@ class ChatResponse(BaseModel):
     session_id: UUID
     message: str                        # Jawaban naratif dari LLM
     # Jika ada pertanyaan klarifikasi
-    clarification_message_answer_options: List[str] | None = None
+    clarification_questions: list[ClarificationQuestionResponse] | None = None
     generated_sql: str | None = None    # Hanya ditampilkan jika show_sql=True
     graphic_chart_type: str | None = None
     graphic_image_base64: str | None = None
     rows_returned: int | None = None
     execution_time_ms: int | None = None
-    pipeline_stages: list[PipelineStageInfo] = []
+    pipeline_stages: list[PipelineStageInfo] = Field(default_factory=list)
 
 
 class ChatErrorResponse(BaseModel):

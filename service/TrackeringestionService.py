@@ -285,7 +285,7 @@ class TrackerIngestionService:
         requested_tahun: Optional[int],
         all_sheets: list[dict],
     ) -> int:
-        if requested_tahun is not None:
+        if requested_tahun is not None and requested_tahun != 0:
             return requested_tahun
 
         for sheet in all_sheets:

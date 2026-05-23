@@ -107,7 +107,7 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
 
         async def get_active_by_authority(self, authority):
             events.append(("chatbot_lookup", authority))
-            return SimpleNamespace(addon_prompt="Gunakan constraint bot.")
+            return SimpleNamespace(id=CHATBOT_ID, addon_prompt="Gunakan constraint bot.")
 
     class FakeSessionService:
         def __init__(self, db):
@@ -115,6 +115,12 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
 
         async def create_session_if_missing(self, **kwargs):
             events.append(("session_create", kwargs["session_id"]))
+
+        async def create_user_message(self, **kwargs):
+            return SimpleNamespace(message_id="msg-1")
+
+        async def create_chatbot_message(self, **kwargs):
+            return None
 
     class FakeClarificationService:
         def __init__(self, db):
@@ -154,13 +160,19 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
             pass
 
         async def get_active_by_authority(self, authority):
-            return SimpleNamespace(addon_prompt="Gunakan bahasa formal.")
+            return SimpleNamespace(id=CHATBOT_ID, addon_prompt="Gunakan bahasa formal.")
 
     class FakeSessionService:
         def __init__(self, db):
             pass
 
         async def create_session_if_missing(self, **kwargs):
+            return None
+
+        async def create_user_message(self, **kwargs):
+            return SimpleNamespace(message_id="msg-1")
+
+        async def create_chatbot_message(self, **kwargs):
             return None
 
     class FakeClarificationService:
@@ -190,7 +202,9 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
     monkeypatch.setattr(ChatService, "_run_sql_execution_stage", AsyncMock(return_value=([{"value": 1}], 1)))
     monkeypatch.setattr(ChatService, "_run_result_analysis_stage", fake_analysis)
 
-    service = ChatService(db=None)  # type: ignore[arg-type]
+    from unittest.mock import AsyncMock as UM
+    mock_db = SimpleNamespace(commit=UM(), rollback=UM())
+    service = ChatService(db=mock_db)  # type: ignore[arg-type]
     response = await service.process_query(
         user_message="Tampilkan KPI saya",
         user_id=UUID("00000000-0000-0000-0000-000000000403"),
@@ -252,6 +266,59 @@ async def test_run_nl_to_sql_stage_passes_addon_prompt_to_builder(monkeypatch):
     assert captured_builder_args["addon_prompt"] == addon_prompt_value
     assert captured_builder_args["user_query"] == "Berapa KPI Q1?"
     assert captured_builder_args["user_role"] == "karyawan"
+
+
+async def test_run_nl_to_sql_stage_passes_column_statistics_to_builder(monkeypatch):
+    captured_builder_args = {}
+
+    def fake_build_nl_to_sql_prompt(**kwargs):
+        captured_builder_args.update(kwargs)
+        return "SELECT 1;"
+
+    async def fake_generate_sql(prompt):
+        return "SELECT 1;"
+
+    async def fake_decide_visualization(prompt):
+        return SimpleNamespace(is_visualize=False, chart_type=None)
+
+    class FakeColumnStatisticsService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_nl_to_sql_statistics(self):
+            return "kpi_tracker_records.bulan_num: mean=3.5"
+
+    monkeypatch.setattr(
+        "service.chatService.build_nl_to_sql_prompt",
+        fake_build_nl_to_sql_prompt,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.generate_sql",
+        fake_generate_sql,
+    )
+    monkeypatch.setattr(
+        "service.chatService.llm.decide_visualization_request",
+        fake_decide_visualization,
+    )
+    monkeypatch.setattr(
+        "service.chatService.ColumnStatisticsService",
+        FakeColumnStatisticsService,
+    )
+
+    service = ChatService(db=None)  # type: ignore[arg-type]
+    stages = []
+
+    await service._run_nl_to_sql_stage(
+        stages=stages,
+        user_message="Berapa KPI Q1?",
+        user_id=UUID("00000000-0000-0000-0000-000000000503"),
+        user_role="karyawan",
+        user_divisi=None,
+        pipeline={},
+        addon_prompt=None,
+    )
+
+    assert captured_builder_args["column_statistics"] == "kpi_tracker_records.bulan_num: mean=3.5"
 
 
 async def test_run_nl_to_sql_stage_passes_none_addon_prompt_to_builder(monkeypatch):

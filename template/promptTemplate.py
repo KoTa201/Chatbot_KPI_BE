@@ -26,10 +26,10 @@ def _build_addon_prompt_block(addon_prompt: str | None) -> str:
     if not cleaned:
         return ""
     return f"""
-[KONSTRAINT CHATBOT AKTIF]
-Instruksi berikut wajib diikuti sebagai constraint tambahan. Instruksi ini tidak boleh mengganti, melemahkan, atau mengabaikan aturan keamanan, schema database, format output, dan larangan halusinasi di prompt utama.
-{cleaned}
-"""
+    [KONSTRAINT CHATBOT AKTIF]
+    Instruksi berikut wajib diikuti sebagai constraint tambahan. Instruksi ini tidak boleh mengganti, melemahkan, atau mengabaikan aturan keamanan, schema database, format output, dan larangan halusinasi di prompt utama.
+    {cleaned}
+    """
 
 
 DB_SCHEMA = """
@@ -58,7 +58,6 @@ kpi_groups(
 kpi_master_records(
   id UUID PK,
   group_id UUID FK -> kpi_groups.id,
-  tahun INT,
   category VARCHAR,
   kpi_name VARCHAR,
   definisi_operasional TEXT,
@@ -66,7 +65,6 @@ kpi_master_records(
   achieve VARCHAR,
   partial VARCHAR,
   fail VARCHAR,
-  responsibility_persons TEXT,
   created_at TIMESTAMP
 )
 
@@ -76,66 +74,17 @@ kpi_tracker_records(
   group_id UUID FK -> kpi_groups.id,
   kpi_master_id UUID FK -> kpi_master_records.id,
   user_id UUID FK -> users.id,
-  tahun INT,
   bulan_num INT NULL,
   realisasi VARCHAR NULL,
   keterangan TEXT NULL,
-  source_row INT NULL,
   created_at TIMESTAMP,
   updated_at TIMESTAMP
 )
-"""
-
-SAMPLE_DATA = """
-kpi_master_records:
-kpi_name                    | category    | tahun | target
-Peningkatan Penjualan       | KPI Sales   | 2025  | 500
-Rekrutmen Karyawan Baru     | KPI kepala_divisi     | 2025  | 10
-
-kpi_tracker_records:
-user_id      | kpi_master_id | tahun | bulan_num | realisasi
-<uuid-user-1>| <uuid-kpi-1>  | 2025  | 3         | 480
-<uuid-user-2>| <uuid-kpi-2>  | 2025  | 3         | 12
-"""
-
-FEW_SHOT_EXAMPLES = """
-[CONTOH QUERY 1]
-Pertanyaan: "Tampilkan semua KPI saya di bulan Maret 2025"
-SQL:
-SELECT
-  km.kpi_name,
-  km.target,
-  kt.realisasi,
-  kt.tahun,
-  kt.bulan_num
-FROM kpi_tracker_records kt
-JOIN kpi_master_records km ON km.id = kt.kpi_master_id
-WHERE kt.tahun = 2025 AND kt.bulan_num = 3
-ORDER BY km.kpi_name
-LIMIT 1000;
-
-[CONTOH QUERY 2]
-Pertanyaan: "Siapa karyawan dengan performa terbaik bulan ini?"
-SQL:
-SELECT
-  u.full_name AS nama_karyawan,
-  AVG(
-    CASE
-      WHEN NULLIF(km.target, '') ~ '^[0-9]+(\.[0-9]+)?$'
-       AND NULLIF(kt.realisasi, '') ~ '^[0-9]+(\.[0-9]+)?$'
-       AND NULLIF(km.target, '')::numeric != 0
-      THEN (kt.realisasi::numeric / km.target::numeric) * 100
-      ELSE NULL
-    END
-  ) AS avg_persen
-FROM kpi_tracker_records kt
-JOIN kpi_master_records km ON km.id = kt.kpi_master_id
-JOIN users u ON u.id = kt.user_id
-WHERE kt.tahun = EXTRACT(YEAR FROM CURRENT_DATE)::int
-  AND kt.bulan_num = EXTRACT(MONTH FROM CURRENT_DATE)::int
-GROUP BY u.full_name
-ORDER BY avg_persen DESC NULLS LAST
-LIMIT 10;
+--relation master users
+kpi_master_users(
+kpi_master_id UUID FK -> kpi_master_records.id,
+user_id UUID FK -> users.id,
+)
 """
 
 
@@ -145,10 +94,11 @@ def build_nl_to_sql_prompt(
     user_role: str,
     divisi: str | None,
     addon_prompt: str | None = None,
+    column_statistics: str | None = None,
 ) -> str:
     """
     Membangun prompt NL-to-SQL untuk Stage 1.
-    Menyertakan: schema, contoh data, few-shot, konteks user.
+    Menyertakan: pertanyaan asli, schema, statistik kolom, contoh data, few-shot, konteks user.
     """
 
     # Tentukan scope akses berdasarkan role
@@ -162,41 +112,45 @@ def build_nl_to_sql_prompt(
         data_access_scope = "Semua data (akses penuh read-only)"
 
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
+    column_statistics_block = (column_statistics or "").strip() or "Statistik kolom belum tersedia. Jika statistik tidak tersedia, tetap gunakan schema database dan pertanyaan asli pengguna; jangan mengarang nilai unik, mean, min, max, non-zero, atau non-null."
 
     prompt = f"""[SYSTEM PROMPT]
-Kamu adalah asisten SQL expert yang mengkonversi pertanyaan bahasa Indonesia menjadi query SQL PostgreSQL.
-{addon_prompt_block}
-ATURAN WAJIB:
-1. Hanya generate query SELECT — DILARANG KERAS menggunakan INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC, atau perintah apapun selain SELECT.
-2. Selalu gunakan tabel, view, dan kolom yang ada di schema yang diberikan di bawah.
-3. Tambahkan LIMIT 1000 jika tidak ada limit spesifik dalam pertanyaan.
-4. Gunakan alias yang deskriptif dan mudah dipahami pada kolom hasil.
-5. Utamakan JOIN antara kpi_tracker_records dan kpi_master_records melalui kpi_master_id.
-6. Format output: HANYA SQL mentah, tanpa penjelasan, tanpa markdown backtick, tanpa komentar.
-7. Jika pertanyaan tidak dapat dijawab dengan data yang tersedia, keluarkan: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
-8. Nama karyawan ada di users.full_name; join users u ON u.id = kt.user_id untuk filter atau menampilkan nama.
-9. Data di kpi_tracker_records bisa berupa lanjutan progress KPI tracker sebelumnya; gunakan DISTINCT atau GROUP BY jika menghitung jumlah orang atau pekerjaan.
-10. Gunakan UPPER(u.full_name) LIKE untuk pencarian nama orang agar fleksibel, karena user bisa menyebut nama sebagian.
-
-[DATABASE SCHEMA]
-{DB_SCHEMA}
-
-[CONTOH DATA]
-{SAMPLE_DATA}
-
-[FEW-SHOT EXAMPLES]
-{FEW_SHOT_EXAMPLES}
-
-[CONTEXT PENGGUNA]
-Role: {user_role}
-Karyawan ID: {user_id}
-Divisi: {divisi or 'N/A'}
-Akses data: {data_access_scope}
-
-[PERTANYAAN PENGGUNA]
-{user_query}
-
-SQL:"""
+    Kamu adalah asisten SQL expert yang mengkonversi pertanyaan bahasa Indonesia menjadi query SQL PostgreSQL.
+    {addon_prompt_block}
+    
+    ATURAN WAJIB:
+    1. Hanya generate query SELECT — DILARANG KERAS menggunakan INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC, atau perintah apapun selain SELECT.
+    2. Selalu gunakan tiga input utama untuk inference S-RAG: Pertanyaan Asli Pengguna (q), Skema Database (S), dan Statistik Setiap Kolom.
+    3. Selalu gunakan tabel, view, dan kolom yang ada di schema yang diberikan di bawah.
+    4. Gunakan statistik kolom untuk memetakan maksud pengguna ke filter leksikal atau nilai penulisan yang persis sama dengan data database.
+    5. Untuk atribut numerik, manfaatkan mean, maksimum, minimum, non-zero, dan non-null bila tersedia.
+    6. Untuk atribut string dan boolean, manfaatkan nilai unik, non-zero, dan non-null bila tersedia.
+    7. Tambahkan LIMIT 1000 jika tidak ada limit spesifik dalam pertanyaan.
+    8. Gunakan alias yang deskriptif dan mudah dipahami pada kolom hasil.
+    9. Utamakan JOIN antara kpi_tracker_records dan kpi_master_records melalui kpi_master_id.
+    10. Format output: HANYA SQL mentah, tanpa penjelasan, tanpa markdown backtick, tanpa komentar.
+    11. Jika pertanyaan tidak dapat dijawab dengan data yang tersedia, keluarkan: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
+    12. Nama karyawan ada di users.full_name; join users u ON u.id = kt.user_id untuk filter atau menampilkan nama.
+    13. Data di kpi_tracker_records bisa berupa lanjutan progress KPI tracker sebelumnya; gunakan DISTINCT atau GROUP BY jika menghitung jumlah orang atau pekerjaan.
+    14. Gunakan UPPER(u.full_name) LIKE untuk pencarian nama orang agar fleksibel, karena user bisa menyebut nama sebagian.
+    15. Selalu gunakan kolom bulan_num sebagai acuan utama untuk menentukan konteks periode data pada KPI Tracker. Nilai bulan_num harus diinterpretasikan sebagai nomor bulan (contoh: Januari = 1, Februari = 2, Maret = 3, dan seterusnya) agar analisis atau jawaban dapat mengidentifikasi data KPI berasal dari bulan yang tepat.
+    
+    [PERTANYAAN ASLI PENGGUNA (q)]
+    {user_query}
+    
+    [SKEMA DATABASE (S)]
+    {DB_SCHEMA}
+    
+    [STATISTIK SETIAP KOLOM]
+    {column_statistics_block}
+    
+    [CONTEXT PENGGUNA]
+    Role: {user_role}
+    Karyawan ID: {user_id}
+    Divisi: {divisi or 'N/A'}
+    Akses data: {data_access_scope}
+    
+    SQL:"""
 
     return prompt
 
@@ -208,12 +162,8 @@ def build_analysis_prompt(
     rows_count: int,
     addon_prompt: str | None = None,
 ) -> str:
-    max_rows = 20
-    max_cols = 8
-    compact_rows = []
-    for row in query_result[:max_rows]:
-        keys = list(row.keys())[:max_cols]
-        compact_rows.append({k: row.get(k) for k in keys})
+    # No truncation
+    compact_rows = query_result
 
     result_str = json.dumps(
         compact_rows,
@@ -222,13 +172,9 @@ def build_analysis_prompt(
         default=_json_default_serializer,
     )
 
-    truncation_note = (
-        f"⚠️ Data dipotong: ditampilkan {max_rows} dari {rows_count} baris total."
-        if rows_count > max_rows
-        else f"Total: {rows_count} baris."
-    )
+    truncation_note = f"Total: {rows_count} baris."
 
-    # Build explicit column + row preview so model knows exact shape
+    # Build explicit column + row preview
     if compact_rows:
         columns = list(compact_rows[0].keys())
         col_preview = ", ".join(f'"{c}"' for c in columns)
@@ -236,7 +182,6 @@ def build_analysis_prompt(
     else:
         col_preview = "-"
         row_count_hint = "0 baris (kosong)"
-
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
     prompt = f"""[SYSTEM PROMPT]
@@ -309,9 +254,9 @@ def build_ambiguity_assessment_prompt(
     """
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
-    prompt = f"""[SYSTEM PROMPT — KPI AMBISQL AMBIGUITY ASSESSOR]
-Kamu adalah sistem deteksi ambiguitas untuk chatbot KPI Text-to-SQL menggunakan AmbiSQL framework.
-Tugasmu: identifikasi SEMUA frasa ambigu yang dapat mengubah SQL atau hasil KPI secara material.
+    prompt = f"""Given a user question, database schema, and optional evidence, identify ambiguities in the user question and generate clarification questions to resolve them.
+Contents in the evidence are user provided clarifications to resolve previous detected ambiguities.
+Note that the user question might use both data inside the database and external parametrized knowledge from the Large Language Model (LLM).
 {addon_prompt_block}
 ════════════════════════════════════════════════════════════════
 INPUT ELEMENTS:
@@ -322,46 +267,53 @@ Role: {user_role}
 Schema: {DB_SCHEMA}
 Evidence: {kpi_context}
 
-════════════════════════════════════════════════════════════════
-AMBIGUITY TAXONOMY (AmbiSQL):
-════════════════════════════════════════════════════════════════
 
-LEVEL 1 — Ambiguity Source:
-- Database-sourced ambiguity: Ketidakjelasan berasal dari struktur/semantik database
-- LLM-sourced ambiguity: Ketidakjelasan berasal dari NL interpretation
 
-⚠️ CRITICAL: Data selalu bersumber dari database. Jangan membuat kategori pemilihan sumber data.
 
-LEVEL 2 — Ambiguity Type:
-- AmbiSchema: Frasa dapat merujuk ke >1 tabel/kolom/metrik KPI
-  Contoh: "terbaik" = achievement%, realisasi, target, atau score
-- AmbiValue: Nilai user tidak jelas atau tidak cocok dengan data aktual
-  Contoh: nama divisi, KPI, karyawan, status, periode
-- AmbiIntent: Operasi bisnis tidak jelas
-  Contoh: daftar vs ranking vs grouping vs filter vs perbandingan vs total vs rata-rata
-- AmbiContext: Konteks bisnis kurang
-  Contoh: cakupan aktif/nonaktif, mata uang, organisasi, aturan KPI
-- AmbiFallacy: Asumsi user bertentangan dengan data tersedia
-  Contoh: mereferensi data yang tidak ada atau karyawan yang tidak aktif
-- AmbiRef: Referensi temporal/spasial tidak spesifik
-  Contoh: bulan ini, tahun lalu, Q3, awal tahun, setelah target tercapai
-
-════════════════════════════════════════════════════════════════
-INSTRUCTIONS:
-════════════════════════════════════════════════════════════════
-
-1. Identifikasi maksimal 5 ambiguitas, urutkan dari dampak terbesar ke SQL
-2. Untuk setiap ambiguitas, tentukan Level 1 dan Level 2 type
-3. Untuk setiap ambiguity, sediakan 2-5 interpretasi konkret (opsi jawaban)
-4. Gunakan Bahasa Indonesia bisnis, bukan istilah SQL, untuk clarifying questions
-5. Jika ambiguitas tidak ada, return has_ambiguity=false dan question_set kosong array
-6. Jika user memilih Abstain pada ambiguitas sebelumnya, jangan identifikasi lagi
+## Ambiguity Definition & Taxonomy:
+A user question is identifies as ambiguous when there is more than one reasonable interpretation due to unclear, incomplete, or conflicting information.
+The ambiguity in a user question are defined as two different levels.
+- level_1 ambiguity type are defined from two different dimensions, database and LLM repectively:
+    - "Database-sourced ambiguity": Ambiguity that leads to incorrect or incomplete data retrieval directly from the database, due to unclear or underspecified aspects of the user query with respect to the database schema or content.
+    - "LLM-sourced ambiguity": Ambiguity that results in the misuse of LLM external knowledge, causing difficulties in correctly retrieving or applying information beyond the database.
+- level_2 ambiguity type are defined under each level_1 ambiguity type as follows:
+    - Database-sourced ambiguity:
+      - "AmbiSchema": The question lacks sufficient context to determine which table or specific column to use for operations(e.g., filtering, grouping, ranking, joining, aggregation, etc.), resulting in multiple plausible interpretations.
+        - (e.g., "the oldest user" could refer to 'age' column or 'registration_date' column, representing different aspects of user's age or registration date).
+      - "AmbiValue": The question refers to a value that does not correctly correspond to the actual values stored in the database, making it unclear how to formulate the WHERE clause condition and potentially causing relevant results to be omitted or producing inaccurate results.
+        - (e.g., querying posts mentioning the "R programming language", the WHERE clause might be "posts.Body LIKE '%R%'", or "posts.Body = 'programming language'", etc)
+        - (e.g., querying for users living in "New York City", the WHERE clause might be "users.City = 'New York City'", or "users.City = 'NYC'", etc)
+        - (e.g., querying for posts about coronavirus, the WHERE clause might be "posts.Body LIKE '%COVID-19%'", or "posts.Body = 'coronavirus'", etc)
+      - "AmbiView": Key terms clarifying the intended operation are absent, leading to ambiguity about the desired SQL operation 
+        - (e.g., query as 'Top 5 popular tags's star', which can list each tag's star or the amount of stars).
+    - LLM-sourced ambiguity:
+      - "AmbiContext": The question lacks adequate information to guide LLM reasoning effectively.
+        - (e.g., requesting dynamic or time-sensitive external information like "current exchange rate" without specifying the target currencies or date).
+      - "AmbiFallacy": Knowledge assumptions embedded within the question contradicts real-world facts or database contents 
+        - (e.g., querying entities or participants in events that never occurred, like 2001 Olympic Games).
+      - "AmbiRef": Spatial or temporal constraints are underspecified, resulting in multiple possible interpretations at different granularities 
+        - (e.g., querying for records "after the 2018 World Cup" could mean immediately after the final match or after the entire tournament year).
+        - (e.g., querying for records in the 'Middle East Region' might cause missing countries in the list for "Middle East" due to vague or imprecise geographic constraints from different sources).
+      
+## Instructions
+1. Analyze user question, database schema and evidence(if provided) to identify all possible ambiguous phrases in the user question.
+2. For each unresolved ambiguity: **(1)** Assign exactly one level-1 and one level-2 label. **(2)** Write a multi-choice question for user to further clarify their intent.
+3. For each multi-choice question: provide several possible options for users to choose from, add a description for each option, and add an explanation for the whole question through thinking. Formulate options and corresponding description based on the ambiguity type detected as follows:
+  i. For "AmbiSchema", list all plausible columns with the format of 'table_name::column_name', with relevant descriptive schema info retrieved from the input database schema.
+  ii. For "AmbiValue", list most likely 2-3 possible interpretations of WHERE clause, with concise explanation for each interpretation.
+  iii. For "AmbiView", list most likely 2-3 possible interpretations of SQL operations, with concise explanation for each interpretation.
+  v. For "AmbiContext", list most likely 2-3 possible values, ranges or constraints with concise explanation for each interpretation.
+  vi. For "AmbiFallacy", list most likely 2-3 best-guessing interpretations of the 'fallacy' info considering it as a typo.
+  vii. For "AmbiRef", list most likey 2-3 interpretations according to the reference part in the original user query.
+**Important Note**: 
+- All possible options should be in complete with concise description for user to select(Do not use such as or etc to omit some necessary options).
+- Not each input question is ambiguous. If all ambiguities are resolved or the original user input is unambiguous, return an empty question_set. (e.g., If only one column in the database is plausible, it should not be an unclear schema reference)
+- If the user's response in evidence to a specific ambiguity is 'Abstain', it means the identified ambiguity is not an actual ambiguity, and you can skip this ambiguity and not identify it again.
 
 ════════════════════════════════════════════════════════════════
 OUTPUT FORMAT (Strict JSON — FOLLOW EXACTLY):
 ════════════════════════════════════════════════════════════════
 
-CONTOH OUTPUT AMBIGUOUS:
 {{
   "has_ambiguity": true,
   "question_set": [
@@ -398,8 +350,6 @@ CONTOH OUTPUT TIDAK AMBIGUOUS:
 }}
 
 CRITICAL JSON STRUCTURE RULES:
-- NO top-level "ambiguity_score" field
-- NO per-item "ambiguity_score" field
 - NO per-item "metadata" field
 - "description" MUST be an object with ONLY "options" key containing array of strings
 - "options" array contains ONLY the clarifying options (2-5 items)
@@ -414,54 +364,6 @@ REMEMBER:
 - Respect the strict JSON shape above. Do not add extra fields."""
 
     return prompt
-
-
-def build_clarifying_question_prompt(
-    user_query: str,
-    ambiguity_type: str,
-    possible_interpretations: list[dict],
-    user_role: str,
-) -> str:
-    """
-    Membangun prompt untuk generator pertanyaan klarifikasi.
-    Menghasilkan satu pertanyaan spesifik dengan 2-4 pilihan konkret.
-    """
-    interpretations_str = "\n".join(
-        f"  {i+1}. {interp.get('interpretation') or interp.get('label') or interp if isinstance(interp, dict) else interp}"
-        for i, interp in enumerate(possible_interpretations)
-    )
-
-    prompt = f"""[SYSTEM PROMPT — CLARIFICATION QUESTION GENERATOR]
-Kamu adalah asisten KPI yang perlu meminta klarifikasi kepada pengguna.
-
-Pertanyaan pengguna: "{user_query}"
-Aspek ambigu: {ambiguity_type}
-Role pengguna: {user_role}
-Interpretasi yang teridentifikasi:
-{interpretations_str}
-
-Buat SATU pertanyaan klarifikasi dalam Bahasa Indonesia yang:
-1. Langsung merujuk pada aspek ambigu yang spesifik
-2. Menawarkan 3-4 pilihan konkret (BUKAN pertanyaan ya/tidak atau terbuka)
-3. Singkat (maksimal 2 kalimat)
-4. Menggunakan bahasa yang dipahami {user_role}
-5. Menggunakan terminologi domain KPI (periode, target, realisasi, divisi, dll.)
-
-CONTOH BAIK:
-"Apakah Anda ingin melihat performa bulan ini saja, atau akumulasi sepanjang tahun 2025?"
-
-CONTOH BURUK:
-"Bisakah Anda menjelaskan lebih lanjut pertanyaan Anda?"
-
-Jawab HANYA dalam format JSON (TANPA PENJELASAN LAIN):
-{{
-  "clarifying_question": <string pertanyaan klarifikasi>,
-  "options": [<list string dengan 2-4 opsi>],
-  "default_if_no_answer": <string interpretasi default jika tidak dijawab>
-}}"""
-
-    return prompt
-
 
 def build_query_disambiguation_prompt(
     original_query: str,

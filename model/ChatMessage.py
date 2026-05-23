@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UUID as SAUUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
@@ -18,7 +18,7 @@ class ChatMessage(Base):
     message_id: Mapped[str] = mapped_column(
         String(255), primary_key=True, default=lambda: str(uuid.uuid4())
     )
-    message: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
     is_sender_chatbot: Mapped[bool] = mapped_column(Boolean, nullable=False)
     send_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

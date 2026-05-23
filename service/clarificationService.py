@@ -39,7 +39,6 @@ class ClarificationService:
         self.ambiguity_detector = AmbiguityDetectorService()
         self.llm = LLMService()
         self.repo = ClarificationRepository(db)
-        self.MAX_QUESTIONS_PER_BATCH = 3
 
     async def process_user_query(
         self,
@@ -48,6 +47,7 @@ class ClarificationService:
         session_id: UUID,
         clarification_count: int = 0,
         addon_prompt: str | None = None,
+        message_id: str | None = None,
     ) -> ClarificationMessageResponse | None:
         """
         Process query dan tentukan: clarify atau direct?
@@ -63,32 +63,29 @@ class ClarificationService:
             user_query, user_role, kpi_context, addon_prompt=addon_prompt
         )
         logger.info(
-            f"[ClarificationService] Ambiguity detected: score={ambiguity_result.ambiguity_score}, "
+            f"[ClarificationService] Ambiguity detected: "
             f"is_ambiguous={ambiguity_result.is_ambiguous}"
         )
 
-        # STEP 2: Tentukan decision: clarify atau direct?
-        # Apply max clarification limit: jangan tanya lebih dari 1x per query
         if not ambiguity_result.is_ambiguous or clarification_count >= 1:
-            # Direct answer
             logger.info(
                 f"[ClarificationService] Decision: DIRECT (count={clarification_count})")
-
-            # Log keputusan ke database
             await self.repo.create(
                 session_id=session_id,
-                original_query=user_query,
                 ambiguity_type=ambiguity_result.ambiguity_type,
+                is_ambiguity_level1_type_llm=ambiguity_result.is_ambiguous_level1_type_llm,
+                clarifying_question=ambiguity_result.suggested_clarifying_question or user_query,
+                answer_options=ambiguity_result.answer_options,
+                message_id=message_id,
             )
-
-            return None  # Tidak perlu klarifikasi, lanjut ke pipeline RAG
+            return None
 
         logger.info("[ClarificationService] Decision: CLARIFY")
-
         return await self._build_clarification_response_from_detection(
             session_id=session_id,
             original_query=user_query,
             ambiguity_result=ambiguity_result,
+            message_id=message_id,
         )
 
     async def handle_clarification_response(
@@ -115,7 +112,7 @@ class ClarificationService:
             raise ValueError(
                 f"Pertanyaan klarifikasi tidak ditemukan: {', '.join(missing)}")
 
-        source_query = original_query or logs[-1].ambiguous_phrase or ""
+        source_query = original_query or ""
         qa_set = self._build_qa_set(clarification_answers, log_by_id)
         preference_tree = PreferenceTree(llm=self.llm)
         await preference_tree.update_tree(qa_set)
@@ -149,11 +146,19 @@ class ClarificationService:
         )
         next_clarification = None
         if recheck_result and recheck_result.is_ambiguous and refinement_round < 3:
-            next_clarification = await self._build_clarification_response_from_detection(
-                session_id=session_id,
-                original_query=disambiguated_query,
-                ambiguity_result=recheck_result,
-            )
+            answered_questions = {pair.question.strip().casefold() for pair in qa_set}
+            recheck_result.detected_ambiguities = [
+                ambiguity
+                for ambiguity in recheck_result.detected_ambiguities
+                if (ambiguity.suggested_clarifying_question or "").strip().casefold()
+                not in answered_questions
+            ]
+            if recheck_result.detected_ambiguities:
+                next_clarification = await self._build_clarification_response_from_detection(
+                    session_id=session_id,
+                    original_query=disambiguated_query,
+                    ambiguity_result=recheck_result,
+                )
 
         return QueryDisambiguationResult(
             original_query=source_query,
@@ -178,8 +183,7 @@ class ClarificationService:
             qa_set.append(
                 QAPair(
                     level1=getattr(log, "ambiguity_type", None) or "unknown",
-                    level2=getattr(log, "ambiguous_phrase", None) or getattr(
-                        log, "clarification_question", None) or answer.question_id,
+                    level2=getattr(log, "clarification_question", None) or answer.question_id,
                     question=getattr(log, "clarification_question",
                                      None) or answer.question_id,
                     answer=effective_answer,
@@ -284,15 +288,12 @@ class ClarificationService:
         session_id: UUID,
         original_query: str,
         ambiguity_result,
+        message_id: str | None = None,
     ) -> ClarificationMessageResponse | None:
         if not ambiguity_result or not ambiguity_result.is_ambiguous:
             return None
 
-        detected = sorted(
-            ambiguity_result.detected_ambiguities,
-            key=lambda item: item.ambiguity_score,
-            reverse=True,
-        )[: self.MAX_QUESTIONS_PER_BATCH]
+        detected = ambiguity_result.detected_ambiguities
         if not detected:
             return None
 
@@ -302,23 +303,20 @@ class ClarificationService:
                 ambiguity_type=ambiguity.ambiguity_type,
                 suggested_question=ambiguity.suggested_clarifying_question,
                 suggested_options=ambiguity.answer_options,
-                ambiguous_phrase=ambiguity.ambiguous_phrase,
                 metadata=ambiguity.metadata,
             )
             log = await self.repo.create(
                 session_id=session_id,
-                original_query=original_query,
                 ambiguity_type=ambiguity.ambiguity_type,
                 is_ambiguity_level1_type_llm=ambiguity.metadata.get(
                     "is_ambiguity_level1_type_llm"),
                 clarifying_question=clarifying_q.clarifying_question,
                 answer_options=clarifying_q.options,
-                ambiguous_phrase=clarifying_q.ambiguous_phrase,
+                message_id=message_id,
             )
             questions.append(
                 ClarificationQuestionResponse(
                     id=str(log.clarification_question_id),
-                    ambiguous_phrase=clarifying_q.ambiguous_phrase or ambiguity.ambiguous_phrase,
                     ambiguity_type=clarifying_q.ambiguity_type or ambiguity.ambiguity_type,
                     question=clarifying_q.clarifying_question,
                     options=clarifying_q.options,
@@ -339,7 +337,6 @@ class ClarificationService:
             ambiguity_type: str,
         suggested_question: Optional[str],
         suggested_options: Optional[list[str]],
-        ambiguous_phrase: str | None = None,
         metadata: dict | None = None,
     ) -> ClarifyingQuestionData:
         if suggested_question and suggested_options:
@@ -354,7 +351,6 @@ class ClarificationService:
                 options=options,
                 default_if_no_answer="Lewati",
                 ambiguity_type=ambiguity_type,
-                ambiguous_phrase=ambiguous_phrase,
                 metadata=metadata or {},
             )
 
@@ -366,7 +362,6 @@ class ClarificationService:
             options=["Lewati", "Lainnya"],
             default_if_no_answer="Lewati",
             ambiguity_type=ambiguity_type,
-            ambiguous_phrase=ambiguous_phrase,
             metadata=metadata or {},
         )
 
