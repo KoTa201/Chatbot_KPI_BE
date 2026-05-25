@@ -1,0 +1,69 @@
+- id: active_kpi_groups_current_year
+  question: "Tampilkan semua grup KPI aktif tahun 2024"
+  user_role: "admin"
+  user_divisi: null
+  user_id: "00000000-0000-0000-0000-000000000001"
+  expected_sql: >
+    SELECT id, nama_grup, group_type, sheet_name, tahun
+    FROM kpi_groups
+    WHERE is_active = TRUE AND tahun = 2024;
+  expected_context:
+    tables:
+      - kpi_groups
+    columns:
+      - kpi_groups.id
+      - kpi_groups.nama_grup
+      - kpi_groups.group_type
+      - kpi_groups.sheet_name
+      - kpi_groups.tahun
+      - kpi_groups.is_active
+  notes: "Basic schema retrieval for active KPI groups."
+
+- id: monthly_kpi_realization_by_division
+  question: "Berapa realisasi KPI per bulan untuk divisi saya?"
+  user_role: "kepala_divisi"
+  user_divisi: "Marketing"
+  user_id: "00000000-0000-0000-0000-000000000002"
+  expected_sql: >
+    SELECT kt.bulan_num, km.kpi_name, kt.realisasi, kt.keterangan
+    FROM kpi_tracker_records kt
+    JOIN kpi_master_records km ON kt.kpi_master_id = km.id
+    JOIN kpi_groups kg ON km.group_id = kg.id
+    WHERE kg.nama_grup = 'Marketing'
+    ORDER BY kt.bulan_num, km.kpi_name;
+  expected_context:
+    tables:
+      - kpi_tracker_records
+      - kpi_master_records
+      - kpi_groups
+    columns:
+      - kpi_tracker_records.bulan_num
+      - kpi_tracker_records.realisasi
+      - kpi_tracker_records.keterangan
+      - kpi_tracker_records.kpi_master_id
+      - kpi_master_records.id
+      - kpi_master_records.kpi_name
+      - kpi_master_records.group_id
+      - kpi_groups.id
+      - kpi_groups.nama_grup
+  notes: "Role-scoped division KPI tracker query."
+
+- id: kpi_target_and_achievement_summary
+  question: "Ringkas target dan achievement untuk semua KPI"
+  user_role: "admin"
+  user_divisi: null
+  user_id: "00000000-0000-0000-0000-000000000001"
+  expected_sql: >
+    SELECT kpi_name, target, achieve, partial, fail
+    FROM kpi_master_records
+    ORDER BY kpi_name;
+  expected_context:
+    tables:
+      - kpi_master_records
+    columns:
+      - kpi_master_records.kpi_name
+      - kpi_master_records.target
+      - kpi_master_records.achieve
+      - kpi_master_records.partial
+      - kpi_master_records.fail
+  notes: "KPI master target and threshold query."
