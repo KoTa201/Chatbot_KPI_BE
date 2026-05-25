@@ -263,6 +263,18 @@ def configure_ragas_environment() -> None:
         os.environ["OPENAI_BASE_URL"] = settings.LLM_BASE_URL
 
 
+def build_ragas_embeddings() -> Any:
+    from configCredidential import get_settings
+    from ragas.embeddings import LiteLLMEmbeddings
+
+    settings = get_settings()
+    return LiteLLMEmbeddings(
+        model=os.getenv("RAGAS_EMBEDDING_MODEL", "openai/text-embedding-3-small"),
+        api_key=os.getenv("OPENAI_API_KEY") or settings.LLM_API_KEY,
+        api_base=os.getenv("OPENAI_BASE_URL") or settings.LLM_BASE_URL,
+    )
+
+
 async def evaluate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not any(row.get("status") == "success" for row in rows):
         return [{**row, "metric_error": "No successful rows to evaluate."} for row in rows]
@@ -272,7 +284,7 @@ async def evaluate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         configure_ragas_environment()
         dataset = build_ragas_dataset(rows)
-        result = evaluate(dataset, metrics=load_ragas_metrics())
+        result = evaluate(dataset, metrics=load_ragas_metrics(), embeddings=build_ragas_embeddings())
         scores = result.to_pandas().to_dict(orient="records")
         return merge_scores(rows, scores)
     except Exception as error:
