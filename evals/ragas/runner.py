@@ -30,7 +30,8 @@ class EvalCase:
     question: str
     user_role: str
     user_divisi: str | None
-    user_id: UUID
+    user_id: UUID | None
+    user_email: str | None
     expected_sql: str
     expected_context: dict[str, list[str]]
     notes: str | None = None
@@ -57,9 +58,11 @@ def load_cases(path: Path) -> list[EvalCase]:
     for index, raw_case in enumerate(raw_cases, start=1):
         if not isinstance(raw_case, dict):
             raise ValueError(f"Case #{index} must be an object.")
-        missing = [field for field in ("id", "question", "user_role", "user_id", "expected_sql") if not raw_case.get(field)]
+        missing = [field for field in ("id", "question", "user_role", "expected_sql") if not raw_case.get(field)]
         if missing:
             raise ValueError(f"Case #{index} missing required field(s): {', '.join(missing)}")
+        if not raw_case.get("user_id") and not raw_case.get("user_email"):
+            raise ValueError(f"Case #{index} must include user_id or user_email.")
 
         expected_context = raw_case.get("expected_context") or {}
         if not isinstance(expected_context, dict):
@@ -71,7 +74,8 @@ def load_cases(path: Path) -> list[EvalCase]:
                 question=str(raw_case["question"]),
                 user_role=str(raw_case["user_role"]),
                 user_divisi=raw_case.get("user_divisi"),
-                user_id=UUID(str(raw_case["user_id"])),
+                user_id=UUID(str(raw_case["user_id"])) if raw_case.get("user_id") else None,
+                user_email=str(raw_case["user_email"]) if raw_case.get("user_email") else None,
                 expected_sql=str(raw_case["expected_sql"]).strip(),
                 expected_context={
                     "tables": [str(value) for value in expected_context.get("tables", [])],
@@ -109,6 +113,21 @@ def serialize_stages(stages: list[Any]) -> list[dict[str, Any]]:
     return serialized
 
 
+async def resolve_user_id(db: Any, eval_case: EvalCase) -> UUID:
+    if eval_case.user_id is not None:
+        return eval_case.user_id
+
+    from sqlalchemy import select
+
+    from model.User import User
+
+    result = await db.execute(select(User.id).where(User.email == eval_case.user_email))
+    user_id = result.scalar_one_or_none()
+    if user_id is None:
+        raise ValueError(f"User email not found for case {eval_case.id}: {eval_case.user_email}")
+    return user_id
+
+
 async def run_pipeline_case(eval_case: EvalCase) -> dict[str, Any]:
     from databaseConfig import AsyncSessionLocal
     from service.chatService import ChatService
@@ -126,9 +145,10 @@ async def run_pipeline_case(eval_case: EvalCase) -> dict[str, Any]:
             context = f"{DB_SCHEMA}\n\nCOLUMN STATISTICS UNAVAILABLE: {error}"
 
         try:
+            user_id = await resolve_user_id(db, eval_case)
             response = await ChatService(db).process_query(
                 user_message=eval_case.question,
-                user_id=eval_case.user_id,
+                user_id=user_id,
                 user_role=eval_case.user_role,
                 user_divisi=eval_case.user_divisi,
                 session_id=session_id,

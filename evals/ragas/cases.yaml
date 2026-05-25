@@ -1,12 +1,12 @@
 - id: active_kpi_groups_current_year
-  question: "Tampilkan semua grup KPI aktif tahun 2024"
-  user_role: "admin"
+  question: "Tampilkan semua grup KPI aktif tahun 2025"
+  user_role: "kepala_divisi"
   user_divisi: null
-  user_id: "00000000-0000-0000-0000-000000000001"
+  user_email: "rina.kadiv@kpiapp.id"
   expected_sql: >
     SELECT id, nama_grup, group_type, sheet_name, tahun
     FROM kpi_groups
-    WHERE is_active = TRUE AND tahun = 2024;
+    WHERE is_active = TRUE AND tahun = 2025;
   expected_context:
     tables:
       - kpi_groups
@@ -22,14 +22,13 @@
 - id: monthly_kpi_realization_by_division
   question: "Berapa realisasi KPI per bulan untuk divisi saya?"
   user_role: "kepala_divisi"
-  user_divisi: "Marketing"
-  user_id: "00000000-0000-0000-0000-000000000002"
+  user_divisi: null
+  user_email: "rina.kadiv@kpiapp.id"
   expected_sql: >
     SELECT kt.bulan_num, km.kpi_name, kt.realisasi, kt.keterangan
     FROM kpi_tracker_records kt
     JOIN kpi_master_records km ON kt.kpi_master_id = km.id
     JOIN kpi_groups kg ON km.group_id = kg.id
-    WHERE kg.nama_grup = 'Marketing'
     ORDER BY kt.bulan_num, km.kpi_name;
   expected_context:
     tables:
@@ -50,9 +49,9 @@
 
 - id: kpi_target_and_achievement_summary
   question: "Ringkas target dan achievement untuk semua KPI"
-  user_role: "admin"
+  user_role: "kepala_divisi"
   user_divisi: null
-  user_id: "00000000-0000-0000-0000-000000000001"
+  user_email: "rina.kadiv@kpiapp.id"
   expected_sql: >
     SELECT kpi_name, target, achieve, partial, fail
     FROM kpi_master_records
