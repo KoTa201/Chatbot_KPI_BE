@@ -1,5 +1,5 @@
 - id: active_kpi_groups_current_year
-  question: "Tampilkan semua grup KPI aktif tahun 2025"
+  question: "Tampilkan kolom id, nama_grup, group_type, sheet_name, dan tahun dari tabel kpi_groups untuk baris dengan is_active true dan tahun 2025"
   user_role: "kepala_divisi"
   user_divisi: null
   user_email: "rina.kadiv@kpiapp.id"
@@ -20,7 +20,7 @@
   notes: "Basic schema retrieval for active KPI groups."
 
 - id: monthly_kpi_realization_by_division
-  question: "Berapa realisasi KPI per bulan untuk divisi saya?"
+  question: "Tampilkan bulan_num, kpi_name, realisasi, dan keterangan untuk semua baris kpi_tracker_records yang terhubung ke kpi_master_records dan kpi_groups, urutkan berdasarkan bulan_num lalu kpi_name"
   user_role: "kepala_divisi"
   user_divisi: null
   user_email: "rina.kadiv@kpiapp.id"
@@ -48,7 +48,7 @@
   notes: "Role-scoped division KPI tracker query."
 
 - id: kpi_target_and_achievement_summary
-  question: "Ringkas target dan achievement untuk semua KPI"
+  question: "Tampilkan kpi_name, target, achieve, partial, dan fail dari semua baris kpi_master_records, urutkan berdasarkan kpi_name"
   user_role: "kepala_divisi"
   user_divisi: null
   user_email: "rina.kadiv@kpiapp.id"
