@@ -267,17 +267,29 @@ class RagasEmbeddingAdapter:
     def __init__(self, embeddings: Any):
         self.embeddings = embeddings
 
-    def embed_query(self, text: str) -> list[float]:
+    def embed_text(self, text: str) -> list[float]:
         return self.embeddings.embed_text(text)
 
-    async def aembed_query(self, text: str) -> list[float]:
+    async def aembed_text(self, text: str) -> list[float]:
         return await self.embeddings.aembed_text(text)
 
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
         return self.embeddings.embed_texts(texts)
 
-    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+    async def aembed_texts(self, texts: list[str]) -> list[list[float]]:
         return await self.embeddings.aembed_texts(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        return await self.aembed_text(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed_texts(texts)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        return await self.aembed_texts(texts)
 
 
 def build_ragas_embeddings() -> Any:
