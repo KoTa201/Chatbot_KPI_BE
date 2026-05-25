@@ -263,16 +263,36 @@ def configure_ragas_environment() -> None:
         os.environ["OPENAI_BASE_URL"] = settings.LLM_BASE_URL
 
 
+class RagasEmbeddingAdapter:
+    def __init__(self, embeddings: Any):
+        self.embeddings = embeddings
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embeddings.embed_text(text)
+
+    async def aembed_query(self, text: str) -> list[float]:
+        return await self.embeddings.aembed_text(text)
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embeddings.embed_texts(texts)
+
+    async def aembed_documents(self, texts: list[str]) -> list[list[float]]:
+        return await self.embeddings.aembed_texts(texts)
+
+
 def build_ragas_embeddings() -> Any:
     from configCredidential import get_settings
     from ragas.embeddings import LiteLLMEmbeddings
 
     settings = get_settings()
-    return LiteLLMEmbeddings(
+    embeddings = LiteLLMEmbeddings(
         model=os.getenv("RAGAS_EMBEDDING_MODEL", "openai/text-embedding-3-small"),
         api_key=os.getenv("OPENAI_API_KEY") or settings.LLM_API_KEY,
         api_base=os.getenv("OPENAI_BASE_URL") or settings.LLM_BASE_URL,
+        timeout=int(os.getenv("RAGAS_EMBEDDING_TIMEOUT", "300")),
+        max_retries=int(os.getenv("RAGAS_EMBEDDING_MAX_RETRIES", "1")),
     )
+    return RagasEmbeddingAdapter(embeddings)
 
 
 async def evaluate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -281,10 +301,20 @@ async def evaluate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     try:
         from ragas import evaluate
+        from ragas.run_config import RunConfig
 
         configure_ragas_environment()
         dataset = build_ragas_dataset(rows)
-        result = evaluate(dataset, metrics=load_ragas_metrics(), embeddings=build_ragas_embeddings())
+        result = evaluate(
+            dataset,
+            metrics=load_ragas_metrics(),
+            embeddings=build_ragas_embeddings(),
+            run_config=RunConfig(
+                timeout=int(os.getenv("RAGAS_TIMEOUT", "600")),
+                max_retries=int(os.getenv("RAGAS_MAX_RETRIES", "1")),
+                max_workers=int(os.getenv("RAGAS_MAX_WORKERS", "3")),
+            ),
+        )
         scores = result.to_pandas().to_dict(orient="records")
         return merge_scores(rows, scores)
     except Exception as error:
