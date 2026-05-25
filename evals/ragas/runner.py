@@ -41,6 +41,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run live RAGAS evals for text-to-SQL pipeline.")
     parser.add_argument("--cases", default="evals/ragas/cases.yaml", help="Path to YAML eval cases.")
     parser.add_argument("--out", default="evals/ragas/results", help="Output directory for JSON/CSV reports.")
+    parser.add_argument(
+        "--include-clarification",
+        action="store_true",
+        help="Run ambiguity clarification before SQL generation. By default evals bypass clarification so SQL metrics can be scored.",
+    )
     return parser.parse_args()
 
 
@@ -128,7 +133,7 @@ async def resolve_user_id(db: Any, eval_case: EvalCase) -> UUID:
     return user_id
 
 
-async def run_pipeline_case(eval_case: EvalCase) -> dict[str, Any]:
+async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = False) -> dict[str, Any]:
     from databaseConfig import AsyncSessionLocal
     from service.chatService import ChatService
     from service.columnStatisticsService import ColumnStatisticsService
@@ -153,6 +158,7 @@ async def run_pipeline_case(eval_case: EvalCase) -> dict[str, Any]:
                 user_divisi=eval_case.user_divisi,
                 session_id=session_id,
                 show_sql=True,
+                context_from_clarification=None if include_clarification else {},
             )
         except Exception as error:
             await db.rollback()
@@ -316,7 +322,7 @@ async def main() -> None:
         cases = load_cases(Path(args.cases))
         rows = []
         for eval_case in cases:
-            rows.append(await run_pipeline_case(eval_case))
+            rows.append(await run_pipeline_case(eval_case, include_clarification=args.include_clarification))
         evaluated_rows = await evaluate_rows(rows)
         write_reports(evaluated_rows, Path(args.out))
         print(f"Wrote RAGAS reports to {args.out}")
