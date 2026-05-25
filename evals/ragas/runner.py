@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -273,16 +274,37 @@ def write_reports(rows: list[dict[str, Any]], out_dir: Path) -> None:
     frame.to_csv(timestamp_csv, index=False)
 
 
+async def shutdown_async_resources() -> None:
+    try:
+        from databaseConfig import engine
+
+        await engine.dispose()
+    except Exception:
+        pass
+
+    try:
+        from service.chatService import llm
+
+        await llm.client.close()
+    except Exception:
+        pass
+
+
 async def main() -> None:
     args = parse_args()
-    cases = load_cases(Path(args.cases))
-    rows = []
-    for eval_case in cases:
-        rows.append(await run_pipeline_case(eval_case))
-    evaluated_rows = await evaluate_rows(rows)
-    write_reports(evaluated_rows, Path(args.out))
-    print(f"Wrote RAGAS reports to {args.out}")
+    try:
+        cases = load_cases(Path(args.cases))
+        rows = []
+        for eval_case in cases:
+            rows.append(await run_pipeline_case(eval_case))
+        evaluated_rows = await evaluate_rows(rows)
+        write_reports(evaluated_rows, Path(args.out))
+        print(f"Wrote RAGAS reports to {args.out}")
+    finally:
+        await shutdown_async_resources()
 
 
 if __name__ == "__main__":
+    if sys.platform.startswith("win"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
