@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
@@ -252,6 +253,16 @@ def merge_scores(rows: list[dict[str, Any]], scores: list[dict[str, Any]]) -> li
     return merged
 
 
+def configure_ragas_environment() -> None:
+    from configCredidential import get_settings
+
+    settings = get_settings()
+    if settings.LLM_API_KEY and not os.getenv("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = settings.LLM_API_KEY
+    if settings.LLM_BASE_URL and not os.getenv("OPENAI_BASE_URL"):
+        os.environ["OPENAI_BASE_URL"] = settings.LLM_BASE_URL
+
+
 async def evaluate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not any(row.get("status") == "success" for row in rows):
         return [{**row, "metric_error": "No successful rows to evaluate."} for row in rows]
@@ -259,6 +270,7 @@ async def evaluate_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     try:
         from ragas import evaluate
 
+        configure_ragas_environment()
         dataset = build_ragas_dataset(rows)
         result = evaluate(dataset, metrics=load_ragas_metrics())
         scores = result.to_pandas().to_dict(orient="records")
