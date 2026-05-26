@@ -24,9 +24,9 @@ def upgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_chatbot_audit_log_user_id")
     op.execute("DROP INDEX IF EXISTS ix_chatbot_audit_log_session_id")
     op.execute("DROP INDEX IF EXISTS ix_chat_sessions_user_id")
-    op.drop_table("clarification_logs", if_exists=True)
-    op.drop_table("chatbot_audit_log", if_exists=True)
-    op.drop_table("chat_sessions", if_exists=True)
+    op.execute("DROP TABLE IF EXISTS clarification_logs")
+    op.execute("DROP TABLE IF EXISTS chatbot_audit_log")
+    op.execute("DROP TABLE IF EXISTS chat_sessions")
 
     op.create_table(
         "chat_sessions",

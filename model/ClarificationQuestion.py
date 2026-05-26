@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,10 +20,10 @@ class ClarificationQuestion(Base):
     )
     ambiguity_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_ambiguity_level1_type_llm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    clarification_question: Mapped[str] = mapped_column(String(255), nullable=False)
-    answer_options: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    selected_answer: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    free_text_answer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    clarification_question: Mapped[str] = mapped_column(Text, nullable=False)
+    answer_options: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    free_text_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

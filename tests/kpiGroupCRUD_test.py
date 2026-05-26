@@ -70,7 +70,6 @@ def make_kpi_group(
     sheet_url: str = SHEET_URL,
     sheet_name: str = SHEET_NAME,
     tahun: int | None = TAHUN,
-    is_scheduled: bool = True,
     is_active: bool = True,
     master_records: list = None,
     tracker_records: list = None,
@@ -84,7 +83,6 @@ def make_kpi_group(
     group.sheet_url = sheet_url
     group.sheet_name = sheet_name
     group.tahun = tahun
-    group.is_scheduled = is_scheduled
     group.is_active = is_active
     group.created_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
     group.updated_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
@@ -156,7 +154,6 @@ async def test_create_kpi_group_master_with_explicit_sheet_info():
         nama_grup="KPI Master 2025",
         group_type="master",
         tahun=TAHUN,
-        is_scheduled=True,
         is_active=True,
     )
 
@@ -227,7 +224,6 @@ async def test_create_kpi_group_tracker():
         sheet_name="Tracker",
         nama_grup="KPI Tracker 2025",
         group_type="tracker",
-        is_scheduled=False,
         is_active=True,
     )
 

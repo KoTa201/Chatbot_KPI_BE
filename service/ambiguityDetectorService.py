@@ -304,6 +304,6 @@ class AmbiguityDetectorService:
             raise RuntimeError(f"LLM response parsing error: {e}")
 
         except Exception as e:
-            logger.error(
+            logger.warning(
                 f"[AmbiguityDetector] LLM API error: {type(e).__name__}: {e}")
             raise RuntimeError(f"LLM API error: {e}")

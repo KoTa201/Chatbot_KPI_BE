@@ -315,7 +315,6 @@ class ChatService:
     ) -> tuple[str, VisualizationDecision]:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
-            logging.error("user_message: " + user_message + "")
             column_statistics = await ColumnStatisticsService(self.db).build_nl_to_sql_statistics()
             nl_prompt = build_nl_to_sql_prompt(
                 user_query=user_message,
@@ -326,8 +325,6 @@ class ChatService:
                 column_statistics=column_statistics,
             )
             generated_sql = await llm.generate_sql(nl_prompt)
-
-            logging.error(f"Generated SQL: {generated_sql}")
 
             n2_prompt = build_graphic_generation_prompt(
                 user_query=user_message)

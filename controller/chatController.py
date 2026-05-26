@@ -15,6 +15,7 @@ from service.authService import get_current_user
 from service.chatService import ChatService
 from service.chatSessionService import ChatSessionService
 from service.clarificationService import ClarificationService
+from repository.clarificationRepository import ClarificationRepository
 from schema.chatSchema import ChatRequest, ChatResponse
 from schema.sessionSchema import SessionDetailResponse, SessionResponse, UpdateSessionTitleRequest
 from model.User import User
@@ -112,6 +113,26 @@ class ChatController:
                 clarification_questions=clarification_message.questions,
             )
             return self._build_streaming_response(response)
+
+        # Simpan jawaban klarifikasi user ke DB sebelum pipeline RAG
+        clarification_repo = ClarificationRepository(self.db)
+        logs = await clarification_repo.get_by_session(request.session_id)
+        log_by_id = {str(log.clarification_question_id): log for log in logs}
+        answer_lines = []
+        for idx, answer in enumerate(request.clarification_answers):
+            log = log_by_id.get(answer.question_id)
+            question_text = log.clarification_question if log else f"Pertanyaan {idx + 1}"
+            answer_text = answer.free_text or answer.selected_option
+            answer_lines.append(f"**Q{idx + 1}. {question_text}**\n{answer_text}")
+        if request.additional_constraints:
+            answer_lines.append(f"**Catatan tambahan:**\n{request.additional_constraints}")
+        user_answer_message = "\n\n".join(answer_lines) if answer_lines else request.message
+        session_service_for_save = ChatSessionService(self.db)
+        await session_service_for_save.create_user_message(
+            session_id=request.session_id,
+            message=user_answer_message,
+        )
+        await self.db.commit()
 
         # Lanjutkan ke pipeline RAG dengan query yang sudah disambiguasi
         service = ChatService(self.db)

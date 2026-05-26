@@ -74,7 +74,7 @@ class ClarificationService:
                 session_id=session_id,
                 ambiguity_type=ambiguity_result.ambiguity_type,
                 is_ambiguity_level1_type_llm=ambiguity_result.is_ambiguous_level1_type_llm,
-                clarifying_question=ambiguity_result.suggested_clarifying_question or user_query,
+                clarifying_question=(ambiguity_result.suggested_clarifying_question or user_query)[:500],
                 answer_options=ambiguity_result.answer_options,
                 message_id=message_id,
             )
