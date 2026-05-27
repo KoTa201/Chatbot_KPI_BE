@@ -3,7 +3,7 @@ models/user_model.py
 SQLAlchemy ORM model untuk tabel users.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 import uuid
 from uuid import uuid4
@@ -12,6 +12,7 @@ from sqlalchemy import UUID, Boolean, DateTime, Enum, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from model.Base import Base, RoleEnum
 from model.PasswordReset import PasswordReset
+from utils.datetime import utc_now
 if TYPE_CHECKING:
     from model.ChatSession import ChatSession
 
@@ -33,13 +34,13 @@ class User(Base):
         Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=utc_now,
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=utc_now,
+        onupdate=utc_now,
         nullable=False,
     )
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from repository.schedulerRepository import SchedulerRepository
 from model.SchedulerConfig import SchedulerConfigModel
+from utils.datetime import utc_now
 
 
 class SchedulerJobService:
@@ -57,7 +58,7 @@ class SchedulerJobService:
         repo = SchedulerRepository()
         next_run = self.get_next_run_time()
         await repo.update_run_times(
-            last_run_at=datetime.now(timezone.utc),
+            last_run_at=utc_now(),
             next_run_at=next_run,
         )
 
@@ -66,7 +67,7 @@ class SchedulerJobService:
     async def _auto_pause_if_december(self, now: Optional[datetime] = None) -> None:
         """Pause the scheduler after a December run (year-end cycle complete)."""
         if now is None:
-            now = datetime.now(timezone.utc)
+            now = utc_now()
         if now.month != 12:
             return
         repo = SchedulerRepository()
@@ -94,7 +95,7 @@ class SchedulerJobService:
         if not job:
             return None
         try:
-            return job.trigger.get_next_fire_time(None, datetime.now(timezone.utc))
+            return job.trigger.get_next_fire_time(None, utc_now())
         except Exception:
             return None
 

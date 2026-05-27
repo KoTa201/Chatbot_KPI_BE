@@ -50,6 +50,14 @@ def _patch_clarification_service(monkeypatch, clarification_response):
 
 
 def _create_chat_service(monkeypatch) -> ChatService:
+    class FakeColumnStatisticsService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_nl_to_sql_statistics(self):
+            return ""
+
+    monkeypatch.setattr(chat_service_module, "ColumnStatisticsService", FakeColumnStatisticsService)
     service = ChatService(db=Mock(commit=AsyncMock(), rollback=AsyncMock()))
     service.session_service = Mock()
     service.session_service.create_session_if_missing = AsyncMock(return_value=None)

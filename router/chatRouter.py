@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
+from controller.chatSessionController import ChatSessionController
 from service.authService import get_current_user
 from controller.chatController import ChatController
 from schema.chatSchema import ChatRequest, ChatResponse
@@ -130,16 +131,16 @@ class ChatRouter:
     async def get_sessions(
         self,
         current_user: User = Depends(get_current_user),
-        controller: ChatController = Depends(ChatController),
+        controller: ChatSessionController = Depends(ChatSessionController),
     ):
         """Kembalikan semua session chatbot milik user yang sedang login."""
         return await controller.handle_get_sessions(current_user=current_user)
 
+    @staticmethod
     async def get_session_detail(
-        self,
-        session_id: UUID,
+            session_id: UUID,
         current_user: User = Depends(get_current_user),
-        controller: ChatController = Depends(ChatController),
+        controller: ChatSessionController = Depends(ChatSessionController),
     ):
         """Kembalikan detail session, pesan, dan pertanyaan klarifikasi per pesan."""
         return await controller.handle_get_session_detail(
@@ -150,7 +151,7 @@ class ChatRouter:
         self,
         session_id: UUID,
         current_user: User = Depends(get_current_user),
-        controller: ChatController = Depends(ChatController),
+        controller: ChatSessionController = Depends(ChatSessionController),
     ):
         """
         Hapus session beserta seluruh pesan dan clarification log-nya.
@@ -165,7 +166,7 @@ class ChatRouter:
         session_id: UUID,
         request: UpdateSessionTitleRequest,
         current_user: User = Depends(get_current_user),
-        controller: ChatController = Depends(ChatController),
+        controller: ChatSessionController = Depends(ChatSessionController),
     ):
         """
         Ubah judul session. Hanya pemilik session yang dapat melakukan ini.

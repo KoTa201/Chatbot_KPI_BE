@@ -10,10 +10,11 @@ from uuid import UUID
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.PasswordReset import PasswordReset
-from datetime import datetime, timezone
+from datetime import datetime
 
 from model.User import RoleEnum, User
 from model.RevokedToken import RevokedToken          # ← model baru
+from utils.datetime import utc_now
 
 
 class UserRepository:
@@ -27,7 +28,7 @@ class UserRepository:
     #  Create                                                              #
     # ------------------------------------------------------------------ #
 
-    async def create_user(self, user: User) -> User:
+    async def create_user(self, user: User) -> User | None:
         """Insert user baru. Kembalikan instance yang sudah ter-refresh (id terisi)."""
         self.user = user
         self.db.add(self.user)
@@ -184,7 +185,7 @@ class UserRepository:
 
     async def get_active_reset_pin(self, user_id: UUID) -> PasswordReset | None:
         """Ambil PIN reset aktif (belum dipakai, belum expired)."""
-        now = datetime.now(timezone.utc)
+        now = utc_now()
         result = await self.db.execute(
             select(PasswordReset)
             .where(
@@ -210,5 +211,5 @@ class UserRepository:
 
     async def mark_reset_pin_used(self, record: PasswordReset) -> None:
         """Tandai PIN sebagai sudah dipakai."""
-        record.used_at = datetime.now(timezone.utc)
+        record.used_at = utc_now()
         await self.db.commit()

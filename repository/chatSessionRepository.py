@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from model.ChatMessage import ChatMessage
 from model.ChatSession import ChatSession
 from model.ClarificationQuestion import ClarificationQuestion
+from utils.datetime import utc_now
 
 
 @dataclass
@@ -119,7 +120,7 @@ class ChatSessionRepository:
         session = await self.get_by_id(session_id)
         if session is None:
             return None
-        session.end_at = datetime.now(timezone.utc)
+        session.end_at = utc_now()
         await self.db.flush()
         await self.db.refresh(session)
         return session

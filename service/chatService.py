@@ -270,9 +270,9 @@ class ChatService:
         stage.status = status_value
         stage.detail = detail
 
+    @staticmethod
     async def _handle_pipeline_error(
-        self,
-        pipeline: dict[str, Any],
+            pipeline: dict[str, Any],
         error: Exception,
     ) -> HTTPException:
         pipeline["execution_status"] = "error"

@@ -2,7 +2,6 @@
 controller/kpiGroupController.py
 """
 
-import math
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -20,6 +19,7 @@ from schema.kpiGroupSchema import (
     GroupTypeEnum,
 )
 from service.kpiGroupService import KPIGroupService
+from utils.pagination import calculate_total_pages, validate_limit, validate_page
 
 
 class KPIGroupController:
@@ -38,15 +38,13 @@ class KPIGroupController:
         group_type: GroupTypeEnum | None = None,
         search:     str | None = None,
     ) -> KPIGroupListResponse:
-        if limit < 1 or limit > 100:
+        try:
+            page = validate_page(page)
+            limit = validate_limit(limit)
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'limit' harus antara 1 dan 100.",
-            )
-        if page < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'page' tidak boleh negatif dan minimal 1.",
+                detail=str(e),
             )
 
         rows, total = await self.service.list_groups(
@@ -60,7 +58,7 @@ class KPIGroupController:
             total=total,
             page=page,
             limit=limit,
-            total_pages=math.ceil(total / limit) if total else 0,
+            total_pages=calculate_total_pages(total, limit),
             data=[self._build_response(r, include_records=False)
                   for r in rows],
         )
@@ -93,7 +91,7 @@ class KPIGroupController:
         response = await self.service.delete_group(group_id=group_id)
         return MessageResponse(message=response["message"])
 
-     # ─── Helper: ORM → KPIGroupResponse ──────────────────────────────────────
+    # ─── Helper: ORM → KPIGroupResponse ──────────────────────────────────────
 
     @staticmethod
     def _build_response(

@@ -223,6 +223,14 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
 
 async def test_run_nl_to_sql_stage_passes_addon_prompt_to_builder(monkeypatch):
     """Verify _run_nl_to_sql_stage passes addon_prompt to build_nl_to_sql_prompt."""
+    class FakeColumnStatisticsService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_nl_to_sql_statistics(self):
+            return ""
+
+    monkeypatch.setattr("service.chatService.ColumnStatisticsService", FakeColumnStatisticsService)
     captured_builder_args = {}
 
     def fake_build_nl_to_sql_prompt(**kwargs):
@@ -323,6 +331,14 @@ async def test_run_nl_to_sql_stage_passes_column_statistics_to_builder(monkeypat
 
 async def test_run_nl_to_sql_stage_passes_none_addon_prompt_to_builder(monkeypatch):
     """Verify _run_nl_to_sql_stage passes None addon_prompt when not provided."""
+    class FakeColumnStatisticsService:
+        def __init__(self, db):
+            self.db = db
+
+        async def build_nl_to_sql_statistics(self):
+            return ""
+
+    monkeypatch.setattr("service.chatService.ColumnStatisticsService", FakeColumnStatisticsService)
     captured_builder_args = {}
 
     def fake_build_nl_to_sql_prompt(**kwargs):

@@ -151,44 +151,6 @@ class ChatController:
             chunks.append(f"{word} " if index < last_index else word)
         return chunks
 
-    async def handle_get_session_detail(
-        self,
-        session_id: UUID,
-        current_user: User = Depends(get_current_user),
-    ) -> SessionDetailResponse:
-        service = ChatSessionService(self.db)
-        return await service.get_session_detail(session_id=session_id, user_id=current_user.id)
-
-    async def handle_get_sessions(
-        self,
-        current_user: User = Depends(get_current_user),
-    ) -> list[SessionResponse]:
-        service = ChatSessionService(self.db)
-        sessions = await service.get_sessions(user_id=str(current_user.id))
-        return [SessionResponse.model_validate(s) for s in sessions]
-
-    async def handle_delete_session(
-        self,
-        session_id: UUID,
-        current_user: User = Depends(get_current_user),
-    ) -> None:
-        service = ChatSessionService(self.db)
-        await service.delete_session(session_id=session_id, user_id=current_user.id)
-
-    async def handle_update_session_title(
-        self,
-        session_id: UUID,
-        request: UpdateSessionTitleRequest,
-        current_user: User = Depends(get_current_user),
-    ) -> SessionResponse:
-        service = ChatSessionService(self.db)
-        updated = await service.update_session_title(
-            session_id=session_id,
-            user_id=current_user.id,
-            title=request.title,
-        )
-        return SessionResponse.model_validate(updated)
-
     def _build_streaming_response(self, response: ChatResponse) -> StreamingResponse:
         payload = response.model_dump(mode="json")
         metadata = {key: value for key,

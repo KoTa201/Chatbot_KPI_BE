@@ -7,7 +7,7 @@ Logika bisnis authentication:
 - Dependency FastAPI untuk mendapatkan current user dari token
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Optional
 import uuid
 
@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 import random
 import secrets
-from datetime import datetime, timedelta, timezone
 
 from model.PasswordReset import PasswordReset
 from service.emailService import EmailService
@@ -28,6 +27,7 @@ from configCredidential import settings
 from databaseConfig import get_db
 from model.User import RoleEnum, User
 from repository.userRepository import UserRepository
+from utils.datetime import utc_now
 
 _oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
@@ -97,7 +97,7 @@ class AuthService:
             if expires_delta
             else self.access_token_expire_minutes * 60
         )
-        expire_at = datetime.now(timezone.utc) + timedelta(seconds=expire_seconds)
+        expire_at = utc_now() + timedelta(seconds=expire_seconds)
 
         payload = {
             "sub": str(user_id),
@@ -174,7 +174,7 @@ class AuthService:
             if expires_delta
             else self.refresh_token_expire_days * 86_400
         )
-        expire_at = datetime.now(timezone.utc) + \
+        expire_at = utc_now() + \
             timedelta(seconds=expire_seconds)
 
         payload = {
@@ -338,7 +338,7 @@ class AuthService:
         pin = f"{random.SystemRandom().randint(0, 999_999):06d}"
         pin_hash = self.hash_password(pin)   # bcrypt — sama seperti password
 
-        expires_at = datetime.now(timezone.utc) + \
+        expires_at = utc_now() + \
             timedelta(minutes=self.pin_expire_minutes)
         record = PasswordReset(
             user_id=user.id,
@@ -380,7 +380,7 @@ class AuthService:
 
         # Terbitkan reset_token: JWT pendek, type khusus, payload minimal
         expire_seconds = self.reset_token_expire_minutes * 60
-        expire_at = datetime.now(timezone.utc) + \
+        expire_at = utc_now() + \
             timedelta(seconds=expire_seconds)
         payload = {
             "sub": str(user.id),

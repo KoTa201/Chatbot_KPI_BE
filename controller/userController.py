@@ -17,6 +17,7 @@ from schema.authSchema import (
     UserResponse,
 )
 from service.userService import UserService
+from utils.pagination import validate_limit, validate_page
 
 
 class UserController:
@@ -52,15 +53,13 @@ class UserController:
     ) -> dict:
         """[Admin] Daftar semua user."""
         # -- validasi input --
-        if limit < 1 or limit > 100:
+        try:
+            page = validate_page(page)
+            limit = validate_limit(limit)
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'limit' harus antara 1 dan 100.",
-            )
-        if page < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'page' tidak boleh negatif dan minimal 1.",
+                detail=str(e),
             )
 
         active_status_filter = None

@@ -1,10 +1,8 @@
 from typing import Optional
 from uuid import UUID
-from fastapi import Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
+from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from databaseConfig import get_db
+
 from model.Chatbot import AuthorityEnum
 from schema.chatbotSchema import (
     ChatbotCreate,
@@ -14,6 +12,7 @@ from schema.chatbotSchema import (
     MessageResponse,
 )
 from service.chatbotService import ChatbotService
+from utils.pagination import validate_limit, validate_page
 
 
 class ChatbotController:
@@ -32,15 +31,13 @@ class ChatbotController:
         authority: Optional[AuthorityEnum],
         search: Optional[str],
     ) -> ChatbotListResponse:
-        if limit < 1 or limit > 100:
+        try:
+            page = validate_page(page)
+            limit = validate_limit(limit)
+        except ValueError as e:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'limit' harus antara 1 dan 100.",
-            )
-        if page < 1:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="'page' tidak boleh negatif dan minimal 1.",
+                detail=str(e),
             )
         chatbots = await self.service.get_all(page, limit, authority, search)
 

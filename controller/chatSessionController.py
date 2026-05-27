@@ -5,7 +5,7 @@ from uuid import UUID
 from databaseConfig import get_db
 from service.authService import get_current_user
 from service.chatSessionService import ChatSessionService
-from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest
+from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest, SessionDetailResponse
 from model.User import User
 
 
@@ -20,6 +20,15 @@ class ChatSessionController:
     ) -> list[SessionResponse]:
         sessions = await self.service.get_sessions(user_id=str(current_user.id))
         return [SessionResponse.model_validate(s) for s in sessions]
+
+
+    async def handle_get_session_detail(
+        self,
+        session_id: UUID,
+        current_user: User = Depends(get_current_user),
+    ) -> SessionDetailResponse:
+        service = ChatSessionService(self.db)
+        return await service.get_session_detail(session_id=session_id, user_id=current_user.id)
 
     async def handle_delete_session(
         self,

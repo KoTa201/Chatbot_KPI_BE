@@ -11,6 +11,7 @@ from schema.chatbotSchema import (
     ChatbotListResponse,
     ChatbotResponse,
 )
+from utils.pagination import calculate_total_pages
 
 
 class ChatbotService:
@@ -53,7 +54,7 @@ class ChatbotService:
         search: Optional[str] = None,
     ) -> dict:
         chatbots, total = await self.repo.get_all(page, limit, authority, search)
-        total_pages = max(1, -(-total // limit))  # ceiling division
+        total_pages = calculate_total_pages(total, limit, minimum=1)
 
         return {
             "data": [ChatbotResponse.model_validate(c) for c in chatbots],

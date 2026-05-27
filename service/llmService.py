@@ -114,9 +114,9 @@ class LLMService:
         except HTTPException:
             return VisualizationDecision(is_visualize=False, chart_type=None)
 
+    @staticmethod
     def _build_payload(
-        self,
-        model: str,
+            model: str,
         prompt: str,
         temperature: float,
         max_output_tokens: int,
