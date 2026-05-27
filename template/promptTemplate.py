@@ -134,7 +134,10 @@ def build_nl_to_sql_prompt(
     13. Data di kpi_tracker_records bisa berupa lanjutan progress KPI tracker sebelumnya; gunakan DISTINCT atau GROUP BY jika menghitung jumlah orang atau pekerjaan.
     14. Gunakan UPPER(u.full_name) LIKE untuk pencarian nama orang agar fleksibel, karena user bisa menyebut nama sebagian.
     15. Selalu gunakan kolom bulan_num sebagai acuan utama untuk menentukan konteks periode data pada KPI Tracker. Nilai bulan_num harus diinterpretasikan sebagai nomor bulan (contoh: Januari = 1, Februari = 2, Maret = 3, dan seterusnya) agar analisis atau jawaban dapat mengidentifikasi data KPI berasal dari bulan yang tepat.
-    
+    16. Kolom km.target, km.achieve, km.partial, dan km.fail adalah definisi threshold KPI, bukan nilai realisasi. DILARANG membandingkan kt.realisasi langsung dengan km.achieve, km.partial, atau km.fail menggunakan =, IN, atau perbandingan string lain.
+    17. Untuk pertanyaan tentang mencapai target, mendekati target, achieve, partial, fail, progress, atau kinerja, ambil data mentah untuk dianalisis: kt.user_id, kt.bulan_num, km.kpi_name, kt.realisasi, km.target, km.achieve, km.partial, km.fail, kt.keterangan.
+    18. Untuk konteks "sampai bulan terakhir", "terbaru", atau "latest", ambil realisasi terbaru berdasarkan bulan_num untuk KPI/karyawan yang relevan, biasanya dengan MAX(bulan_num); jangan menyaring hasil dengan kt.realisasi = km.achieve atau kt.realisasi = km.partial.
+
     [PERTANYAAN ASLI PENGGUNA (q)]
     {user_query}
     
@@ -185,53 +188,40 @@ def build_analysis_prompt(
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
     prompt = f"""[SYSTEM PROMPT]
-Kamu adalah analis data KPI yang bertugas menyajikan dan menjelaskan data secara akurat dalam Bahasa Indonesia.
-{addon_prompt_block}
-Tugasmu HANYA: sajikan data → jelaskan apa yang terlihat. Kamu BUKAN pengambil keputusan.
+    Kamu adalah analis data KPI yang menyajikan jawaban akurat, langsung, dan ringkas dalam Bahasa Indonesia.
+    {addon_prompt_block}
+    Tugasmu HANYA menjawab pertanyaan pengguna berdasarkan data mentah hasil SQL.
+    
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ATURAN WAJIB — IKUTI PERSIS:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    1. Jawab pertanyaan pengguna secara langsung terlebih dahulu.
+    2. Gunakan hanya data dalam [DATA MENTAH]. Jangan menambah nama, angka, status, atau periode yang tidak ada di data.
+    3. Jangan tampilkan tabel lengkap kecuali pengguna memintanya secara eksplisit.
+    4. Jika perlu daftar, gunakan maksimal 3–6 bullet dan sertakan nilai relevan seperti nama KPI, realisasi/progress, target, dan keterangan.
+    5. Jika data kosong: tulis "Tidak ada data." dan berhenti.
+    6. Jangan tambahkan seksi rekomendasi, saran tindakan, atau opini.
+    7. Jangan tambahkan seksi insight umum kecuali pengguna memintanya.
+    
+    ATURAN KHUSUS KPI TARGET / PROGRESS:
+    - Jika pertanyaan menanyakan pencapaian target, mendekati target, achieve, partial, fail, progress, atau kinerja, bandingkan kolom realisasi dengan target jika keduanya tersedia dan bisa dibandingkan.
+    - Untuk nilai numerik, realisasi == target atau realisasi > target berarti target tercapai.
+    - Untuk format TRL N, bandingkan angka N; TRL yang sama atau lebih tinggi dari target berarti target tercapai.
+    - Kolom achieve, partial, dan fail adalah deskripsi threshold. Gunakan sebagai konteks penjelasan, bukan sebagai label wajib yang harus muncul di keterangan.
+    - Jangan menyatakan status tidak diketahui hanya karena keterangan tidak memuat kata ACHIEVE jika realisasi dan target membuktikan target tercapai.
+    - Jika realisasi dan target tidak bisa dibandingkan secara pasti, sebutkan keterbatasan singkat dan tampilkan data mentah yang relevan.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ATURAN WAJIB — IKUTI PERSIS:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-LANGKAH 1 — TAMPILKAN TABEL DATA (WAJIB, LAKUKAN DULUAN)
-Cetak SELURUH isi data hasil query ke dalam tabel Markdown.
-Data memiliki {row_count_hint}.
-- Gunakan nama kolom asli sebagai header tabel.
-- Tampilkan SETIAP baris apa adanya, tanpa diringkas, tanpa dibuang.
-- Format angka: titik (.) pemisah ribuan, koma (,) desimal.
-- Tambahkan baris catatan di bawah tabel: "{truncation_note}"
-- Jika data kosong: tulis "Tidak ada data." dan BERHENTI di sini.
-
-LANGKAH 2 — JAWAB PERTANYAAN PENGGUNA
-Jawab pertanyaan secara langsung dan ringkas (2–4 kalimat).
-Gunakan HANYA angka/nama yang ada di tabel Langkah 1.
-
-LANGKAH 3 — INSIGHT DARI DATA
-Jelaskan temuan penting yang terlihat dari data. Contoh:
-- Nilai tertinggi / terendah (sebutkan baris & nilainya).
-- Perbandingan antar baris jika relevan.
-- Anomali atau pola yang terlihat.
-Setiap klaim HARUS menyebut nilai eksak dari tabel. Jangan generalisasi.
-
-TIDAK ADA LANGKAH LAIN. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-LARANGAN KERAS:
-- JANGAN sebut angka/nama yang tidak ada di data.
-- JANGAN karang, asumsikan, atau interpolasi data apapun.
-- JANGAN tambahkan seksi "Rekomendasi", "Saran", atau sejenisnya.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-[PERTANYAAN PENGGUNA]
-{user_query}
-
-[SQL YANG DIEKSEKUSI]
-{executed_sql}
-
-[DATA MENTAH — {row_count_hint} — {truncation_note}]
-{result_str}
-
-[MULAI RESPONS — LANGKAH 1: TABEL DATA]"""
+    [PERTANYAAN PENGGUNA]
+    {user_query}
+    
+    [SQL YANG DIEKSEKUSI]
+    {executed_sql}
+    
+    [DATA MENTAH — {row_count_hint} — {truncation_note}]
+    {result_str}
+    
+    [MULAI RESPONS]"""
 
     return prompt
 
@@ -255,113 +245,110 @@ def build_ambiguity_assessment_prompt(
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
     prompt = f"""Given a user question, database schema, and optional evidence, identify ambiguities in the user question and generate clarification questions to resolve them.
-Contents in the evidence are user provided clarifications to resolve previous detected ambiguities.
-Note that the user question might use both data inside the database and external parametrized knowledge from the Large Language Model (LLM).
-{addon_prompt_block}
-════════════════════════════════════════════════════════════════
-INPUT ELEMENTS:
-════════════════════════════════════════════════════════════════
-
-Question: "{user_query}"
-Role: {user_role}
-Schema: {DB_SCHEMA}
-Evidence: {kpi_context}
-
-
-
-
-## Ambiguity Definition & Taxonomy:
-A user question is identifies as ambiguous when there is more than one reasonable interpretation due to unclear, incomplete, or conflicting information.
-The ambiguity in a user question are defined as two different levels.
-- level_1 ambiguity type are defined from two different dimensions, database and LLM repectively:
-    - "Database-sourced ambiguity": Ambiguity that leads to incorrect or incomplete data retrieval directly from the database, due to unclear or underspecified aspects of the user query with respect to the database schema or content.
-    - "LLM-sourced ambiguity": Ambiguity that results in the misuse of LLM external knowledge, causing difficulties in correctly retrieving or applying information beyond the database.
-- level_2 ambiguity type are defined under each level_1 ambiguity type as follows:
-    - Database-sourced ambiguity:
-      - "AmbiSchema": The question lacks sufficient context to determine which table or specific column to use for operations(e.g., filtering, grouping, ranking, joining, aggregation, etc.), resulting in multiple plausible interpretations.
-        - (e.g., "the oldest user" could refer to 'age' column or 'registration_date' column, representing different aspects of user's age or registration date).
-      - "AmbiValue": The question refers to a value that does not correctly correspond to the actual values stored in the database, making it unclear how to formulate the WHERE clause condition and potentially causing relevant results to be omitted or producing inaccurate results.
-        - (e.g., querying posts mentioning the "R programming language", the WHERE clause might be "posts.Body LIKE '%R%'", or "posts.Body = 'programming language'", etc)
-        - (e.g., querying for users living in "New York City", the WHERE clause might be "users.City = 'New York City'", or "users.City = 'NYC'", etc)
-        - (e.g., querying for posts about coronavirus, the WHERE clause might be "posts.Body LIKE '%COVID-19%'", or "posts.Body = 'coronavirus'", etc)
-      - "AmbiView": Key terms clarifying the intended operation are absent, leading to ambiguity about the desired SQL operation 
-        - (e.g., query as 'Top 5 popular tags's star', which can list each tag's star or the amount of stars).
-    - LLM-sourced ambiguity:
-      - "AmbiContext": The question lacks adequate information to guide LLM reasoning effectively.
-        - (e.g., requesting dynamic or time-sensitive external information like "current exchange rate" without specifying the target currencies or date).
-      - "AmbiFallacy": Knowledge assumptions embedded within the question contradicts real-world facts or database contents 
-        - (e.g., querying entities or participants in events that never occurred, like 2001 Olympic Games).
-      - "AmbiRef": Spatial or temporal constraints are underspecified, resulting in multiple possible interpretations at different granularities 
-        - (e.g., querying for records "after the 2018 World Cup" could mean immediately after the final match or after the entire tournament year).
-        - (e.g., querying for records in the 'Middle East Region' might cause missing countries in the list for "Middle East" due to vague or imprecise geographic constraints from different sources).
-      
-## Instructions
-1. Analyze user question, database schema and evidence(if provided) to identify all possible ambiguous phrases in the user question.
-2. For each unresolved ambiguity: **(1)** Assign exactly one level-1 and one level-2 label. **(2)** Write a multi-choice question for user to further clarify their intent.
-3. For each multi-choice question: provide several possible options for users to choose from, add a description for each option, and add an explanation for the whole question through thinking. Formulate options and corresponding description based on the ambiguity type detected as follows:
-  i. For "AmbiSchema", list all plausible columns with the format of 'table_name::column_name', with relevant descriptive schema info retrieved from the input database schema.
-  ii. For "AmbiValue", list most likely 2-3 possible interpretations of WHERE clause, with concise explanation for each interpretation.
-  iii. For "AmbiView", list most likely 2-3 possible interpretations of SQL operations, with concise explanation for each interpretation.
-  v. For "AmbiContext", list most likely 2-3 possible values, ranges or constraints with concise explanation for each interpretation.
-  vi. For "AmbiFallacy", list most likely 2-3 best-guessing interpretations of the 'fallacy' info considering it as a typo.
-  vii. For "AmbiRef", list most likey 2-3 interpretations according to the reference part in the original user query.
-**Important Note**: 
-- All possible options should be in complete with concise description for user to select(Do not use such as or etc to omit some necessary options).
-- Not each input question is ambiguous. If all ambiguities are resolved or the original user input is unambiguous, return an empty question_set. (e.g., If only one column in the database is plausible, it should not be an unclear schema reference)
-- If the user's response in evidence to a specific ambiguity is 'Abstain', it means the identified ambiguity is not an actual ambiguity, and you can skip this ambiguity and not identify it again.
-
-════════════════════════════════════════════════════════════════
-OUTPUT FORMAT (Strict JSON — FOLLOW EXACTLY):
-════════════════════════════════════════════════════════════════
-
-{{
-  "has_ambiguity": true,
-  "question_set": [
+    Contents in the evidence are user provided clarifications to resolve previous detected ambiguities.
+    Note that the user question might use both data inside the database and external parametrized knowledge from the Large Language Model (LLM).
+    {addon_prompt_block}
+    ════════════════════════════════════════════════════════════════
+    INPUT ELEMENTS:
+    ════════════════════════════════════════════════════════════════
+    
+    Question: "{user_query}"
+    Role: {user_role}
+    Schema: {DB_SCHEMA}
+    Evidence: {kpi_context}
+    
+    ## Ambiguity Definition & Taxonomy:
+    A user question is identifies as ambiguous when there is more than one reasonable interpretation due to unclear, incomplete, or conflicting information.
+    The ambiguity in a user question are defined as two different levels.
+    - level_1 ambiguity type are defined from two different dimensions, database and LLM repectively:
+        - "Database-sourced ambiguity": Ambiguity that leads to incorrect or incomplete data retrieval directly from the database, due to unclear or underspecified aspects of the user query with respect to the database schema or content.
+        - "LLM-sourced ambiguity": Ambiguity that results in the misuse of LLM external knowledge, causing difficulties in correctly retrieving or applying information beyond the database.
+    - level_2 ambiguity type are defined under each level_1 ambiguity type as follows:
+        - Database-sourced ambiguity:
+          - "AmbiSchema": The question lacks sufficient context to determine which table or specific column to use for operations(e.g., filtering, grouping, ranking, joining, aggregation, etc.), resulting in multiple plausible interpretations.
+            - (e.g., "the oldest user" could refer to 'age' column or 'registration_date' column, representing different aspects of user's age or registration date).
+          - "AmbiValue": The question refers to a value that does not correctly correspond to the actual values stored in the database, making it unclear how to formulate the WHERE clause condition and potentially causing relevant results to be omitted or producing inaccurate results.
+            - (e.g., querying posts mentioning the "R programming language", the WHERE clause might be "posts.Body LIKE '%R%'", or "posts.Body = 'programming language'", etc)
+            - (e.g., querying for users living in "New York City", the WHERE clause might be "users.City = 'New York City'", or "users.City = 'NYC'", etc)
+            - (e.g., querying for posts about coronavirus, the WHERE clause might be "posts.Body LIKE '%COVID-19%'", or "posts.Body = 'coronavirus'", etc)
+          - "AmbiView": Key terms clarifying the intended operation are absent, leading to ambiguity about the desired SQL operation 
+            - (e.g., query as 'Top 5 popular tags's star', which can list each tag's star or the amount of stars).
+        - LLM-sourced ambiguity:
+          - "AmbiContext": The question lacks adequate information to guide LLM reasoning effectively.
+            - (e.g., requesting dynamic or time-sensitive external information like "current exchange rate" without specifying the target currencies or date).
+          - "AmbiFallacy": Knowledge assumptions embedded within the question contradicts real-world facts or database contents 
+            - (e.g., querying entities or participants in events that never occurred, like 2001 Olympic Games).
+          - "AmbiRef": Spatial or temporal constraints are underspecified, resulting in multiple possible interpretations at different granularities 
+            - (e.g., querying for records "after the 2018 World Cup" could mean immediately after the final match or after the entire tournament year).
+            - (e.g., querying for records in the 'Middle East Region' might cause missing countries in the list for "Middle East" due to vague or imprecise geographic constraints from different sources).
+          
+    ## Instructions
+    1. Analyze user question, database schema and evidence(if provided) to identify all possible ambiguous phrases in the user question.
+    2. For each unresolved ambiguity: **(1)** Assign exactly one level-1 and one level-2 label. **(2)** Write a multi-choice question for user to further clarify their intent.
+    3. For each multi-choice question: provide several possible options for users to choose from, add a description for each option, and add an explanation for the whole question through thinking. Formulate options and corresponding description based on the ambiguity type detected as follows:
+      i. For "AmbiSchema", list all plausible columns with the format of 'table_name::column_name', with relevant descriptive schema info retrieved from the input database schema.
+      ii. For "AmbiValue", list most likely 2-3 possible interpretations of WHERE clause, with concise explanation for each interpretation.
+      iii. For "AmbiView", list most likely 2-3 possible interpretations of SQL operations, with concise explanation for each interpretation.
+      v. For "AmbiContext", list most likely 2-3 possible values, ranges or constraints with concise explanation for each interpretation.
+      vi. For "AmbiFallacy", list most likely 2-3 best-guessing interpretations of the 'fallacy' info considering it as a typo.
+      vii. For "AmbiRef", list most likey 2-3 interpretations according to the reference part in the original user query.
+    **Important Note**: 
+    - All possible options should be in complete with concise description for user to select(Do not use such as or etc to omit some necessary options).
+    - Not each input question is ambiguous. If all ambiguities are resolved or the original user input is unambiguous, return an empty question_set. (e.g., If only one column in the database is plausible, it should not be an unclear schema reference)
+    - If the user's response in evidence to a specific ambiguity is 'Abstain', it means the identified ambiguity is not an actual ambiguity, and you can skip this ambiguity and not identify it again.
+    
+    ════════════════════════════════════════════════════════════════
+    OUTPUT FORMAT (Strict JSON — FOLLOW EXACTLY):
+    ════════════════════════════════════════════════════════════════
+    
     {{
-      "question": "Progress KPI Akmal ingin dilihat dari sisi apa?",
-      "level_1_label": "LLM-sourced ambiguity",
-      "level_2_label": "AmbiIntent",
-      "description": {{
-        "options": [
-          "Realisasi KPI terbaru",
-          "Persentase pencapaian terhadap target",
-          "Tren progress dari waktu ke waktu"
-        ]
-      }}
-    }},
-    {{
-      "question": "Akmal merujuk ke karyawan atau KPI yang mana?",
-      "level_1_label": "Database-sourced ambiguity",
-      "level_2_label": "AmbiValue",
-      "description": {{
-        "options": [
-          "Karyawan bernama Akmal",
-          "KPI yang mengandung kata Akmal"
-        ]
-      }}
+      "has_ambiguity": true,
+      "question_set": [
+        {{
+          "question": "Progress KPI Akmal ingin dilihat dari sisi apa?",
+          "level_1_label": "LLM-sourced ambiguity",
+          "level_2_label": "AmbiIntent",
+          "description": {{
+            "options": [
+              "Realisasi KPI terbaru",
+              "Persentase pencapaian terhadap target",
+              "Tren progress dari waktu ke waktu"
+            ]
+          }}
+        }},
+        {{
+          "question": "Akmal merujuk ke karyawan atau KPI yang mana?",
+          "level_1_label": "Database-sourced ambiguity",
+          "level_2_label": "AmbiValue",
+          "description": {{
+            "options": [
+              "Karyawan bernama Akmal",
+              "KPI yang mengandung kata Akmal"
+            ]
+          }}
+        }}
+      ]
     }}
-  ]
-}}
-
-CONTOH OUTPUT TIDAK AMBIGUOUS:
-{{
-  "has_ambiguity": false,
-  "question_set": []
-}}
-
-CRITICAL JSON STRUCTURE RULES:
-- NO per-item "metadata" field
-- "description" MUST be an object with ONLY "options" key containing array of strings
-- "options" array contains ONLY the clarifying options (2-5 items)
-- question_set is array of objects, each with exactly: question, level_1_label, level_2_label, description
-
-════════════════════════════════════════════════════════════════
-REMEMBER:
-════════════════════════════════════════════════════════════════
-- Data source ALWAYS database. DO NOT create source-selection ambiguity category.
-- "Abstain" means: skip that ambiguity type and do not identify it again in future queries
-- Return ONLY valid JSON. NO markdown, NO explanation, NO comments.
-- Respect the strict JSON shape above. Do not add extra fields."""
+    
+    CONTOH OUTPUT TIDAK AMBIGUOUS:
+    {{
+      "has_ambiguity": false,
+      "question_set": []
+    }}
+    
+    CRITICAL JSON STRUCTURE RULES:
+    - NO per-item "metadata" field
+    - "description" MUST be an object with ONLY "options" key containing array of strings
+    - "options" array contains ONLY the clarifying options (2-5 items)
+    - question_set is array of objects, each with exactly: question, level_1_label, level_2_label, description
+    
+    ════════════════════════════════════════════════════════════════
+    REMEMBER:
+    ════════════════════════════════════════════════════════════════
+    - Data source ALWAYS database. DO NOT create source-selection ambiguity category.
+    - "Abstain" means: skip that ambiguity type and do not identify it again in future queries
+    - Return ONLY valid JSON. NO markdown, NO explanation, NO comments.
+    - Respect the strict JSON shape above. Do not add extra fields."""
 
     return prompt
 
@@ -386,64 +373,64 @@ def build_query_disambiguation_prompt(
         additional_information = "\n".join(answer_lines) if answer_lines else "Tidak ada informasi tambahan."
 
     return f'''## Task
-To combine an `original_question` with `additional_information` into a single, coherent, and complete new question that is logically sound and easy to understand.
-
-## Core Principles
-1.  **Absolute Preservation**: You MUST preserve ALL constraints, details, and intents from the `original_question`. Nothing from the original should be omitted or altered unless it is directly and explicitly contradicted by the `additional_information`.
-2.  **Full Integration**: You MUST seamlessly integrate ALL new requirements and constraints from the `additional_information` into the new question.
-3.  **Conflict Resolution**: If a piece of `additional_information` directly conflicts with a part of the `original_question`, the `additional_information` takes precedence and should be used to update or replace the conflicting part. This is the **only** scenario where original information may be modified.
-4.  **Natural Language**: The final output must be a single, natural-sounding question, not a list of criteria.
-
-## Examples
-Original question: List all novels published after 2000 that won a Booker Prize.
-Additional information: Only include novels published after 2010 that were also adapted into movies and written by female authors.
-Rewritten question: List all novels published after 2010 that won a Booker Prize, were adapted into movies, and were written by female authors.
-
-Original question: Which Asian countries have a GDP per capita above $30,000 and a population under 10 million?
-Additional information: Exclude countries that are island nations and with a population more than 10 million.
-Rewritten question: Which Asian countries that are not island nations have a GDP per capita above $30,000 and a population more than 10 million?
-
-Original question: Provide the list of Olympic gold medalists in swimming events for the last three Summer Olympics, including their ages at the time of winning.
-Additional information: I am only interested in male athletes from North America, and only in individual events.
-Rewritten question: Provide the list of male North American Olympic gold medalists in individual swimming events for the last three Summer Olympics, including their ages at the time of winning.
-
-## Response Format
-- Return **only** the text of the rewritten question.
-- Do not include any preamble, labels (like "Rewritten question:"), or explanations.
-
----
-**Input:**
-Original question: {original_query}
-Additional information: {additional_information}
-
-The rewritten question is:
-'''
+    To combine an `original_question` with `additional_information` into a single, coherent, and complete new question that is logically sound and easy to understand.
+    
+    ## Core Principles
+    1.  **Absolute Preservation**: You MUST preserve ALL constraints, details, and intents from the `original_question`. Nothing from the original should be omitted or altered unless it is directly and explicitly contradicted by the `additional_information`.
+    2.  **Full Integration**: You MUST seamlessly integrate ALL new requirements and constraints from the `additional_information` into the new question.
+    3.  **Conflict Resolution**: If a piece of `additional_information` directly conflicts with a part of the `original_question`, the `additional_information` takes precedence and should be used to update or replace the conflicting part. This is the **only** scenario where original information may be modified.
+    4.  **Natural Language**: The final output must be a single, natural-sounding question, not a list of criteria.
+    
+    ## Examples
+    Original question: List all novels published after 2000 that won a Booker Prize.
+    Additional information: Only include novels published after 2010 that were also adapted into movies and written by female authors.
+    Rewritten question: List all novels published after 2010 that won a Booker Prize, were adapted into movies, and were written by female authors.
+    
+    Original question: Which Asian countries have a GDP per capita above $30,000 and a population under 10 million?
+    Additional information: Exclude countries that are island nations and with a population more than 10 million.
+    Rewritten question: Which Asian countries that are not island nations have a GDP per capita above $30,000 and a population more than 10 million?
+    
+    Original question: Provide the list of Olympic gold medalists in swimming events for the last three Summer Olympics, including their ages at the time of winning.
+    Additional information: I am only interested in male athletes from North America, and only in individual events.
+    Rewritten question: Provide the list of male North American Olympic gold medalists in individual swimming events for the last three Summer Olympics, including their ages at the time of winning.
+    
+    ## Response Format
+    - Return **only** the text of the rewritten question.
+    - Do not include any preamble, labels (like "Rewritten question:"), or explanations.
+    
+    ---
+    **Input:**
+    Original question: {original_query}
+    Additional information: {additional_information}
+    
+    The rewritten question is:
+    '''
 
 
 def build_node_merge_prompt(old_list: list[dict], new_pair: dict) -> str:
     import json
 
     return f'''## Task
-Merge a new question-answer pair into an existing list of question-answer pairs.
-
-## Input
-- old_list: existing list of objects, each with a `question` and `answer` field.
-- new_pair: object with a `question` and `answer` field.
-
-old_list:
-{json.dumps(old_list, ensure_ascii=False)}
-
-new_pair:
-{json.dumps(new_pair, ensure_ascii=False)}
-
-## Merge Instructions
-1. Compare the `question` field of `new_pair` with each item in `old_list`. If any question in `old_list` has the same or highly similar meaning as `new_pair` (same intent, possibly different wording), treat it as a conflict.
-2. If there is a conflict, remove the conflicting item and replace it with `new_pair`.
-3. If there is no conflict, append `new_pair` at the end.
-4. Ensure the output list contains no duplicate questions by meaning.
-5. Return ONLY the merged list as a valid JSON array: [{{"question": "...", "answer": "..."}}, ...]
-6. Do NOT return any explanation or text outside the JSON array.
-'''
+    Merge a new question-answer pair into an existing list of question-answer pairs.
+    
+    ## Input
+    - old_list: existing list of objects, each with a `question` and `answer` field.
+    - new_pair: object with a `question` and `answer` field.
+    
+    old_list:
+    {json.dumps(old_list, ensure_ascii=False)}
+    
+    new_pair:
+    {json.dumps(new_pair, ensure_ascii=False)}
+    
+    ## Merge Instructions
+    1. Compare the `question` field of `new_pair` with each item in `old_list`. If any question in `old_list` has the same or highly similar meaning as `new_pair` (same intent, possibly different wording), treat it as a conflict.
+    2. If there is a conflict, remove the conflicting item and replace it with `new_pair`.
+    3. If there is no conflict, append `new_pair` at the end.
+    4. Ensure the output list contains no duplicate questions by meaning.
+    5. Return ONLY the merged list as a valid JSON array: [{{"question": "...", "answer": "..."}}, ...]
+    6. Do NOT return any explanation or text outside the JSON array.
+    '''
 
 
 def build_graphic_generation_prompt(

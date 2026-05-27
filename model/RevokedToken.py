@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -7,6 +7,7 @@ from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
+from utils.datetime import utc_now
 
 if TYPE_CHECKING:
     from model.User import User
@@ -26,7 +27,7 @@ class RevokedToken(Base):
     )
     revoked_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=utc_now,
     )
 
     user: Mapped["User"] = relationship("User")

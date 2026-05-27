@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
+from utils.datetime import utc_now
 
 if TYPE_CHECKING:
     from model.ChatSession import ChatSession
@@ -22,7 +23,7 @@ class ChatMessage(Base):
     is_sender_chatbot: Mapped[bool] = mapped_column(Boolean, nullable=False)
     send_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=utc_now,
         nullable=False,
     )
     session_id: Mapped[uuid.UUID] = mapped_column(

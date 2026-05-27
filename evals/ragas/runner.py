@@ -34,6 +34,7 @@ class EvalCase:
     user_id: UUID | None
     user_email: str | None
     expected_sql: str
+    expected_answer: str
     expected_context: dict[str, list[str]]
     notes: str | None = None
 
@@ -83,6 +84,7 @@ def load_cases(path: Path) -> list[EvalCase]:
                 user_id=UUID(str(raw_case["user_id"])) if raw_case.get("user_id") else None,
                 user_email=str(raw_case["user_email"]) if raw_case.get("user_email") else None,
                 expected_sql=str(raw_case["expected_sql"]).strip(),
+                expected_answer=str(raw_case.get("expected_answer") or raw_case["expected_sql"]).strip(),
                 expected_context={
                     "tables": [str(value) for value in expected_context.get("tables", [])],
                     "columns": [str(value) for value in expected_context.get("columns", [])],
@@ -96,10 +98,12 @@ def load_cases(path: Path) -> list[EvalCase]:
     return cases
 
 
-def build_reference_contexts(expected_context: dict[str, list[str]]) -> list[str]:
+def build_reference_contexts(eval_case: EvalCase) -> list[str]:
     parts: list[str] = []
-    tables = expected_context.get("tables") or []
-    columns = expected_context.get("columns") or []
+    if eval_case.expected_answer:
+        parts.append("Expected answer evidence: " + eval_case.expected_answer)
+    tables = eval_case.expected_context.get("tables") or []
+    columns = eval_case.expected_context.get("columns") or []
     if tables:
         parts.append("Expected tables: " + ", ".join(tables))
     if columns:
@@ -117,6 +121,36 @@ def serialize_stages(stages: list[Any]) -> list[dict[str, Any]]:
         else:
             serialized.append({"stage": str(stage)})
     return serialized
+
+
+def build_success_row(eval_case: EvalCase, response: Any, context: str) -> dict[str, Any]:
+    generated_sql = (response.generated_sql or "").strip()
+    query_result_text = ""
+    if response.rows_returned and response.rows_returned > 0:
+        query_result_text = f"\n\nQUERY RESULTS ({response.rows_returned} rows):\n{response.message}"
+
+    return {
+        "id": eval_case.id,
+        "question": eval_case.question,
+        "answer": response.message or generated_sql,
+        "generated_sql": generated_sql,
+        "expected_sql": eval_case.expected_sql,
+        "sql_ground_truth": eval_case.expected_sql,
+        "ground_truth": eval_case.expected_answer,
+        "reference": eval_case.expected_answer,
+        "ragas_reference": eval_case.expected_answer,
+        "expected_answer": eval_case.expected_answer,
+        "contexts": [context + query_result_text],
+        "reference_contexts": build_reference_contexts(eval_case),
+        "expected_context": eval_case.expected_context,
+        "final_narrative": response.message,
+        "rows_returned": response.rows_returned,
+        "execution_time_ms": response.execution_time_ms,
+        "pipeline_stages": serialize_stages(response.pipeline_stages),
+        "status": "success" if generated_sql else "missing_generated_sql",
+        "error": None if generated_sql else "ChatResponse.generated_sql was empty.",
+        "notes": eval_case.notes,
+    }
 
 
 async def resolve_user_id(db: Any, eval_case: EvalCase) -> UUID:
@@ -169,9 +203,9 @@ async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = F
                 "answer": "",
                 "generated_sql": "",
                 "ground_truth": eval_case.expected_sql,
-                "reference": eval_case.expected_sql,
+                "reference": eval_case.expected_answer,
                 "contexts": [context],
-                "reference_contexts": build_reference_contexts(eval_case.expected_context),
+                "reference_contexts": build_reference_contexts(eval_case),
                 "expected_context": eval_case.expected_context,
                 "status": "pipeline_error",
                 "error": str(error),
@@ -185,9 +219,9 @@ async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = F
                 "answer": "",
                 "generated_sql": "",
                 "ground_truth": eval_case.expected_sql,
-                "reference": eval_case.expected_sql,
+                "reference": eval_case.expected_answer,
                 "contexts": [context],
-                "reference_contexts": build_reference_contexts(eval_case.expected_context),
+                "reference_contexts": build_reference_contexts(eval_case),
                 "expected_context": eval_case.expected_context,
                 "status": "clarification_required",
                 "error": response.message,
@@ -195,25 +229,7 @@ async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = F
                 "notes": eval_case.notes,
             }
 
-        generated_sql = (response.generated_sql or "").strip()
-        return {
-            "id": eval_case.id,
-            "question": eval_case.question,
-            "answer": generated_sql,
-            "generated_sql": generated_sql,
-            "ground_truth": eval_case.expected_sql,
-            "reference": eval_case.expected_sql,
-            "contexts": [context],
-            "reference_contexts": build_reference_contexts(eval_case.expected_context),
-            "expected_context": eval_case.expected_context,
-            "final_narrative": response.message,
-            "rows_returned": response.rows_returned,
-            "execution_time_ms": response.execution_time_ms,
-            "pipeline_stages": serialize_stages(response.pipeline_stages),
-            "status": "success" if generated_sql else "missing_generated_sql",
-            "error": None if generated_sql else "ChatResponse.generated_sql was empty.",
-            "notes": eval_case.notes,
-        }
+        return build_success_row(eval_case, response, context)
 
 
 def load_ragas_metrics() -> list[Any]:
@@ -229,8 +245,8 @@ def build_ragas_dataset(rows: list[dict[str, Any]]) -> Dataset:
             {
                 "question": row["question"],
                 "answer": row["answer"],
-                "ground_truth": row["ground_truth"],
-                "reference": row["reference"],
+                "ground_truth": row.get("expected_answer") or row["reference"],
+                "reference": row.get("expected_answer") or row["reference"],
                 "contexts": row["contexts"],
                 "reference_contexts": row["reference_contexts"],
             }

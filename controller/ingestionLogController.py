@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.ingestionLogService import IngestionLogService
+from utils.pagination import validate_limit, validate_page
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -69,8 +70,8 @@ class IngestionLogController:
         """
         # ── Validate limit ──────────────────────────────────────────────
         try:
-            page = self._validate_page(page)
-            limit = self._validate_limit(limit)
+            page = validate_page(page)
+            limit = validate_limit(limit, max_limit=MAX_LIMIT, clamp=True)
         except ValueError as e:
             raise HTTPException(
                 status_code=400,
@@ -101,44 +102,3 @@ class IngestionLogController:
                 status_code=500,
                 detail=f"Error saat fetch ingestion logs: {str(e)}",
             )
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # PRIVATE: Validation helpers
-    # ─────────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _validate_limit(limit: int) -> int:
-        """
-        Validate dan normalize limit parameter.
-
-        Args:
-            limit: Jumlah logs yang diminta
-
-        Returns:
-            Normalized limit (clamped ke [1, MAX_LIMIT])
-
-        Raises:
-            ValueError: Jika limit invalid
-        """
-        if not isinstance(limit, int):
-            raise ValueError(
-                f"limit harus berupa integer. Diterima: {type(limit).__name__}")
-
-        if limit < 1:
-            raise ValueError(f"limit harus >= 1. Diterima: {limit}")
-
-        if limit > MAX_LIMIT:
-            limit = MAX_LIMIT
-
-        return limit
-
-    @staticmethod
-    def _validate_page(page: int) -> int:
-        if not isinstance(page, int):
-            raise ValueError(
-                f"page harus berupa integer. Diterima: {type(page).__name__}")
-
-        if page < 1:
-            raise ValueError(f"page harus >= 1. Diterima: {page}")
-
-        return page

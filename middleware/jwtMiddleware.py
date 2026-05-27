@@ -4,7 +4,6 @@ Middleware JWT untuk FastAPI.
 Mendukung role: admin, kepala_divisi, karyawan
 """
 
-import json
 import logging
 import re
 from typing import Optional
@@ -15,9 +14,10 @@ from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-logger = logging.getLogger(__name__)
-
 from configCredidential import settings
+from utils.responses import json_response
+
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------ #
 #  Role constants                                                      #
@@ -109,15 +109,6 @@ def _decode_token(token: str) -> Optional[dict]:
         return None
 
 
-def _json_response(status_code: int, detail: str) -> Response:
-    body = json.dumps({"detail": detail}, ensure_ascii=False)
-    return Response(
-        content=body,
-        status_code=status_code,
-        media_type="application/json",
-    )
-
-
 # ------------------------------------------------------------------ #
 #  Middleware                                                          #
 # ------------------------------------------------------------------ #
@@ -151,7 +142,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         # 2. Ambil & validasi token
         token = _extract_token(request.headers.get("Authorization"))
         if not token:
-            return _json_response(
+            return json_response(
                 status.HTTP_401_UNAUTHORIZED,
                 "Token tidak ditemukan. Sertakan header: Authorization: Bearer <token>",
             )
@@ -159,7 +150,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         # 3. Decode token
         payload = _decode_token(token)
         if payload is None:
-            return _json_response(
+            return json_response(
                 status.HTTP_401_UNAUTHORIZED,
                 "Token tidak valid atau sudah kadaluarsa.",
             )
@@ -167,7 +158,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         # 4. Klaim wajib
         user_id = payload.get("sub")
         if not user_id:
-            return _json_response(
+            return json_response(
                 status.HTTP_401_UNAUTHORIZED,
                 "Token tidak mengandung identitas user.",
             )
@@ -179,13 +170,13 @@ class JWTMiddleware(BaseHTTPMiddleware):
 
         if allowed_roles is None:
             # Tidak ada rule yang cocok → tolak (deny by default)
-            return _json_response(
+            return json_response(
                 status.HTTP_403_FORBIDDEN,
                 f"Akses ditolak: endpoint tidak terdaftar dalam kebijakan akses.",
             )
 
         if role not in allowed_roles:
-            return _json_response(
+            return json_response(
                 status.HTTP_403_FORBIDDEN,
                 f"Akses ditolak: role '{role}' tidak memiliki izin untuk endpoint ini.",
             )
@@ -204,7 +195,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
             # ServerErrorMiddleware (which is outside CORS), producing a
             # response with no CORS headers → browser CORS block + ERR_FAILED.
             logger.exception("Unhandled error on %s %s", request.method, request.url.path)
-            return _json_response(
+            return json_response(
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
                 f"Internal server error: {type(exc).__name__}",
             )

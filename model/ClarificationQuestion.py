@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String
@@ -7,6 +7,7 @@ from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
+from utils.datetime import utc_now
 
 if TYPE_CHECKING:
     from model.ChatMessage import ChatMessage
@@ -26,7 +27,7 @@ class ClarificationQuestion(Base):
     free_text_answer: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=utc_now,
         nullable=False,
     )
     message_id: Mapped[str | None] = mapped_column(

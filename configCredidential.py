@@ -43,7 +43,7 @@ class Settings:
     SMTP_PASSWORD: str = get_required_env("SMTP_PASSWORD")
     # LLM Configuration
     LLM_API_KEY: str = get_required_env("LLM_MODEL_API_KEY")
-    LLM_BASE_URL: str = get_required_env("LLM_MODEL_BASE_URl")
+    LLM_BASE_URL: str = get_required_env("LLM_MODEL_BASE_URL")
     LLM_MODEL_NL_TO_SQL: str = get_required_env("LLM_MODEL_NL_TO_SQL")
     LLM_MODEL_ANALYSIS: str = get_required_env("LLM_MODEL_ANALYSIS")
     LLM_MODEL_GRAPHIC_CLASSIFIER: str = get_required_env(

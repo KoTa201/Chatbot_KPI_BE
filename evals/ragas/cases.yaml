@@ -1,68 +1,78 @@
-- id: active_kpi_groups_current_year
-  question: "Tampilkan kolom id, nama_grup, group_type, sheet_name, dan tahun dari tabel kpi_groups untuk baris dengan is_active true dan tahun 2025"
+- id: team_kpi_progress_against_target
+  question: "KPI tim saya yang realisasinya sudah mencapai target atau mendekati target sampai bulan terakhir apa saja? Tolong sertakan progress dan keterangannya."
   user_role: "kepala_divisi"
   user_divisi: null
   user_email: "rina.kadiv@kpiapp.id"
   expected_sql: >
-    SELECT id, nama_grup, group_type, sheet_name, tahun
-    FROM kpi_groups
-    WHERE is_active = TRUE AND tahun = 2025;
-  expected_context:
-    tables:
-      - kpi_groups
-    columns:
-      - kpi_groups.id
-      - kpi_groups.nama_grup
-      - kpi_groups.group_type
-      - kpi_groups.sheet_name
-      - kpi_groups.tahun
-      - kpi_groups.is_active
-  notes: "Basic schema retrieval for active KPI groups."
-
-- id: monthly_kpi_realization_by_division
-  question: "Tampilkan bulan_num, kpi_name, realisasi, dan keterangan untuk semua baris kpi_tracker_records yang terhubung ke kpi_master_records dan kpi_groups, urutkan berdasarkan bulan_num lalu kpi_name"
-  user_role: "kepala_divisi"
-  user_divisi: null
-  user_email: "rina.kadiv@kpiapp.id"
-  expected_sql: >
-    SELECT kt.bulan_num, km.kpi_name, kt.realisasi, kt.keterangan
+    SELECT kt.bulan_num, km.kpi_name, kt.realisasi, km.target, km.achieve, km.partial, km.fail, kt.keterangan
     FROM kpi_tracker_records kt
     JOIN kpi_master_records km ON kt.kpi_master_id = km.id
-    JOIN kpi_groups kg ON km.group_id = kg.id
-    ORDER BY kt.bulan_num, km.kpi_name;
+    WHERE kt.bulan_num = (SELECT MAX(bulan_num) FROM kpi_tracker_records)
+    ORDER BY kt.bulan_num DESC, km.kpi_name;
+  expected_answer: "Pada bulan terakhir, KPI yang ditampilkan adalah Internal Enablement dengan realisasi 3 dan target 3, Product Readiness dengan realisasi TRL 7 dan target TRL 7, serta Product Launch dengan realisasi 3 dan target 3. Ketiganya memiliki keterangan progress bulan terakhir, termasuk Internal Enablement: ACHIEVE dan Product Readiness: ACHIEVE."
   expected_context:
     tables:
       - kpi_tracker_records
       - kpi_master_records
-      - kpi_groups
     columns:
       - kpi_tracker_records.bulan_num
+      - kpi_tracker_records.kpi_master_id
       - kpi_tracker_records.realisasi
       - kpi_tracker_records.keterangan
-      - kpi_tracker_records.kpi_master_id
       - kpi_master_records.id
-      - kpi_master_records.kpi_name
-      - kpi_master_records.group_id
-      - kpi_groups.id
-      - kpi_groups.nama_grup
-  notes: "Role-scoped division KPI tracker query."
-
-- id: kpi_target_and_achievement_summary
-  question: "Tampilkan kpi_name, target, achieve, partial, dan fail dari semua baris kpi_master_records, urutkan berdasarkan kpi_name"
-  user_role: "kepala_divisi"
-  user_divisi: null
-  user_email: "rina.kadiv@kpiapp.id"
-  expected_sql: >
-    SELECT kpi_name, target, achieve, partial, fail
-    FROM kpi_master_records
-    ORDER BY kpi_name;
-  expected_context:
-    tables:
-      - kpi_master_records
-    columns:
       - kpi_master_records.kpi_name
       - kpi_master_records.target
       - kpi_master_records.achieve
       - kpi_master_records.partial
       - kpi_master_records.fail
-  notes: "KPI master target and threshold query."
+  notes: "Kepala divisi performance review for KPI progress against target thresholds."
+
+#- id: monthly_kpi_realization_by_division
+#  question: "Bisa tunjukkan progress realisasi tiap KPI per bulan, termasuk keterangannya?"
+#  user_role: "kepala_divisi"
+#  user_divisi: null
+#  user_email: "rina.kadiv@kpiapp.id"
+#  expected_sql: >
+#    SELECT kt.bulan_num, km.kpi_name, kt.realisasi, kt.keterangan
+#    FROM kpi_tracker_records kt
+#    JOIN kpi_master_records km ON kt.kpi_master_id = km.id
+#    JOIN kpi_groups kg ON km.group_id = kg.id
+#    ORDER BY kt.bulan_num, km.kpi_name;
+#  expected_answer: "Progress realisasi tiap KPI ditampilkan per bulan, bersama nama KPI dan keterangan masing-masing realisasi."
+#  expected_context:
+#    tables:
+#      - kpi_tracker_records
+#      - kpi_master_records
+#      - kpi_groups
+#    columns:
+#      - kpi_tracker_records.bulan_num
+#      - kpi_tracker_records.realisasi
+#      - kpi_tracker_records.keterangan
+#      - kpi_tracker_records.kpi_master_id
+#      - kpi_master_records.id
+#      - kpi_master_records.kpi_name
+#      - kpi_master_records.group_id
+#      - kpi_groups.id
+#      - kpi_groups.nama_grup
+#  notes: "Role-scoped division KPI tracker query."
+#
+#- id: kpi_target_and_achievement_summary
+#  question: "Saya mau lihat daftar KPI beserta target dan batas pencapaiannya."
+#  user_role: "kepala_divisi"
+#  user_divisi: null
+#  user_email: "rina.kadiv@kpiapp.id"
+#  expected_sql: >
+#    SELECT kpi_name, target, achieve, partial, fail
+#    FROM kpi_master_records
+#    ORDER BY kpi_name;
+#  expected_answer: "Daftar KPI ditampilkan bersama target, batas tercapai, batas sebagian tercapai, dan batas gagal."
+#  expected_context:
+#    tables:
+#      - kpi_master_records
+#    columns:
+#      - kpi_master_records.kpi_name
+#      - kpi_master_records.target
+#      - kpi_master_records.achieve
+#      - kpi_master_records.partial
+#      - kpi_master_records.fail
+#  notes: "KPI master target and threshold query."

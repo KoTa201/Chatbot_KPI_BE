@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String
@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
+from utils.datetime import utc_now
 
 if TYPE_CHECKING:
     from model.ChatMessage import ChatMessage
@@ -24,7 +25,7 @@ class ChatSession(Base):
     session_name: Mapped[str] = mapped_column(String(255), nullable=False)
     start_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=utc_now,
         nullable=False,
     )
     end_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
