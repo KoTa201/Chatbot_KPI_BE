@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from model.Base import GroupTypeEnum
 from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
-from repository.KpiGroupRepository import KPIGroupRepository
+from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import TrackerSourceItem   # input schema — boleh tetap
