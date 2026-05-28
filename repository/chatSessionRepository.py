@@ -107,10 +107,7 @@ class ChatSessionRepository:
             clarification_questions_by_message_id=questions_by_message_id,
         )
 
-    async def update_title(self, session_id: uuid.UUID, title: str) -> Optional[ChatSession]:
-        session = await self.get_by_id(session_id)
-        if session is None:
-            return None
+    async def update_title(self, session: ChatSession, title: str) -> Optional[ChatSession]:
         session.session_name = title
         await self.db.flush()
         await self.db.refresh(session)
@@ -125,10 +122,6 @@ class ChatSessionRepository:
         await self.db.refresh(session)
         return session
 
-    async def delete(self, session_id: uuid.UUID) -> bool:
-        session = await self.get_by_id(session_id)
-        if session is None:
-            return False
+    async def delete(self, session: ChatSession):
         await self.db.delete(session)
         await self.db.flush()
-        return True

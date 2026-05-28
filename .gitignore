@@ -79,8 +79,9 @@ ehthumbs.db
 CLAUDE.md
 CLAUDE_USER.md
 
-docs/
+.docs/
 
 .claude/
 
 .graphify-out/
+

@@ -1,11 +1,14 @@
-from fastapi import Depends
+
+
+from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from databaseConfig import get_db
 from service.authService import get_current_user
 from service.chatSessionService import ChatSessionService
-from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest, SessionDetailResponse
+from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest, SessionDetailResponse, \
+    SessionDeleteResponse
 from model.User import User
 
 
@@ -18,7 +21,7 @@ class ChatSessionController:
         self,
         current_user: User = Depends(get_current_user),
     ) -> list[SessionResponse]:
-        sessions = await self.service.get_sessions(user_id=str(current_user.id))
+        sessions = await self.service.get_sessions(user_id=current_user.id)
         return [SessionResponse.model_validate(s) for s in sessions]
 
 
@@ -27,15 +30,16 @@ class ChatSessionController:
         session_id: UUID,
         current_user: User = Depends(get_current_user),
     ) -> SessionDetailResponse:
-        service = ChatSessionService(self.db)
-        return await service.get_session_detail(session_id=session_id, user_id=current_user.id)
+        session_detail = await self.service.get_session_detail(session_id=session_id, user_id=current_user.id)
+        return SessionDetailResponse.model_validate(session_detail)
 
     async def handle_delete_session(
         self,
         session_id: UUID,
         current_user: User = Depends(get_current_user),
     ) -> None:
-        await self.service.delete_session(session_id=session_id, user_id=current_user.id)
+        response = await self.service.delete_session(session_id=session_id, user_id=current_user.id)
+        SessionDeleteResponse.model_validate(response)
 
     async def handle_update_session_title(
         self,
@@ -43,6 +47,7 @@ class ChatSessionController:
         request: UpdateSessionTitleRequest,
         current_user: User = Depends(get_current_user),
     ) -> SessionResponse:
+
         updated = await self.service.update_session_title(
             session_id=session_id,
             user_id=current_user.id,
