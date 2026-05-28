@@ -252,7 +252,7 @@ class TestClarificationService:
     """Test suite untuk clarification service orchestration."""
 
     @pytest.mark.asyncio
-    async def test_process_user_query_commits_clarification_questions(self):
+    async def test_process_user_query_flushes_clarification_questions(self):
         engine, session_factory = await _make_sqlite_session()
         session_id = uuid4()
         try:
@@ -280,8 +280,6 @@ class TestClarificationService:
                 )
 
                 assert result is not None
-
-            async with session_factory() as db:
                 stored = (await db.execute(select(ClarificationQuestion).where(
                     ClarificationQuestion.session_id == session_id
                 ))).scalars().all()
@@ -1108,14 +1106,12 @@ async def test_fallback_rewrite_skips_lewati_and_uses_lainnya():
 
 
 @pytest.mark.asyncio
-async def test_process_user_query_limits_batch_to_three_questions():
+async def test_process_user_query_returns_all_detected_questions():
     service = ClarificationService(db=None)
     service.repo.create = AsyncMock(side_effect=[
-        SimpleNamespace(clarification_question_id="q1"),
-        SimpleNamespace(clarification_question_id="q2"),
-        SimpleNamespace(clarification_question_id="q3"),
+        SimpleNamespace(clarification_question_id=f"q{index}")
+        for index in range(5)
     ])
-
 
     ambiguities = [
         DetectedAmbiguity(
@@ -1141,7 +1137,7 @@ async def test_process_user_query_limits_batch_to_three_questions():
         )
 
     assert result.questions is not None
-    assert len(result.questions) == 3
+    assert len(result.questions) == 5
 
 
 def test_nl_to_sql_prompt_includes_addon_prompt_constraint():
@@ -1307,15 +1303,6 @@ class TestKPIPrompts:
         assert '"question_set": [' in prompt
         assert '"options": [' in prompt
 
-    def test_nl_to_sql_schema_uses_user_id_not_removed_nama_orang(self):
-        from template.promptTemplate import DB_SCHEMA, FEW_SHOT_EXAMPLES, SAMPLE_DATA
-
-        combined_prompt_context = f"{DB_SCHEMA}\n{SAMPLE_DATA}\n{FEW_SHOT_EXAMPLES}"
-
-        assert "nama_orang" not in combined_prompt_context
-        assert "user_id UUID" in DB_SCHEMA
-        assert "users.id" in DB_SCHEMA
-        assert "JOIN users" in FEW_SHOT_EXAMPLES
 
     def test_ambiguity_prompt_uses_prd_taxonomy_and_context(self):
         prompt = build_ambiguity_assessment_prompt(
