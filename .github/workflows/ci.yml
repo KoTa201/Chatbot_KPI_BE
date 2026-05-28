@@ -35,6 +35,8 @@ jobs:
           echo "APP_ENV=test" >> .env
           echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
           echo "ACCESS_TOKEN_EXPIRE_MINUTES=60" >> .env
+          echo "CORS_ORIGINS=${{ secrets.CORS_ORIGINS}}" >> .env
+          echo "CORS_ORIGIN_REGEX=${{ secrets.CORS_ORIGIN_REGEX }}" >> .env
           echo "REFRESH_SECRET_KEY=${{ secrets.REFRESH_SECRET_KEY }}" >> .env
           echo "REFRESH_TOKEN_EXPIRE_DAYS=7" >> .env
           echo "RESET_SECRET_KEY=${{ secrets.RESET_SECRET_KEY }}" >> .env
