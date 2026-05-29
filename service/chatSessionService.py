@@ -141,8 +141,13 @@ class ChatSessionService:
         return session  # ← return it
 
     @staticmethod
-    def _check_user_access(session: ChatSession| ChatSessionDetailRecord , user_id: UUID):
-        if str(session.user_id) != str(user_id):
+    def _check_user_access(session: ChatSession | ChatSessionDetailRecord, user_id: UUID):
+        session_user_id = (
+            session.user_id
+            if isinstance(session, ChatSession)
+            else session.session.user_id
+        )
+        if str(session_user_id) != str(user_id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Anda tidak memiliki akses ke session ini.",
