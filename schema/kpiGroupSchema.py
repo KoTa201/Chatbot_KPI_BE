@@ -112,9 +112,8 @@ class KPIGroupBase(BaseModel):
 # ─── Create ───────────────────────────────────────────────────────────────────
 class KPIGroupCreate(KPIGroupBase):
     # Kolom khusus tracker
-    tahun:        Optional[int] = Field(None, ge=2000, le=2100)
-    is_scheduled: bool = Field(True)
-    is_active:    bool = Field(True)
+    tahun:     Optional[int] = Field(None, ge=2000, le=2100)
+    is_active: bool = Field(True)
 
 
 # ─── Update ───────────────────────────────────────────────────────────────────
@@ -127,9 +126,8 @@ class KPIGroupUpdate(BaseModel):
     sheet_url:    Optional[AnyHttpUrl] = Field(None)
     sheet_id:     Optional[str] = Field(None, max_length=255)
     sheet_name:   Optional[str] = Field(None, max_length=255)
-    tahun:        Optional[int] = Field(None, ge=2000, le=2100)
-    is_scheduled: Optional[bool] = None
-    is_active:    Optional[bool] = None
+    tahun:     Optional[int] = Field(None, ge=2000, le=2100)
+    is_active: Optional[bool] = None
 
 
 # ─── Response ─────────────────────────────────────────────────────────────────
@@ -147,9 +145,8 @@ class KPIGroupResponse(BaseModel):
     sheet_url:       AnyHttpUrl
     sheet_id:        Optional[str] = None
     sheet_name:      Optional[str] = None
-    tahun:           Optional[int] = None
-    is_scheduled:    bool = True
-    is_active:       bool = True
+    tahun:     Optional[int] = None
+    is_active: bool = True
     created_at:      datetime
     updated_at:      datetime
     master_records:  list[KPIGroupMasterRecord] = Field(default_factory=list)

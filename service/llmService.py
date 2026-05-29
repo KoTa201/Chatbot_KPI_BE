@@ -24,7 +24,7 @@ class VisualizationDecision:
 class LLMService:
     """Wrapper LLM API dengan alur request yang eksplisit."""
 
-    def __init__(self, timeout_seconds: float = 20.0, max_retries: int = 1):
+    def __init__(self, timeout_seconds: float = 20.0, max_retries: int = 3):
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self.retry_delay_seconds = 1
@@ -174,6 +174,16 @@ class LLMService:
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                         detail="Terlalu banyak permintaan. Silakan coba lagi nanti.",
                     ) from error
+                if status_code >= 500:
+                    is_last_attempt = attempt >= self.max_retries
+                    if is_last_attempt:
+                        logger.error("LLM API server error %d: %s", status_code, error)
+                        self._raise_model_not_available()
+                    wait = self.retry_delay_seconds * (2 ** attempt)
+                    logger.warning("LLM API server error %d, retrying in %.1fs (attempt %d/%d)",
+                                   status_code, wait, attempt + 1, self.max_retries + 1)
+                    await asyncio.sleep(wait)
+                    continue
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",

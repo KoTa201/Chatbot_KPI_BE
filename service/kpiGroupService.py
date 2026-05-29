@@ -100,7 +100,6 @@ class KPIGroupService:
         existing = await self._get_or_404(group_id)
 
         update_fields = payload.model_dump(exclude_none=True)
-        update_fields.pop("is_scheduled", None)
 
         if "sheet_url" in update_fields:
             update_fields["sheet_url"] = str(update_fields["sheet_url"])

@@ -32,7 +32,6 @@ class ClarificationRepository:
         )
         self.db.add(question)
         await self.db.flush()
-        await self.db.commit()
         await self.db.refresh(question)
         return question
 
@@ -56,7 +55,6 @@ class ClarificationRepository:
         question.free_text_answer = self._serialize_answer(free_text_answer)
         self.db.add(question)
         await self.db.flush()
-        await self.db.commit()
         await self.db.refresh(question)
         return question
 
