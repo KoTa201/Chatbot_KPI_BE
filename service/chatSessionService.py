@@ -1,8 +1,7 @@
 
 
 import json
-from types import CoroutineType
-from typing import List, Any
+
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +12,7 @@ from repository.chatSessionRepository import ChatSessionRepository, ChatSessionD
 from schema.sessionSchema import (
     SessionClarificationQuestionResponse,
     SessionDetailResponse,
+    SessionGraphicItem,
     SessionMessageResponse,
 )
 
@@ -45,11 +45,18 @@ class ChatSessionService:
             is_sender_chatbot=False,
         )
 
-    async def create_chatbot_message(self, session_id: UUID, message: str):
+    async def create_chatbot_message(
+        self,
+        session_id: UUID,
+        message: str,
+        graphics: list[dict] | None = None,
+    ):
+        graphics_json = json.dumps(graphics, ensure_ascii=False) if graphics else None
         return await self.session_repo.create_message(
             session_id=session_id,
             message=message,
             is_sender_chatbot=True,
+            graphics_json=graphics_json,
         )
 
     async def get_sessions(self, user_id: UUID) -> list:
@@ -74,6 +81,15 @@ class ChatSessionService:
                 )
                 for question in checked_session_detail.clarification_questions_by_message_id.get(message.message_id, [])
             ]
+            graphics: list[SessionGraphicItem] = []
+            if message.graphics_json:
+                try:
+                    raw = json.loads(message.graphics_json)
+                    if isinstance(raw, list):
+                        graphics = [SessionGraphicItem(**g) for g in raw if isinstance(g, dict)]
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
             messages.append(
                 SessionMessageResponse(
                     message_id=message.message_id,
@@ -81,6 +97,7 @@ class ChatSessionService:
                     is_sender_chatbot=message.is_sender_chatbot,
                     send_at=message.send_at,
                     clarification_questions=questions,
+                    graphics=graphics,
                 )
             )
 

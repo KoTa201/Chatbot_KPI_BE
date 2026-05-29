@@ -33,7 +33,7 @@ class PipelineStageInfo(BaseModel):
 class GraphicItemResponse(BaseModel):
     kpi_name: str | None = None
     chart_type: str
-    image_base64: str
+    image_url: str
 
 
 class ChatResponse(BaseModel):

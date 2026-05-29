@@ -21,6 +21,7 @@ class ChatMessage(Base):
     )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     is_sender_chatbot: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    graphics_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     send_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,

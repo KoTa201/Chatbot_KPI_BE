@@ -209,9 +209,14 @@ class ChatService:
             )
 
             total_ms = int((time.monotonic() - total_start) * 1000)
+            graphics_payload = [
+                {"kpi_name": r.kpi_name or None, "chart_type": r.chart_type, "image_url": r.image_url}
+                for r in graphic_results
+            ] or None
             await self.session_service.create_chatbot_message(
                 session_id=session_id,
                 message=narrative,
+                graphics=graphics_payload,
             )
             await self.db.commit()
 

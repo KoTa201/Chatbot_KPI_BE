@@ -13,11 +13,10 @@ Changelog:
 
 from __future__ import annotations
 
-import base64
 import io
 import re
 import uuid as _uuid_module
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -286,7 +285,6 @@ class GraphicResult:
     chart_type: str
     image_url: str
     kpi_name: str = ""
-    image_base64: str = field(default="")
 
 
 # ===========================================================================
@@ -357,8 +355,7 @@ class GraphicSeervice:
         image_bytes = self._render_chart(df=df, chart_type=chart_type, plt=plt, kpi_meta=kpi_meta)
 
         image_url = self._save_chart_image(image_bytes=image_bytes, session_id=session_id)
-        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
-        return GraphicResult(chart_type=chart_type, image_url=image_url, image_base64=image_base64)
+        return GraphicResult(chart_type=chart_type, image_url=image_url)
 
     def generateGraphicPerKpi(
         self,
@@ -419,12 +416,10 @@ class GraphicSeervice:
                     title_prefix=kpi_name,
                 )
                 image_url = self._save_chart_image(image_bytes, session_id)
-                image_base64 = base64.b64encode(image_bytes).decode("utf-8")
                 results.append(GraphicResult(
                     chart_type=sub_chart_type,
                     image_url=image_url,
                     kpi_name=kpi_name,
-                    image_base64=image_base64,
                 ))
             except Exception as exc:
                 # Satu KPI gagal tidak menghentikan seluruh proses

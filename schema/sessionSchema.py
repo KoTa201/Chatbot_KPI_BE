@@ -23,12 +23,19 @@ class SessionClarificationQuestionResponse(BaseModel):
     created_at: datetime
 
 
+class SessionGraphicItem(BaseModel):
+    kpi_name: str | None = None
+    chart_type: str
+    image_url: str
+
+
 class SessionMessageResponse(BaseModel):
     message_id: UUID
     message: str
     is_sender_chatbot: bool
     send_at: datetime
     clarification_questions: list[SessionClarificationQuestionResponse] = Field(default_factory=list)
+    graphics: list[SessionGraphicItem] = Field(default_factory=list)
 
 
 class SessionDetailResponse(SessionResponse):

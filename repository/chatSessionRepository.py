@@ -45,11 +45,13 @@ class ChatSessionRepository:
         session_id: uuid.UUID,
         message: str,
         is_sender_chatbot: bool,
+        graphics_json: str | None = None,
     ) -> ChatMessage:
         chat_message = ChatMessage(
             session_id=session_id,
             message=message,
             is_sender_chatbot=is_sender_chatbot,
+            graphics_json=graphics_json,
         )
         self.db.add(chat_message)
         await self.db.flush()
