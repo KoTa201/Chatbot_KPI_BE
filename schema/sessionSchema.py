@@ -24,7 +24,7 @@ class SessionClarificationQuestionResponse(BaseModel):
 
 
 class SessionMessageResponse(BaseModel):
-    message_id: str
+    message_id: UUID
     message: str
     is_sender_chatbot: bool
     send_at: datetime
