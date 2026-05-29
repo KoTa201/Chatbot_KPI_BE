@@ -30,14 +30,18 @@ class PipelineStageInfo(BaseModel):
     detail: str | None = None
 
 
+class GraphicItemResponse(BaseModel):
+    kpi_name: str | None = None
+    chart_type: str
+    image_base64: str
+
+
 class ChatResponse(BaseModel):
     session_id: UUID
-    message: str                        # Jawaban naratif dari LLM
-    # Jika ada pertanyaan klarifikasi
+    message: str
     clarification_questions: list[ClarificationQuestionResponse] | None = None
-    generated_sql: str | None = None    # Hanya ditampilkan jika show_sql=True
-    graphic_chart_type: str | None = None
-    graphic_image_url: str | None = None
+    generated_sql: str | None = None
+    graphics: list[GraphicItemResponse] = Field(default_factory=list)
     rows_returned: int | None = None
     execution_time_ms: int | None = None
     pipeline_stages: list[PipelineStageInfo] = Field(default_factory=list)

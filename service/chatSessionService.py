@@ -97,7 +97,7 @@ class ChatSessionService:
         checked_session = self._check_session_or_404(session)
         self._check_user_access(checked_session, user_id)
         await self.session_repo.delete(checked_session)
-        await self.db.flush()
+        await self.db.commit()
 
         return {
             "message": "Session berhasil dihapus.",
@@ -115,7 +115,7 @@ class ChatSessionService:
         checked_session = self._check_session_or_404(session)
         self._check_user_access(checked_session, user_id)
         updated = await self.session_repo.update_title(checked_session, title)
-        await self.db.flush()
+        await self.db.commit()
         return updated
 
     @staticmethod

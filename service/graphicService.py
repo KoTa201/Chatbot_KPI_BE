@@ -13,10 +13,11 @@ Changelog:
 
 from __future__ import annotations
 
+import base64
 import io
 import re
 import uuid as _uuid_module
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -284,7 +285,8 @@ def _is_notes_column(col_name: str, series: pd.Series) -> bool:
 class GraphicResult:
     chart_type: str
     image_url: str
-    kpi_name: str = ""  # nama KPI jika grafik adalah hasil split per-KPI
+    kpi_name: str = ""
+    image_base64: str = field(default="")
 
 
 # ===========================================================================
@@ -355,7 +357,8 @@ class GraphicSeervice:
         image_bytes = self._render_chart(df=df, chart_type=chart_type, plt=plt, kpi_meta=kpi_meta)
 
         image_url = self._save_chart_image(image_bytes=image_bytes, session_id=session_id)
-        return GraphicResult(chart_type=chart_type, image_url=image_url)
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        return GraphicResult(chart_type=chart_type, image_url=image_url, image_base64=image_base64)
 
     def generateGraphicPerKpi(
         self,
@@ -403,9 +406,9 @@ class GraphicSeervice:
 
             subset_meta = self._slice_meta(kpi_meta, list(subset.index))
 
-            sub_chart_type = chart_type
-            if sub_chart_type == "bar":
-                sub_chart_type = self._auto_detect_chart_type(subset) or "bar"
+            # Always re-detect per subset so TRL KPIs get trl_progress
+            # and integer KPIs get the right chart type independently
+            sub_chart_type = self._auto_detect_chart_type(subset) or chart_type or "bar"
 
             try:
                 image_bytes = self._render_chart(
@@ -416,10 +419,12 @@ class GraphicSeervice:
                     title_prefix=kpi_name,
                 )
                 image_url = self._save_chart_image(image_bytes, session_id)
+                image_base64 = base64.b64encode(image_bytes).decode("utf-8")
                 results.append(GraphicResult(
                     chart_type=sub_chart_type,
                     image_url=image_url,
                     kpi_name=kpi_name,
+                    image_base64=image_base64,
                 ))
             except Exception as exc:
                 # Satu KPI gagal tidak menghentikan seluruh proses

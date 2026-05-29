@@ -26,7 +26,7 @@ from service.columnStatisticsService import ColumnStatisticsService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
-from schema.chatSchema import ChatResponse, PipelineStageInfo
+from schema.chatSchema import ChatResponse, PipelineStageInfo, GraphicItemResponse
 from service.clarificationService import ClarificationService
 from utils.sessionContextManager import SessionContextManager
 
@@ -189,9 +189,9 @@ class ChatService:
             )
 
             # STAGE 4 — GRAPHIC GENERATION (OPSIONAL)
-            graphic_result: GraphicResult | None = None
+            graphic_results: list[GraphicResult] = []
             if visualization_decision.is_visualize:
-                graphic_result = self._run_graphic_generation_stage(
+                graphic_results = self._run_graphic_generation_stage(
                     stages=stages,
                     query_result=query_result,
                     chart_type=visualization_decision.chart_type or "bar",
@@ -208,8 +208,6 @@ class ChatService:
                 addon_prompt=addon_prompt,
             )
 
-            narrative = self._append_graphic_url(narrative, graphic_result)
-
             total_ms = int((time.monotonic() - total_start) * 1000)
             await self.session_service.create_chatbot_message(
                 session_id=session_id,
@@ -221,9 +219,14 @@ class ChatService:
                 session_id=session_id,
                 message=narrative,
                 generated_sql=sanitized_sql if show_sql else None,
-                graphic_chart_type=graphic_result.chart_type if graphic_result else None,
-                graphic_image_url=graphic_result.image_url if graphic_result else None,
-                graphic_image_base64=None,
+                graphics=[
+                    GraphicItemResponse(
+                        kpi_name=r.kpi_name or None,
+                        chart_type=r.chart_type,
+                        image_base64=r.image_base64,
+                    )
+                    for r in graphic_results
+                ],
                 rows_returned=rows_count,
                 execution_time_ms=total_ms,
                 pipeline_stages=stages,
@@ -258,12 +261,6 @@ class ChatService:
     @staticmethod
     def _coerce_message_id(message_id: UUID | str) -> UUID:
         return message_id if isinstance(message_id, UUID) else UUID(str(message_id))
-
-    @staticmethod
-    def _append_graphic_url(narrative: str, graphic_result: GraphicResult | None) -> str:
-        if graphic_result is None:
-            return narrative
-        return f"{narrative}\n\nGrafik: {graphic_result.image_url}"
 
     @staticmethod
     def _start_stage(stages: list[PipelineStageInfo], stage_name: str) -> PipelineStageInfo:
@@ -458,23 +455,24 @@ class ChatService:
         query_result: list[dict],
         chart_type: str,
         session_id: UUID,
-    ) -> GraphicResult | None:
+    ) -> list[GraphicResult]:
         stage = self._start_stage(stages, "graphic_generation")
         try:
-            graphic_result = graphic_service.generateGraphic(
+            results = graphic_service.generateGraphicPerKpi(
                 query_result=query_result,
                 chart_type=chart_type,
                 session_id=session_id,
             )
+            chart_types = list(dict.fromkeys(r.chart_type for r in results))
             self._complete_stage(
                 stage,
                 "success",
-                f"Grafik {graphic_result.chart_type} berhasil digenerate.",
+                f"{len(results)} grafik berhasil digenerate (type: {', '.join(chart_types)}).",
             )
-            return graphic_result
+            return results
         except ValueError as error:
             self._complete_stage(stage, "degraded", str(error))
-            return None
+            return []
 
     async def _execute_sql(
         self, sql: str
