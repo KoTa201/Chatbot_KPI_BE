@@ -92,7 +92,6 @@ def build_nl_to_sql_prompt(
     user_query: str,
     user_id: UUID,
     user_role: str,
-    divisi: str | None,
     addon_prompt: str | None = None,
     column_statistics: str | None = None,
 ) -> str:
@@ -150,7 +149,6 @@ def build_nl_to_sql_prompt(
     [CONTEXT PENGGUNA]
     Role: {user_role}
     Karyawan ID: {user_id}
-    Divisi: {divisi or 'N/A'}
     Akses data: {data_access_scope}
     
     SQL:"""

@@ -5,7 +5,9 @@ FastAPI - Structured RAG Ingestion KPI Tracker
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 import model
 from databaseConfig import create_tables
 from configCredidential import settings
@@ -44,6 +46,10 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan,
 )
+
+PUBLIC_DIR = Path("public")
+PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/public", StaticFiles(directory=PUBLIC_DIR), name="public")
 
 app.add_middleware(JWTMiddleware)
 

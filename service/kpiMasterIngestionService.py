@@ -31,7 +31,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
-from repository.KpiGroupRepository import KPIGroupRepository
+from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from service.kpiMasterService import KPIMasterService
 from model.KPIGroup import KPIGroup

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
-from repository.KpiGroupRepository import KPIGroupRepository
+from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from schema.kpiGroupSchema import (
     KPIGroupCreate,

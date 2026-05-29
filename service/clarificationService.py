@@ -45,9 +45,8 @@ class ClarificationService:
         user_query: str,
         user_role: str,
         session_id: UUID,
-        clarification_count: int = 0,
         addon_prompt: str | None = None,
-        message_id: str | None = None,
+        message_id: UUID | None = None,
     ) -> ClarificationMessageResponse | None:
         """
         Process query dan tentukan: clarify atau direct?
@@ -67,9 +66,7 @@ class ClarificationService:
             f"is_ambiguous={ambiguity_result.is_ambiguous}"
         )
 
-        if not ambiguity_result.is_ambiguous or clarification_count >= 1:
-            logger.info(
-                f"[ClarificationService] Decision: DIRECT (count={clarification_count})")
+        if not ambiguity_result.is_ambiguous:
             await self.repo.create(
                 session_id=session_id,
                 ambiguity_type=ambiguity_result.ambiguity_type,
@@ -83,7 +80,6 @@ class ClarificationService:
         logger.info("[ClarificationService] Decision: CLARIFY")
         return await self._build_clarification_response_from_detection(
             session_id=session_id,
-            original_query=user_query,
             ambiguity_result=ambiguity_result,
             message_id=message_id,
         )
@@ -134,7 +130,6 @@ class ClarificationService:
             await self.repo.update_with_answer(
                 log_id=answer.question_id,
                 clarification_answer=effective_answer,
-                disambiguated_query=disambiguated_query,
                 free_text_answer=answer.free_text,
             )
 
@@ -156,7 +151,6 @@ class ClarificationService:
             if recheck_result.detected_ambiguities:
                 next_clarification = await self._build_clarification_response_from_detection(
                     session_id=session_id,
-                    original_query=disambiguated_query,
                     ambiguity_result=recheck_result,
                 )
 
@@ -286,9 +280,8 @@ class ClarificationService:
     async def _build_clarification_response_from_detection(
         self,
         session_id: UUID,
-        original_query: str,
         ambiguity_result,
-        message_id: str | None = None,
+        message_id: UUID| None = None,
     ) -> ClarificationMessageResponse | None:
         if not ambiguity_result or not ambiguity_result.is_ambiguous:
             return None
@@ -381,6 +374,3 @@ class ClarificationService:
             if log.clarifying_question  # Only clarifications, not direct answers
         ]
 
-    async def get_clarification_count_in_session(self, session_id: UUID) -> int:
-        """Hitung jumlah clarification dalam satu session."""
-        return await self.repo.get_clarify_decisions_count(session_id)

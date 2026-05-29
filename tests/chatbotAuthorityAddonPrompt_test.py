@@ -74,14 +74,17 @@ async def test_get_active_by_authority_accepts_role_string():
 
 
 async def test_process_query_fails_when_no_active_chatbot(monkeypatch):
-    class FakeChatbotRepo:
+    class FakeChatbotService:
         def __init__(self, db):
             pass
 
-        async def get_active_by_authority(self, authority):
-            return None
+        async def get_active_chatbot_for_role(self, user_role):
+            raise HTTPException(
+                status_code=404,
+                detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
+            )
 
-    monkeypatch.setattr(chat_service_module, "ChatbotRepository", FakeChatbotRepo)
+    monkeypatch.setattr(chat_service_module, "ChatbotService", FakeChatbotService)
 
     service = ChatService(db=None)  # type: ignore[arg-type]
 
@@ -90,7 +93,6 @@ async def test_process_query_fails_when_no_active_chatbot(monkeypatch):
             user_message="Tampilkan KPI saya",
             user_id=UUID("00000000-0000-0000-0000-000000000401"),
             user_role="karyawan",
-            user_divisi=None,
             session_id=None,
         )
 
@@ -101,12 +103,12 @@ async def test_process_query_fails_when_no_active_chatbot(monkeypatch):
 async def test_process_query_resolves_chatbot_before_session_creation(monkeypatch):
     events = []
 
-    class FakeChatbotRepo:
+    class FakeChatbotService:
         def __init__(self, db):
             pass
 
-        async def get_active_by_authority(self, authority):
-            events.append(("chatbot_lookup", authority))
+        async def get_active_chatbot_for_role(self, user_role):
+            events.append(("chatbot_lookup", user_role))
             return SimpleNamespace(id=CHATBOT_ID, addon_prompt="Gunakan constraint bot.")
 
     class FakeSessionService:
@@ -117,7 +119,7 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
             events.append(("session_create", kwargs["session_id"]))
 
         async def create_user_message(self, **kwargs):
-            return SimpleNamespace(message_id="msg-1")
+            return SimpleNamespace(message_id="00000000-0000-0000-0000-000000000411")
 
         async def create_chatbot_message(self, **kwargs):
             return None
@@ -132,10 +134,11 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
         async def process_user_query(self, **kwargs):
             return None
 
-    monkeypatch.setattr(chat_service_module, "ChatbotRepository", FakeChatbotRepo)
+    monkeypatch.setattr(chat_service_module, "ChatbotService", FakeChatbotService)
     monkeypatch.setattr(chat_service_module, "ChatSessionService", FakeSessionService)
-    monkeypatch.setattr("service.clarificationService.ClarificationService", FakeClarificationService)
-    monkeypatch.setattr(ChatService, "_run_nl_to_sql_stage", AsyncMock(return_value=("SELECT 1;", SimpleNamespace(is_visualize=False, chart_type=None))))
+    monkeypatch.setattr(chat_service_module, "ClarificationService", FakeClarificationService)
+    monkeypatch.setattr(ChatService, "_run_nl_to_sql_stage", AsyncMock(return_value="SELECT 1;"))
+    monkeypatch.setattr(ChatService, "_run_visualization_decision_stage", AsyncMock(return_value=SimpleNamespace(is_visualize=False, chart_type=None)))
     monkeypatch.setattr(ChatService, "_run_sql_validation_stage", lambda self, **kwargs: SimpleNamespace(is_valid=False, sanitized_sql=None, reason="blocked"))
 
     service = ChatService(db=None)  # type: ignore[arg-type]
@@ -143,7 +146,6 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
         user_message="Tampilkan KPI saya",
         user_id=UUID("00000000-0000-0000-0000-000000000402"),
         user_role="karyawan",
-        user_divisi=None,
         session_id=None,
     )
 
@@ -155,11 +157,11 @@ async def test_process_query_resolves_chatbot_before_session_creation(monkeypatc
 async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch):
     captured = {}
 
-    class FakeChatbotRepo:
+    class FakeChatbotService:
         def __init__(self, db):
             pass
 
-        async def get_active_by_authority(self, authority):
+        async def get_active_chatbot_for_role(self, user_role):
             return SimpleNamespace(id=CHATBOT_ID, addon_prompt="Gunakan bahasa formal.")
 
     class FakeSessionService:
@@ -170,7 +172,7 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
             return None
 
         async def create_user_message(self, **kwargs):
-            return SimpleNamespace(message_id="msg-1")
+            return SimpleNamespace(message_id="00000000-0000-0000-0000-000000000411")
 
         async def create_chatbot_message(self, **kwargs):
             return None
@@ -188,16 +190,17 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
 
     async def fake_nl_to_sql(self, **kwargs):
         captured["nl_addon_prompt"] = kwargs.get("addon_prompt")
-        return "SELECT 1;", SimpleNamespace(is_visualize=False, chart_type=None)
+        return "SELECT 1;"
 
     async def fake_analysis(self, **kwargs):
         captured["analysis_addon_prompt"] = kwargs.get("addon_prompt")
         return "Narasi hasil."
 
-    monkeypatch.setattr(chat_service_module, "ChatbotRepository", FakeChatbotRepo)
+    monkeypatch.setattr(chat_service_module, "ChatbotService", FakeChatbotService)
     monkeypatch.setattr(chat_service_module, "ChatSessionService", FakeSessionService)
-    monkeypatch.setattr("service.clarificationService.ClarificationService", FakeClarificationService)
+    monkeypatch.setattr(chat_service_module, "ClarificationService", FakeClarificationService)
     monkeypatch.setattr(ChatService, "_run_nl_to_sql_stage", fake_nl_to_sql)
+    monkeypatch.setattr(ChatService, "_run_visualization_decision_stage", AsyncMock(return_value=SimpleNamespace(is_visualize=False, chart_type=None)))
     monkeypatch.setattr(ChatService, "_run_sql_validation_stage", lambda self, **kwargs: SimpleNamespace(is_valid=True, sanitized_sql="SELECT 1;", reason=None))
     monkeypatch.setattr(ChatService, "_run_sql_execution_stage", AsyncMock(return_value=([{"value": 1}], 1)))
     monkeypatch.setattr(ChatService, "_run_result_analysis_stage", fake_analysis)
@@ -209,7 +212,6 @@ async def test_process_query_passes_addon_prompt_to_pipeline_stages(monkeypatch)
         user_message="Tampilkan KPI saya",
         user_id=UUID("00000000-0000-0000-0000-000000000403"),
         user_role="karyawan",
-        user_divisi=None,
         session_id=UUID("00000000-0000-0000-0000-000000000404"),
     )
 
@@ -260,12 +262,11 @@ async def test_run_nl_to_sql_stage_passes_addon_prompt_to_builder(monkeypatch):
     stages = []
     addon_prompt_value = "Gunakan format ringkas."
 
-    generated_sql, viz_decision = await service._run_nl_to_sql_stage(
+    generated_sql = await service._run_nl_to_sql_stage(
         stages=stages,
         user_message="Berapa KPI Q1?",
         user_id=UUID("00000000-0000-0000-0000-000000000501"),
         user_role="karyawan",
-        user_divisi=None,
         pipeline={},
         addon_prompt=addon_prompt_value,
     )
@@ -321,7 +322,6 @@ async def test_run_nl_to_sql_stage_passes_column_statistics_to_builder(monkeypat
         user_message="Berapa KPI Q1?",
         user_id=UUID("00000000-0000-0000-0000-000000000503"),
         user_role="karyawan",
-        user_divisi=None,
         pipeline={},
         addon_prompt=None,
     )
@@ -367,12 +367,11 @@ async def test_run_nl_to_sql_stage_passes_none_addon_prompt_to_builder(monkeypat
     service = ChatService(db=None)  # type: ignore[arg-type]
     stages = []
 
-    generated_sql, viz_decision = await service._run_nl_to_sql_stage(
+    generated_sql = await service._run_nl_to_sql_stage(
         stages=stages,
         user_message="Berapa KPI Q1?",
         user_id=UUID("00000000-0000-0000-0000-000000000502"),
         user_role="karyawan",
-        user_divisi=None,
         pipeline={},
         addon_prompt=None,
     )

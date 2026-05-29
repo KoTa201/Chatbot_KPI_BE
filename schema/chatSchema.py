@@ -1,4 +1,3 @@
-from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
@@ -38,7 +37,7 @@ class ChatResponse(BaseModel):
     clarification_questions: list[ClarificationQuestionResponse] | None = None
     generated_sql: str | None = None    # Hanya ditampilkan jika show_sql=True
     graphic_chart_type: str | None = None
-    graphic_image_base64: str | None = None
+    graphic_image_url: str | None = None
     rows_returned: int | None = None
     execution_time_ms: int | None = None
     pipeline_stages: list[PipelineStageInfo] = Field(default_factory=list)

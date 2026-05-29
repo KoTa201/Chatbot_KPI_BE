@@ -30,8 +30,8 @@ class ClarificationQuestion(Base):
         default=utc_now,
         nullable=False,
     )
-    message_id: Mapped[str | None] = mapped_column(
-        String(255),
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        SAUUID(as_uuid=True),
         ForeignKey("chat_messages.message_id", ondelete="CASCADE"),
         nullable=True,
         index=True,

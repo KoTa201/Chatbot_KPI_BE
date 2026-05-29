@@ -1,6 +1,5 @@
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -16,7 +15,7 @@ from utils.datetime import utc_now
 class ChatSessionDetailRecord:
     session: ChatSession
     messages: list[ChatMessage]
-    clarification_questions_by_message_id: dict[str, list[ClarificationQuestion]]
+    clarification_questions_by_message_id: dict[uuid.UUID, list[ClarificationQuestion]]
 
 
 class ChatSessionRepository:
@@ -95,7 +94,7 @@ class ChatSessionRepository:
             .where(ClarificationQuestion.message_id.is_not(None))
             .order_by(ClarificationQuestion.created_at.asc())
         )
-        questions_by_message_id: dict[str, list[ClarificationQuestion]] = {}
+        questions_by_message_id: dict[uuid.UUID, list[ClarificationQuestion]] = {}
         for question in questions_result.scalars().all():
             if question.message_id is None:
                 continue

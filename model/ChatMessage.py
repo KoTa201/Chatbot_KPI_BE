@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UUID as SAUUID
+from sqlalchemy import Boolean, DateTime, ForeignKey, Text, UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
@@ -16,8 +16,8 @@ if TYPE_CHECKING:
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
-    message_id: Mapped[str] = mapped_column(
-        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        SAUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     is_sender_chatbot: Mapped[bool] = mapped_column(Boolean, nullable=False)

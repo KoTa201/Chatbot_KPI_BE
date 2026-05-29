@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from configCredidential import get_settings
+from service.chatbotService import ChatbotService
 from service.llmService import LLMService, VisualizationDecision
 from service.graphicService import GraphicSeervice, GraphicResult
 from service.sqlGuardRailsService import SQLWireguardService
@@ -25,8 +26,9 @@ from service.columnStatisticsService import ColumnStatisticsService
 from template.promptTemplate import build_nl_to_sql_prompt, build_analysis_prompt, build_graphic_generation_prompt
 from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
-from repository.chatbotRepository import ChatbotRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo
+from service.clarificationService import ClarificationService
+from utils.sessionContextManager import SessionContextManager
 
 settings = get_settings()
 
@@ -43,14 +45,15 @@ class ChatService:
         self.session_service = ChatSessionService(db)
         self.clarification_repo = ClarificationRepository(db)
         self.query_repo = ChatQueryRepository(db)
-        self.chatbot_repo = ChatbotRepository(db)
+        self.chatbot_service = ChatbotService(db)
+        self.clarification_service = ClarificationService(db)
+        self.column_statistics_service = ColumnStatisticsService(db)
 
     async def process_query(
         self,
         user_message: str,
         user_id: UUID,
         user_role: str,
-        user_divisi: str | None,
         session_id: UUID | None,
         show_sql: bool = False,
         context_from_clarification: Any = None,
@@ -65,10 +68,9 @@ class ChatService:
         [STAGE 4] Graphic Generation (opsional)
         [STAGE 5] Result Analysis (LLM)
         """
-        from service.clarificationService import ClarificationService
-        from utils.sessionContextManager import SessionContextManager
 
-        active_chatbot = await self._get_active_chatbot_for_role(user_role)
+
+        active_chatbot = await self.chatbot_service.get_active_chatbot_for_role(user_role)
         addon_prompt = getattr(active_chatbot, "addon_prompt", None)
 
         session_id = session_id or uuid.uuid4()
@@ -100,28 +102,22 @@ class ChatService:
 
             # Skip stage 0 jika sudah ada clarification context (response dari user)
             if context_from_clarification is None:
-                clarification_service = ClarificationService(self.db)
-                clarification_count = await clarification_service.get_clarification_count_in_session(
-                    session_id
-                )
-
-                clarification_response = await clarification_service.process_user_query(
+                clarification_response = await self.clarification_service.process_user_query(
                     user_query=user_message,
                     user_role=user_role,
                     session_id=session_id,
-                    clarification_count=clarification_count,
                     addon_prompt=addon_prompt,
-                    message_id=user_chat_message.message_id if user_chat_message is not None else None,
+                    message_id=self._coerce_message_id(user_chat_message.message_id) if user_chat_message is not None else None,
                 )
 
                 if clarification_response is not None:
-                    # Pertanyaan klarifikasi diajukan → hentikan pipeline dan return
+                    # Pertanyaan klarifikasi diajukan → hentikan pipeline dan return    
                     self._complete_stage(
                         clarification_stage, "completed", "Clarification question generated")
 
                     await self.session_service.create_chatbot_message(
                         session_id=session_id,
-                        message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                        message=f"Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait '${user_message}', silakan jawab pertanyaan Berikut.",
                     )
                     await self.db.commit()
                     return ChatResponse(
@@ -141,14 +137,17 @@ class ChatService:
 
             # STAGE 1 — NL-TO-SQL
             try:
-                generated_sql, visualization_decision = await self._run_nl_to_sql_stage(
+                generated_sql = await self._run_nl_to_sql_stage(
                     stages=stages,
                     user_message=user_message,
                     user_id=user_id,
                     user_role=user_role,
-                    user_divisi=user_divisi,
                     pipeline=pipeline,
                     addon_prompt=addon_prompt,
+                )
+                visualization_decision = await self._run_visualization_decision_stage(
+                    stages=stages,
+                    user_message=user_message,
                 )
             except HTTPException as error:
                 if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
@@ -196,6 +195,7 @@ class ChatService:
                     stages=stages,
                     query_result=query_result,
                     chart_type=visualization_decision.chart_type or "bar",
+                    session_id=session_id,
                 )
 
             # STAGE 5 — RESULT ANALYSIS
@@ -207,6 +207,8 @@ class ChatService:
                 rows_count=rows_count,
                 addon_prompt=addon_prompt,
             )
+
+            narrative = self._append_graphic_url(narrative, graphic_result)
 
             total_ms = int((time.monotonic() - total_start) * 1000)
             await self.session_service.create_chatbot_message(
@@ -220,7 +222,8 @@ class ChatService:
                 message=narrative,
                 generated_sql=sanitized_sql if show_sql else None,
                 graphic_chart_type=graphic_result.chart_type if graphic_result else None,
-                graphic_image_base64=graphic_result.image_base64 if graphic_result else None,
+                graphic_image_url=graphic_result.image_url if graphic_result else None,
+                graphic_image_base64=None,
                 rows_returned=rows_count,
                 execution_time_ms=total_ms,
                 pipeline_stages=stages,
@@ -230,14 +233,7 @@ class ChatService:
             await self.db.rollback()
             raise await self._handle_pipeline_error(pipeline, error)
 
-    async def _get_active_chatbot_for_role(self, user_role: str):
-        chatbot = await self.chatbot_repo.get_active_by_authority(user_role)
-        if chatbot is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
-            )
-        return chatbot
+
 
     @staticmethod
     def _build_pipeline_context(
@@ -258,6 +254,16 @@ class ChatService:
             "rows_returned": None,
             "execution_time_ms": None,
         }
+
+    @staticmethod
+    def _coerce_message_id(message_id: UUID | str) -> UUID:
+        return message_id if isinstance(message_id, UUID) else UUID(str(message_id))
+
+    @staticmethod
+    def _append_graphic_url(narrative: str, graphic_result: GraphicResult | None) -> str:
+        if graphic_result is None:
+            return narrative
+        return f"{narrative}\n\nGrafik: {graphic_result.image_url}"
 
     @staticmethod
     def _start_stage(stages: list[PipelineStageInfo], stage_name: str) -> PipelineStageInfo:
@@ -309,40 +315,25 @@ class ChatService:
         user_message: str,
         user_id: UUID,
         user_role: str,
-        user_divisi: str | None,
         pipeline: dict[str, Any],
         addon_prompt: str | None = None,
-    ) -> tuple[str, VisualizationDecision]:
+    ) -> str:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
             logging.error("user_message: " + user_message + "")
-            column_statistics = await ColumnStatisticsService(self.db).build_nl_to_sql_statistics()
+            column_statistics = await self.column_statistics_service.build_nl_to_sql_statistics()
             nl_prompt = build_nl_to_sql_prompt(
                 user_query=user_message,
                 user_id=user_id,
                 user_role=user_role,
-                divisi=user_divisi,
                 addon_prompt=addon_prompt,
                 column_statistics=column_statistics,
             )
             generated_sql = await llm.generate_sql(nl_prompt)
-
             logging.error(f"Generated SQL: {generated_sql}")
-
-            n2_prompt = build_graphic_generation_prompt(
-                user_query=user_message)
-            visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
             pipeline["generated_sql"] = generated_sql
-
-            if visualization_decision.is_visualize:
-                detail = (
-                    "SQL berhasil digenerate. Permintaan visualisasi terdeteksi "
-                    f"(chart: {visualization_decision.chart_type or 'bar'})."
-                )
-            else:
-                detail = "SQL berhasil digenerate."
-            self._complete_stage(stage, "success", detail)
-            return generated_sql, visualization_decision
+            self._complete_stage(stage, "success", "SQL berhasil digenerate.")
+            return generated_sql
         except HTTPException as error:
             if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
                 self._complete_stage(
@@ -354,6 +345,24 @@ class ChatService:
                 self._complete_stage(
                     stage, "failed", "Gagal melakukan proses NL-to-SQL.")
             raise
+
+    async def _run_visualization_decision_stage(
+        self,
+        stages: list[PipelineStageInfo],
+        user_message: str,
+    ) -> VisualizationDecision:
+        stage = self._start_stage(stages, "visualization_decision")
+        n2_prompt = build_graphic_generation_prompt(user_query=user_message)
+        visualization_decision = await llm.decide_visualization_request(prompt=n2_prompt)
+        if visualization_decision.is_visualize:
+            detail = (
+                "Permintaan visualisasi terdeteksi "
+                f"(chart: {visualization_decision.chart_type or 'bar'})."
+            )
+        else:
+            detail = "Permintaan visualisasi tidak terdeteksi."
+        self._complete_stage(stage, "success", detail)
+        return visualization_decision
 
     def _run_sql_validation_stage(
         self,
@@ -448,12 +457,14 @@ class ChatService:
         stages: list[PipelineStageInfo],
         query_result: list[dict],
         chart_type: str,
+        session_id: UUID,
     ) -> GraphicResult | None:
         stage = self._start_stage(stages, "graphic_generation")
         try:
             graphic_result = graphic_service.generateGraphic(
                 query_result=query_result,
                 chart_type=chart_type,
+                session_id=session_id,
             )
             self._complete_stage(
                 stage,

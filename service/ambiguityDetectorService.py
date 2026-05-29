@@ -184,14 +184,6 @@ class AmbiguityDetectorService:
 
                     level_2_label = item.get("level_2_label")
 
-                    # Skip unsupported types outside the PRD taxonomy.
-                    if level_2_label not in PRD_AMBIGUITY_TYPES or level_2_label == "none":
-                        logger.info(
-                            f"[AmbiguityDetector] Skipping question_set item with "
-                            f"unsupported level_2_label: {level_2_label}"
-                        )
-                        continue
-
                     # Extract options from description
                     description = item.get("description", {})
                     options = self._extract_description_options(description)
