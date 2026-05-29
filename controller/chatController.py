@@ -13,10 +13,8 @@ from uuid import UUID
 from databaseConfig import get_db
 from service.authService import get_current_user
 from service.chatService import ChatService
-from service.chatSessionService import ChatSessionService
 from service.clarificationService import ClarificationService
 from schema.chatSchema import ChatRequest, ChatResponse
-from schema.sessionSchema import SessionDetailResponse, SessionResponse, UpdateSessionTitleRequest
 from model.User import User
 
 
@@ -24,7 +22,8 @@ class ChatController:
     """Validasi & orkestrasi request/response untuk endpoint chatbot."""
 
     def __init__(self, db: AsyncSession = Depends(get_db)):
-        self.db = db
+        self.service = ChatService(db)
+        self.clarification_service = ClarificationService(db)
 
     async def handle_chat(
         self,
@@ -40,7 +39,6 @@ class ChatController:
         user_id = str(current_user.id)
         role_value = self._extract_role_value(current_user)
         user_role = self._to_chat_role(role_value)
-        user_divisi = None
 
         if not user_id or not user_role:
             raise HTTPException(
@@ -48,12 +46,11 @@ class ChatController:
                 detail="Token tidak memuat informasi user yang valid.",
             )
 
-        service = ChatService(self.db)
-        response = await service.process_query(
+
+        response = await self.service.process_query(
             user_message=request.message,
             user_id=UUID(user_id),
             user_role=user_role,
-            user_divisi=user_divisi,
             session_id=request.session_id,
             show_sql=request.show_sql,
         )
@@ -81,7 +78,6 @@ class ChatController:
         user_id = str(current_user.id)
         role_value = self._extract_role_value(current_user)
         user_role = self._to_chat_role(role_value)
-        user_divisi = None
 
         if not user_id or not user_role:
             raise HTTPException(
@@ -90,9 +86,8 @@ class ChatController:
             )
 
         # Proses clarification response
-        clarification_service = ClarificationService(self.db)
         try:
-            disambiguation_result = await clarification_service.handle_clarification_response(
+            disambiguation_result = await self.clarification_service.handle_clarification_response(
                 session_id=request.session_id,
                 clarification_answers=request.clarification_answers,
                 additional_constraints=request.additional_constraints,
@@ -114,12 +109,11 @@ class ChatController:
             return self._build_streaming_response(response)
 
         # Lanjutkan ke pipeline RAG dengan query yang sudah disambiguasi
-        service = ChatService(self.db)
-        response = await service.process_query(
+
+        response = await self.service.process_query(
             user_message=disambiguation_result.disambiguated_query,
             user_id=UUID(user_id),
             user_role=user_role,
-            user_divisi=user_divisi,
             session_id=request.session_id,
             show_sql=request.show_sql,
             context_from_clarification=disambiguation_result,

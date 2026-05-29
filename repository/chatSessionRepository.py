@@ -1,6 +1,5 @@
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import select
@@ -16,7 +15,7 @@ from utils.datetime import utc_now
 class ChatSessionDetailRecord:
     session: ChatSession
     messages: list[ChatMessage]
-    clarification_questions_by_message_id: dict[str, list[ClarificationQuestion]]
+    clarification_questions_by_message_id: dict[uuid.UUID, list[ClarificationQuestion]]
 
 
 class ChatSessionRepository:
@@ -95,7 +94,7 @@ class ChatSessionRepository:
             .where(ClarificationQuestion.message_id.is_not(None))
             .order_by(ClarificationQuestion.created_at.asc())
         )
-        questions_by_message_id: dict[str, list[ClarificationQuestion]] = {}
+        questions_by_message_id: dict[uuid.UUID, list[ClarificationQuestion]] = {}
         for question in questions_result.scalars().all():
             if question.message_id is None:
                 continue
@@ -107,10 +106,7 @@ class ChatSessionRepository:
             clarification_questions_by_message_id=questions_by_message_id,
         )
 
-    async def update_title(self, session_id: uuid.UUID, title: str) -> Optional[ChatSession]:
-        session = await self.get_by_id(session_id)
-        if session is None:
-            return None
+    async def update_title(self, session: ChatSession, title: str) -> Optional[ChatSession]:
         session.session_name = title
         await self.db.flush()
         await self.db.refresh(session)
@@ -125,10 +121,6 @@ class ChatSessionRepository:
         await self.db.refresh(session)
         return session
 
-    async def delete(self, session_id: uuid.UUID) -> bool:
-        session = await self.get_by_id(session_id)
-        if session is None:
-            return False
+    async def delete(self, session: ChatSession):
         await self.db.delete(session)
         await self.db.flush()
-        return True

@@ -29,21 +29,17 @@ def _patch_clarification_service(monkeypatch, clarification_response):
         async def get_clarification_count_in_session(self, session_id: UUID) -> int:
             return 0
 
-        async def process_user_query(
-            self,
-            user_query: str,
-            user_role: str,
-            session_id: UUID,
-            clarification_count: int = 0,
-            addon_prompt: str | None = None,
-            message_id: str | None = None,
-        ):
-            return clarification_response
+        process_user_query = AsyncMock(return_value=clarification_response)
 
     import service.clarificationService as clarification_module
 
     monkeypatch.setattr(
         clarification_module,
+        "ClarificationService",
+        FakeClarificationService,
+    )
+    monkeypatch.setattr(
+        chat_service_module,
         "ClarificationService",
         FakeClarificationService,
     )
@@ -65,7 +61,8 @@ def _create_chat_service(monkeypatch) -> ChatService:
         return_value=Mock(message_id="00000000-0000-0000-0000-000000000301")
     )
     service.session_service.create_chatbot_message = AsyncMock(return_value=None)
-    service._get_active_chatbot_for_role = AsyncMock(
+    service.chatbot_service = Mock()
+    service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
         return_value=Mock(
             id=UUID("00000000-0000-0000-0000-000000000901"),
             addon_prompt="Prompt awal.",
@@ -76,6 +73,54 @@ def _create_chat_service(monkeypatch) -> ChatService:
 
 def _stage_by_name(response, stage_name: str):
     return next((stage for stage in response.pipeline_stages if stage.stage == stage_name), None)
+
+
+@pytest.mark.asyncio
+async def test_nl_to_sql_stage_only_generates_sql(monkeypatch):
+    service = _create_chat_service(monkeypatch)
+    sanitized_sql = "SELECT bulan, total_realisasi FROM report_kpi LIMIT 100;"
+    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value=sanitized_sql))
+    visualization_mock = AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="pie"))
+    monkeypatch.setattr(chat_service_module.llm, "decide_visualization_request", visualization_mock)
+
+    stages = []
+    generated_sql = await service._run_nl_to_sql_stage(
+        stages=stages,
+        user_message="Tampilkan KPI bulan ini",
+        user_id=UUID("00000000-0000-0000-0000-000000000302"),
+        user_role="Owner",
+        pipeline={},
+        addon_prompt="Prompt awal.",
+    )
+
+    assert generated_sql == sanitized_sql
+    visualization_mock.assert_not_awaited()
+    assert stages[0].stage == "nl_to_sql"
+    assert stages[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_visualization_decision_stage_only_decides_visualization(monkeypatch):
+    service = _create_chat_service(monkeypatch)
+    sql_mock = AsyncMock(return_value="SELECT 1;")
+    monkeypatch.setattr(chat_service_module.llm, "generate_sql", sql_mock)
+    monkeypatch.setattr(
+        chat_service_module.llm,
+        "decide_visualization_request",
+        AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="bar")),
+    )
+
+    stages = []
+    decision = await service._run_visualization_decision_stage(
+        stages=stages,
+        user_message="Tampilkan KPI sebagai grafik",
+    )
+
+    assert decision.is_visualize is True
+    assert decision.chart_type == "bar"
+    sql_mock.assert_not_awaited()
+    assert stages[0].stage == "visualization_decision"
+    assert stages[0].status == "success"
 
 
 @pytest.mark.asyncio
@@ -109,7 +154,6 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
         user_message="Siapa yang paling perform?",
         user_id="user-1",
         user_role="Owner",
-        user_divisi=None,
         session_id=SESSION_CLARIFY,
     )
 
@@ -124,6 +168,9 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
     assert response.clarification_questions[0].options == ["Per individu", "Per divisi"]
     assert not hasattr(response, "clarification_message_answer_options")
     assert generate_sql_mock.await_count == 0
+    clarification_call = service.clarification_service.process_user_query.await_args.kwargs
+    assert isinstance(clarification_call["message_id"], UUID)
+
     assert len(response.pipeline_stages) == 1
     assert response.pipeline_stages[0].stage == "Ambiguity Detection"
     assert response.pipeline_stages[0].status == "completed"
@@ -157,7 +204,6 @@ async def test_process_query_returns_security_message_when_sql_validation_fails(
         user_message="Ambil semua data sensitif",
         user_id="user-2",
         user_role="Owner",
-        user_divisi=None,
         session_id=SESSION_BLOCKED,
     )
 
@@ -203,7 +249,6 @@ async def test_process_query_success_without_visualization(monkeypatch):
         user_message="Tampilkan KPI bulan ini",
         user_id="user-3",
         user_role="Owner",
-        user_divisi=None,
         session_id=SESSION_SUCCESS,
         show_sql=True,
     )
@@ -211,7 +256,7 @@ async def test_process_query_success_without_visualization(monkeypatch):
     assert response.message == "Ini adalah analisa KPI."
     assert response.generated_sql == sanitized_sql
     assert response.graphic_chart_type is None
-    assert response.graphic_image_base64 is None
+    assert response.graphic_image_url is None
     assert response.rows_returned == 1
     assert _stage_by_name(response, "graphic_generation") is None
     assert _stage_by_name(response, "result_analysis").status == "success"
@@ -250,9 +295,9 @@ async def test_process_query_success_with_visualization(monkeypatch):
     monkeypatch.setattr(
         chat_service_module.graphic_service,
         "generateGraphic",
-        lambda query_result, chart_type: GraphicResult(
+        lambda query_result, chart_type, session_id=None: GraphicResult(
             chart_type=chart_type,
-            image_base64="BASE64_IMAGE_CONTENT",
+            image_url=f"/public/charts/{session_id}/chart-1.png",
         ),
     )
 
@@ -263,13 +308,13 @@ async def test_process_query_success_with_visualization(monkeypatch):
         user_message="Tampilkan dalam bentuk pie chart",
         user_id="user-4",
         user_role="Owner",
-        user_divisi=None,
         session_id=SESSION_VISUAL,
     )
 
-    assert response.message == "Analisa dengan grafik."
+    expected_url = f"/public/charts/{SESSION_VISUAL}/chart-1.png"
+    assert response.message == f"Analisa dengan grafik.\n\nGrafik: {expected_url}"
     assert response.graphic_chart_type == "pie"
-    assert response.graphic_image_base64 == "BASE64_IMAGE_CONTENT"
+    assert response.graphic_image_url == expected_url
     assert _stage_by_name(response, "graphic_generation").status == "success"
 
 
@@ -313,7 +358,6 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
         user_message="Tampilkan KPI terbaru",
         user_id="user-5",
         user_role="Owner",
-        user_divisi=None,
         session_id=SESSION_RATE_LIMIT,
     )
 
@@ -359,8 +403,7 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
             user_message="Tampilkan KPI bulanan",
             user_id="user-6",
             user_role="Owner",
-            user_divisi=None,
-            session_id=SESSION_TIMEOUT,
+                session_id=SESSION_TIMEOUT,
         )
 
     assert error_info.value.status_code == status.HTTP_408_REQUEST_TIMEOUT
@@ -387,7 +430,6 @@ async def test_process_query_returns_fallback_message_when_llm_unavailable(monke
         user_message="Tampilkan KPI bulan ini",
         user_id="user-7",
         user_role="Owner",
-        user_divisi=None,
         session_id=SESSION_LLM_DOWN,
     )
 

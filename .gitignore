@@ -83,4 +83,7 @@ docs/
 
 .claude/
 
-.graphify-out/
+graphify-out/
+
+public/
+

@@ -43,7 +43,10 @@ class UpdateSessionTitleRequest(BaseModel):
     def title_valid(cls, v: str) -> str:
         v = v.strip()
         if not v:
-            raise ValueError("Title tidak boleh kosong.")
+            raise ValueError("judul sesi tidak boleh kosong.")
         if len(v) > 255:
-            raise ValueError("Title terlalu panjang, maksimal 255 karakter.")
+                raise ValueError("judul sesi terlalu panjang, maksimal 255 karakter.")
         return v
+
+class SessionDeleteResponse(BaseModel):
+    message: str

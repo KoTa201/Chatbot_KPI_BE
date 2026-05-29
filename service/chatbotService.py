@@ -2,13 +2,13 @@ from typing import Optional
 from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette import status
 
 from model.Chatbot import Chatbot, AuthorityEnum
 from repository.chatbotRepository import ChatbotRepository
 from schema.chatbotSchema import (
     ChatbotCreate,
     ChatbotUpdate,
-    ChatbotListResponse,
     ChatbotResponse,
 )
 from utils.pagination import calculate_total_pages
@@ -94,3 +94,12 @@ class ChatbotService:
             return {"message": f"Chatbot id={chatbot_id} berhasil dihapus permanen.", "success": True}
         await self.repo.soft_delete()
         return {"message": f"Chatbot id={chatbot_id} berhasil dinonaktifkan.", "success": True}
+
+    async def get_active_chatbot_for_role(self, user_role: str):
+        chatbot = await self.repo.get_active_by_authority(user_role)
+        if chatbot is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
+            )
+        return chatbot

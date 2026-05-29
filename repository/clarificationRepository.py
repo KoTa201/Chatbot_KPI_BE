@@ -19,7 +19,7 @@ class ClarificationRepository:
         clarifying_question: str,
         clarification_answer: str | None = None,
         answer_options: list[str] | None = None,
-        message_id: str | None = None,
+        message_id: UUID | None = None,
     ) -> ClarificationQuestion:
         question = ClarificationQuestion(
             ambiguity_type=ambiguity_type[:20] if ambiguity_type else None,
@@ -39,7 +39,6 @@ class ClarificationRepository:
         self,
         log_id: str,
         clarification_answer: str,
-        disambiguated_query: str,
         free_text_answer: str | None = None,
     ) -> ClarificationQuestion:
         stmt = select(ClarificationQuestion).where(
@@ -77,20 +76,6 @@ class ClarificationRepository:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-
-    async def update_feedback(
-        self,
-        log_id: UUID,
-        user_feedback: bool,
-        needed_correction: bool | None = None,
-    ) -> None:
-        return None
-
-    async def get_clarify_decisions_count(self, session_id: UUID) -> int:
-        return 0
-
-    async def delete_by_session(self, session_id: UUID) -> int:
-        return 0
 
     @staticmethod
     def _serialize_options(answer_options: list[str] | None) -> str | None:

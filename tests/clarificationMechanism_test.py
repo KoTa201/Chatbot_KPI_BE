@@ -252,7 +252,7 @@ class TestClarificationService:
     """Test suite untuk clarification service orchestration."""
 
     @pytest.mark.asyncio
-    async def test_process_user_query_flushes_clarification_questions(self):
+    async def test_process_user_query_commits_clarification_questions(self):
         engine, session_factory = await _make_sqlite_session()
         session_id = uuid4()
         try:
@@ -276,10 +276,11 @@ class TestClarificationService:
                     user_query="Tampilkan KPI terbaik",
                     user_role="karyawan",
                     session_id=session_id,
-                    clarification_count=0,
                 )
 
                 assert result is not None
+
+            async with session_factory() as db:
                 stored = (await db.execute(select(ClarificationQuestion).where(
                     ClarificationQuestion.session_id == session_id
                 ))).scalars().all()
@@ -296,7 +297,7 @@ class TestClarificationService:
             async with session_factory() as db:
                 user = await _create_user_and_session(db, session_id)
                 service = ChatService(db)
-                service._get_active_chatbot_for_role = AsyncMock(
+                service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
                     return_value=SimpleNamespace(id=uuid4(), addon_prompt=None)
                 )
                 with patch.object(ClarificationService, "process_user_query", new_callable=AsyncMock) as mock_process:
@@ -309,7 +310,6 @@ class TestClarificationService:
                         user_message="Tampilkan KPI terbaik",
                         user_id=user.id,
                         user_role="karyawan",
-                        user_divisi=None,
                         session_id=session_id,
                     )
 
@@ -340,11 +340,12 @@ class TestClarificationService:
                 await db.commit()
 
                 service = ChatService(db)
-                service._get_active_chatbot_for_role = AsyncMock(
+                service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
                     return_value=SimpleNamespace(id=uuid4(), addon_prompt=None)
                 )
-                service._run_nl_to_sql_stage = AsyncMock(
-                    return_value=("SELECT 1", SimpleNamespace(is_visualize=False, chart_type=None))
+                service._run_nl_to_sql_stage = AsyncMock(return_value="SELECT 1")
+                service._run_visualization_decision_stage = AsyncMock(
+                    return_value=SimpleNamespace(is_visualize=False, chart_type=None)
                 )
                 service._run_sql_execution_stage = AsyncMock(return_value=([{"value": 1}], 1))
                 service._run_result_analysis_stage = AsyncMock(return_value="Hasil KPI")
@@ -353,7 +354,6 @@ class TestClarificationService:
                     user_message="Tampilkan KPI terbaik dengan Achievement %",
                     user_id=user.id,
                     user_role="karyawan",
-                    user_divisi=None,
                     session_id=session_id,
                     context_from_clarification=SimpleNamespace(disambiguated_query="Tampilkan KPI terbaik dengan Achievement %"),
                 )
@@ -401,7 +401,6 @@ class TestClarificationService:
                 user_query="Tampilkan sales terbaik tahun lalu",
                 user_role="Kepala Divisi",
                 session_id=SESSION_TEST_2,
-                clarification_count=0,
             )
 
         assert result is not None
@@ -623,7 +622,6 @@ class TestClarificationService:
                 user_query="Tampilkan semua KPI Januari 2025",
                 user_role="Owner",
                 session_id=SESSION_TEST_1,
-                clarification_count=0,
             )
 
             assert result is None
@@ -658,7 +656,6 @@ class TestClarificationService:
                 user_query="Siapa yang terbaik?",
                 user_role="Owner",
                 session_id=SESSION_TEST_2,
-                clarification_count=0,
             )
 
             assert result is not None
@@ -1110,8 +1107,9 @@ async def test_process_user_query_returns_all_detected_questions():
     service = ClarificationService(db=None)
     service.repo.create = AsyncMock(side_effect=[
         SimpleNamespace(clarification_question_id=f"q{index}")
-        for index in range(5)
+        for index in range(1, 6)
     ])
+
 
     ambiguities = [
         DetectedAmbiguity(
@@ -1147,7 +1145,6 @@ def test_nl_to_sql_prompt_includes_addon_prompt_constraint():
         user_query="Tampilkan KPI saya",
         user_id=uuid4(),
         user_role="Karyawan",
-        divisi=None,
         addon_prompt="Jawab hanya untuk KPI aktif.",
     )
 
@@ -1162,7 +1159,6 @@ def test_nl_to_sql_prompt_includes_srag_inference_inputs():
         user_query="Tampilkan KPI Sales bulan Maret",
         user_id=uuid4(),
         user_role="Karyawan",
-        divisi=None,
         column_statistics="kpi_master_records.category: unique=['KPI Sales'], non_null=1, non_zero=1",
     )
 
@@ -1260,7 +1256,6 @@ async def test_clarification_service_passes_addon_prompt_to_detector(monkeypatch
         user_query="Tampilkan KPI saya",
         user_role="Karyawan",
         session_id=SESSION_TEST_1,
-        clarification_count=0,
         addon_prompt="Gunakan constraint bot.",
     )
 
@@ -1303,6 +1298,20 @@ class TestKPIPrompts:
         assert '"question_set": [' in prompt
         assert '"options": [' in prompt
 
+    def test_nl_to_sql_schema_uses_user_id_not_removed_nama_orang(self):
+        from template.promptTemplate import DB_SCHEMA, build_nl_to_sql_prompt
+
+        prompt = build_nl_to_sql_prompt(
+            user_query="Tampilkan KPI Akmal",
+            user_id=uuid4(),
+            user_role="Karyawan",
+        )
+        combined_prompt_context = f"{DB_SCHEMA}\n{prompt}"
+
+        assert "nama_orang" not in combined_prompt_context
+        assert "user_id UUID" in DB_SCHEMA
+        assert "users.id" in DB_SCHEMA
+        assert "join users" in prompt.lower()
 
     def test_ambiguity_prompt_uses_prd_taxonomy_and_context(self):
         prompt = build_ambiguity_assessment_prompt(
