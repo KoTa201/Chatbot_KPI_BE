@@ -252,7 +252,7 @@ class TestClarificationService:
     """Test suite untuk clarification service orchestration."""
 
     @pytest.mark.asyncio
-    async def test_process_user_query_commits_clarification_questions(self):
+    async def test_process_user_query_flushes_clarification_questions(self):
         engine, session_factory = await _make_sqlite_session()
         session_id = uuid4()
         try:
@@ -279,8 +279,6 @@ class TestClarificationService:
                 )
 
                 assert result is not None
-
-            async with session_factory() as db:
                 stored = (await db.execute(select(ClarificationQuestion).where(
                     ClarificationQuestion.session_id == session_id
                 ))).scalars().all()
