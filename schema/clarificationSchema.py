@@ -83,7 +83,6 @@ class QueryDisambiguationResult(BaseModel):
     needs_more_clarification: bool = False
     clarification_message: Optional["ClarificationMessageResponse"] = None
     preference_tree: Optional[dict[str, Any]] = None
-    refinement_round: int = 1
 
 
 # ================================================================ #

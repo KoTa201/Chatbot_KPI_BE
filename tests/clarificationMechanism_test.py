@@ -411,6 +411,7 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_handle_clarification_response_rewrites_from_batched_answers(self):
         service = ClarificationService(db=None)
+        service.db = AsyncMock()
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -449,6 +450,7 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_handle_clarification_response_uses_preference_tree_additional_information(self):
         service = ClarificationService(db=None)
+        service.db = AsyncMock()
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -500,6 +502,7 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_handle_clarification_response_does_not_repeat_answered_questions(self):
         service = ClarificationService(db=None)
+        service.db = AsyncMock()
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -1151,7 +1154,7 @@ def test_nl_to_sql_prompt_includes_addon_prompt_constraint():
         addon_prompt="Jawab hanya untuk KPI aktif.",
     )
 
-    assert "[KONSTRAINT CHATBOT AKTIF]" in prompt
+    assert "[Konfigurasi Chatbot Tambahan]" in prompt
     assert "Jawab hanya untuk KPI aktif." in prompt
 
 
@@ -1202,7 +1205,7 @@ def test_analysis_prompt_includes_addon_prompt_constraint():
         addon_prompt="Gunakan nada formal.",
     )
 
-    assert "[KONSTRAINT CHATBOT AKTIF]" in prompt
+    assert "[Konfigurasi Chatbot Tambahan]" in prompt
     assert "Gunakan nada formal." in prompt
 
 
@@ -1216,7 +1219,7 @@ def test_ambiguity_prompt_omits_empty_addon_prompt():
         addon_prompt="",
     )
 
-    assert "[KONSTRAINT CHATBOT AKTIF]" not in prompt
+    assert "[Konfigurasi Chatbot Tambahan]" not in prompt
 
 
 @pytest.mark.asyncio
