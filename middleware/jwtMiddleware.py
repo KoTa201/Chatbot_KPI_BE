@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
 from configCredidential import settings
-from utils.responses import json_response
+from utils.responses.responses import json_response
 
 logger = logging.getLogger(__name__)
 

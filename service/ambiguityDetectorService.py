@@ -13,7 +13,7 @@ import logging
 from schema.clarificationSchema import (
     AmbiguityAssessmentResult,
 )
-from service.ambiguityParsing import (
+from utils.parser.ambiguityParsing import (
     build_non_ambiguous_result,
     extract_description_options,
     is_llm_sourced_level_1,

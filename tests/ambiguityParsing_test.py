@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from service.ambiguityParsing import (
+from utils.parser.ambiguityParsing import (
     build_non_ambiguous_result,
     normalize_ambiguity_payload,
     parse_llm_json_response,

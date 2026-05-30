@@ -34,7 +34,6 @@ from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from service.kpiMasterService import KPIMasterService
-from model.KPIGroup import KPIGroup
 from utils.userLookUp import UserLookupUtil
 
 logger = logging.getLogger(__name__)
@@ -376,7 +375,7 @@ class KPIMasterIngestionService:
 
     def _parse(self, df, spreadsheet_id: str, sheet_name: str, tahun: int):
         try:
-            from utils.kpiMasterParser import parse_kpi_master_dataframe
+            from utils.parser.kpiMasterParser import parse_kpi_master_dataframe
             return parse_kpi_master_dataframe(df, spreadsheet_id, sheet_name, tahun=tahun)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))

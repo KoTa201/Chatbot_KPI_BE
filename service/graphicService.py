@@ -14,7 +14,6 @@ Changelog:
 from __future__ import annotations
 
 import io
-import re
 import uuid as _uuid_module
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,10 +23,26 @@ from uuid import UUID
 import pandas as pd
 from fastapi import HTTPException, status
 
+from utils.constants.graphicConstants import (
+    ACTUAL_COLUMN_HINTS,
+    CATEGORY_COLUMN_HINTS,
+    COLOR_THRESHOLD_RE,
+    EXPR_RE,
+    HEADER_WORDS,
+    KPI_COLUMN_HINTS,
+    MONTH_COLUMN_HINTS,
+    MONTH_LABELS,
+    NOTES_HINTS,
+    SCALE_MAP,
+    SUPPORTED_CHART_TYPES,
+    TARGET_COLUMN_HINTS,
+    TRL_EXACT_RE,
+    TRL_PATTERN,
+    VALUE_COLUMN_HINTS,
+)
 
-# ===========================================================================
+
 # KpiValueParser — parse ekspresi KPI menjadi nilai numerik + metadata
-# ===========================================================================
 
 @dataclass
 class ParsedValue:
@@ -78,41 +93,10 @@ class KpiValueParser:
       (kosong/nan)→  numeric=None
     """
 
-    # Kata-kata yang dianggap header / placeholder bukan nilai
-    _HEADER_WORDS = frozenset({
-        "target", "realisasi", "pencapaian", "actual", "nilai",
-        "kpi", "indikator", "satuan", "-", "n/a", "na", "",
-    })
-
-    # Operator Unicode + ASCII
-    _OP_PATTERN = r"([≥≤><]|>=|<=)?"
-
-    # Angka desimal (termasuk koma sebagai pemisah desimal)
-    _NUM_PATTERN = r"(\d[\d.,]*)"
-
-    # Satuan opsional setelah angka
-    _UNIT_PATTERN = r"\s*([a-zA-Z%/][^\s]*(?:\s+[a-zA-Z/][^\s]*)*)?"
-
-    # TRL prefix
-    _TRL_RE = re.compile(r"(?i)^\s*trl\s*(\d+)\s*$")
-
-    # Full expression pattern
-    _EXPR_RE = re.compile(
-        r"^\s*" + _OP_PATTERN + r"\s*" + _NUM_PATTERN + _UNIT_PATTERN + r"\s*$",
-        re.UNICODE,
-    )
-
-    # Skala untuk satuan
-    _SCALE_MAP: dict[str, float] = {
-        "m":       1_000_000,   # M/org, M (juta)
-        "jt":      1_000_000,
-        "juta":    1_000_000,
-        "k":       1_000,       # ribu
-        "rb":      1_000,
-        "ribu":    1_000,
-        "miliar":  1_000_000_000,
-        "b":       1_000_000_000,
-    }
+    _HEADER_WORDS = HEADER_WORDS
+    _TRL_RE = TRL_EXACT_RE
+    _EXPR_RE = EXPR_RE
+    _SCALE_MAP = SCALE_MAP
 
     def parse(self, raw: object) -> ParsedValue:
         """Parse satu nilai menjadi ParsedValue."""
@@ -222,15 +206,10 @@ class KpiValueParser:
         return max(set(units), key=units.count)
 
 
-# Singleton global agar tidak perlu instansiasi berulang
 _KPI_PARSER = KpiValueParser()
 
 
-# ===========================================================================
-# Helper-helper lama (dipertahankan & disesuaikan)
-# ===========================================================================
-
-_TRL_PATTERN = re.compile(r"(?i)trl\s*(\d+)")
+_TRL_PATTERN = TRL_PATTERN
 
 
 def _parse_trl_value(series: pd.Series) -> pd.Series | None:
@@ -245,9 +224,7 @@ def _is_trl_column(series: pd.Series) -> bool:
     return _parse_trl_value(series) is not None
 
 
-# Threshold COLOR kolom ("≥100%", "67–99%", "<67%") — BUKAN kolom nilai KPI
-# Pola ini spesifik: range seperti "67–99%" atau hanya operator+angka TANPA satuan lain
-_COLOR_THRESHOLD_RE = re.compile(r"^\d+[–—\-]\d+%$|^[<≥≤>]=?\d+%$")
+_COLOR_THRESHOLD_RE = COLOR_THRESHOLD_RE
 
 
 def _is_color_threshold_column(series: pd.Series) -> bool:
@@ -266,7 +243,7 @@ def _is_color_threshold_column(series: pd.Series) -> bool:
     return matched.mean() >= 0.8
 
 
-_NOTES_HINTS = ("note", "notes", "keterangan", "catatan", "deskripsi", "description")
+_NOTES_HINTS = NOTES_HINTS
 
 
 def _is_notes_column(col_name: str, series: pd.Series) -> bool:
@@ -276,9 +253,7 @@ def _is_notes_column(col_name: str, series: pd.Series) -> bool:
     return bool(str_lengths.mean() > 40) if len(str_lengths) > 0 else False
 
 
-# ===========================================================================
 # Dataclass hasil
-# ===========================================================================
 
 @dataclass
 class GraphicResult:
@@ -287,43 +262,24 @@ class GraphicResult:
     kpi_name: str = ""
 
 
-# ===========================================================================
 # Service utama
-# ===========================================================================
 
 class GraphicSeervice:
     """Service untuk membuat grafik dari data hasil query SQL."""
 
-    SUPPORTED_CHART_TYPES = {
-        "bar", "pie", "donut", "line",
-        "grouped_bar", "stacked_bar",
-        "progress",      # actual vs target per KPI / bulan
-        "trl_progress",  # TRL timeline
-    }
+    SUPPORTED_CHART_TYPES = SUPPORTED_CHART_TYPES
 
     def __init__(self, public_dir: str | Path = "public"):
         self.public_dir = Path(public_dir)
         self.parser = _KPI_PARSER
 
-        self.value_column_hints = (
-            "total", "jumlah", "sum", "avg", "average", "rata", "nilai",
-            "score", "persen", "percentage", "realisasi", "count", "qty",
-            "value", "actual", "pencapaian",
-        )
-        self.target_column_hints = ("target", "goal", "sasaran")
-        self.category_column_hints = (
-            "bulan", "month", "tanggal", "date", "periode", "nama", "kpi",
-            "divisi", "kategori", "category", "label",
-        )
-        self.month_column_hints = ("bulan", "bulan_num", "month", "month_num")
-        self.month_labels = {
-            1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "Mei", 6: "Jun",
-            7: "Jul", 8: "Agu", 9: "Sep", 10: "Okt", 11: "Nov", 12: "Des",
-        }
+        self.value_column_hints = VALUE_COLUMN_HINTS
+        self.target_column_hints = TARGET_COLUMN_HINTS
+        self.category_column_hints = CATEGORY_COLUMN_HINTS
+        self.month_column_hints = MONTH_COLUMN_HINTS
+        self.month_labels = MONTH_LABELS
 
-    # ------------------------------------------------------------------
     # Public entry point
-    # ------------------------------------------------------------------
     def generateGraphic(
         self,
         query_result: list[dict],
@@ -433,9 +389,7 @@ class GraphicSeervice:
 
         return results
 
-    # ------------------------------------------------------------------
     # Helper: slice kpi_meta untuk subset baris (by original integer index)
-    # ------------------------------------------------------------------
     def _slice_meta(
         self,
         kpi_meta: dict[str, list[ParsedValue]],
@@ -450,9 +404,7 @@ class GraphicSeervice:
             result[col] = [pv_list[i] for i in orig_indices if i < len(pv_list)]
         return result
 
-    # ------------------------------------------------------------------
     # Pre-processing 1: buang kolom warna / narasi
-    # ------------------------------------------------------------------
     def _drop_non_data_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         drop_cols: list[str] = []
         for col in df.columns:
@@ -463,9 +415,7 @@ class GraphicSeervice:
                 drop_cols.append(col)
         return df.drop(columns=drop_cols) if drop_cols else df
 
-    # ------------------------------------------------------------------
     # Pre-processing 2: parse kolom KPI-value → float, simpan metadata
-    # ------------------------------------------------------------------
     def _parse_kpi_columns(
         self, df: pd.DataFrame
     ) -> tuple[pd.DataFrame, dict[str, list[ParsedValue]]]:
@@ -496,9 +446,7 @@ class GraphicSeervice:
                 )
         return df, meta
 
-    # ------------------------------------------------------------------
     # Auto-detect chart type
-    # ------------------------------------------------------------------
     def _auto_detect_chart_type(self, df: pd.DataFrame) -> str | None:
         cols_lower = [c.lower() for c in df.columns]
 
@@ -506,7 +454,7 @@ class GraphicSeervice:
             if _is_trl_column(df[col]):
                 return "trl_progress"
 
-        has_actual = any(h in c for c in cols_lower for h in ("actual", "realisasi", "pencapaian"))
+        has_actual = any(h in c for c in cols_lower for h in ACTUAL_COLUMN_HINTS)
         has_target = any(h in c for c in cols_lower for h in self.target_column_hints)
         if has_actual and has_target:
             return "progress"
@@ -518,9 +466,7 @@ class GraphicSeervice:
 
         return None
 
-    # ------------------------------------------------------------------
     # Dispatch render
-    # ------------------------------------------------------------------
     def _render_chart(
         self,
         df: pd.DataFrame,
@@ -539,9 +485,7 @@ class GraphicSeervice:
             return self._render_line(df=df, plt=plt, title_prefix=title_prefix)
         return self._render_simple(df=df, chart_type=chart_type, plt=plt, kpi_meta=kpi_meta, title_prefix=title_prefix)
 
-    # ------------------------------------------------------------------
     # Render: TRL Progress
-    # ------------------------------------------------------------------
     def _render_trl_progress(self, df: pd.DataFrame, plt, title_prefix: str = "") -> bytes:
         trl_col, trl_numeric = self._find_trl_column(df)
         if trl_col is None:
@@ -578,16 +522,14 @@ class GraphicSeervice:
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
-    # ------------------------------------------------------------------
     # Render: Progress — actual vs target
-    # ------------------------------------------------------------------
     def _render_progress(
         self,
         df: pd.DataFrame,
         plt,
         kpi_meta: dict[str, list[ParsedValue]],
     ) -> bytes:
-        actual_col = self._find_column_by_hints(df, ("actual", "realisasi", "pencapaian"))
+        actual_col = self._find_column_by_hints(df, ACTUAL_COLUMN_HINTS)
         target_col = self._find_column_by_hints(df, self.target_column_hints)
         exclude    = [c for c in [actual_col, target_col] if c]
         kpi_col    = self._pick_kpi_column(df, exclude=exclude)
@@ -668,9 +610,7 @@ class GraphicSeervice:
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
-    # ------------------------------------------------------------------
     # Render: Grouped / Stacked Bar
-    # ------------------------------------------------------------------
     def _render_multi_series(self, df: pd.DataFrame, chart_type: str, plt, title_prefix: str = "") -> bytes:
         value_col = self._find_column_by_hints(df, self.value_column_hints) or self._pick_best_numeric(df)
         if not value_col:
@@ -705,9 +645,7 @@ class GraphicSeervice:
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
-    # ------------------------------------------------------------------
     # Render: Line
-    # ------------------------------------------------------------------
     def _render_line(self, df: pd.DataFrame, plt, title_prefix: str = "") -> bytes:
         value_col = self._find_column_by_hints(df, self.value_column_hints) or self._pick_best_numeric(df)
         if not value_col:
@@ -741,9 +679,7 @@ class GraphicSeervice:
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
-    # ------------------------------------------------------------------
     # Render: Simple bar / pie / donut
-    # ------------------------------------------------------------------
     def _render_simple(
         self,
         df: pd.DataFrame,
@@ -799,9 +735,7 @@ class GraphicSeervice:
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
-    # ------------------------------------------------------------------
     # _prepare_chart_data (dipakai _render_simple)
-    # ------------------------------------------------------------------
     def _prepare_chart_data(
         self, dataframe: pd.DataFrame, chart_type: str
     ) -> tuple[str, str, pd.DataFrame]:
@@ -883,9 +817,7 @@ class GraphicSeervice:
 
         return candidates[0]
 
-    # ------------------------------------------------------------------
     # Utilities: column pickers
-    # ------------------------------------------------------------------
     def _find_trl_column(self, df: pd.DataFrame) -> tuple[str | None, pd.Series | None]:
         for col in df.columns:
             parsed = _parse_trl_value(df[col])
@@ -899,18 +831,17 @@ class GraphicSeervice:
                 return col
         return None
 
-    def _pick_time_column(self, df: pd.DataFrame, exclude: list[str | None] = []) -> str | None:
-        excl = [c for c in exclude if c]
+    def _pick_time_column(self, df: pd.DataFrame, exclude: list[str | None] | None = None) -> str | None:
+        excl = [c for c in (exclude or []) if c]
         for col in df.columns:
             if col not in excl and self._is_month_like_column(col):
                 return col
         return None
 
-    def _pick_kpi_column(self, df: pd.DataFrame, exclude: list[str | None] = []) -> str | None:
-        excl = [c for c in exclude if c]
-        kpi_hints = ("kpi", "nama", "kategori", "category", "produk", "product", "name", "indikator")
+    def _pick_kpi_column(self, df: pd.DataFrame, exclude: list[str | None] | None = None) -> str | None:
+        excl = [c for c in (exclude or []) if c]
         for col in df.columns:
-            if col not in excl and any(h in col.lower() for h in kpi_hints):
+            if col not in excl and any(h in col.lower() for h in KPI_COLUMN_HINTS):
                 return col
         for col in df.columns:
             if col not in excl:
@@ -940,9 +871,7 @@ class GraphicSeervice:
     def _is_month_like_column(self, column_name: str) -> bool:
         return any(hint in column_name.lower() for hint in self.month_column_hints)
 
-    # ------------------------------------------------------------------
     # I/O
-    # ------------------------------------------------------------------
     def _fig_to_bytes(self, fig, plt) -> bytes:
         buf = io.BytesIO()
         try:

@@ -58,20 +58,6 @@ class AuthService:
         self.pin_expire_minutes: int = settings.AUTH_PIN_EXPIRE_MINUTES
         self.reset_token_expire_minutes: int = settings.AUTH_RESET_TOKEN_EXPIRE_MINUTES
 
-    # ------------------------------------------------------------------ #
-    #  Password                                                            #
-    # ------------------------------------------------------------------ #
-
-    def hash_password(self, plain_password: str) -> str:
-        password_bytes = plain_password.encode("utf-8")
-        hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt())
-        return hashed.decode("utf-8")
-
-    def verify_password(self, plain_password: str, hashed_password: str) -> bool:
-        password_bytes = plain_password.encode("utf-8")
-        hashed_bytes = hashed_password.encode("utf-8")
-        return bcrypt.checkpw(password_bytes, hashed_bytes)
-
 
     # ------------------------------------------------------------------ #
     #  JWT — Refresh Token                                                 #
@@ -425,6 +411,18 @@ class AuthService:
         user.hashed_password = self.hash_password(new_password)
         await self.repo.save(user)
         return "Password berhasil direset. Silakan login dengan password baru."
+
+    @staticmethod
+    def hash_password(plain_password: str) -> str:
+        password_bytes = plain_password.encode("utf-8")
+        hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt())
+        return hashed.decode("utf-8")
+
+    @staticmethod
+    def verify_password( plain_password: str, hashed_password: str) -> bool:
+        password_bytes = plain_password.encode("utf-8")
+        hashed_bytes = hashed_password.encode("utf-8")
+        return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
 _auth_service = AuthService(repo=UserRepository(Depends(get_db)))

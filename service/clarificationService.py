@@ -6,25 +6,32 @@ Mengkoordinasikan: ambiguity detection → question generation → response hand
 
 import json
 import logging
+from typing import Optional
 from uuid import UUID
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from configCredidential import get_settings
+from repository.clarificationRepository import ClarificationRepository
 from schema.clarificationSchema import (
-    QueryDisambiguationResult,
+    ClarificationAnswerItem,
     ClarificationMessageResponse,
     ClarificationQuestionResponse,
-    ClarificationAnswerItem,
+    ClarifyingQuestionData,
+    QueryDisambiguationResult,
 )
 from service.ambiguityDetectorService import AmbiguityDetectorService
+from utils.helper.clarificationHelpers import (
+    answered_question_keys,
+    build_fallback_disambiguated_query,
+    build_qa_set,
+    build_session_qa_set,
+    effective_answer,
+    filter_unanswered_ambiguities,
+)
 from service.llmService import LLMService
-from service.preferenceTreeService import PreferenceTree, QAPair
-from repository.clarificationRepository import ClarificationRepository
-from template.promptTemplate import build_query_disambiguation_prompt, build_context
-from configCredidential import get_settings
-from collections.abc import Mapping
-from typing import Optional
-
-from schema.clarificationSchema import ClarifyingQuestionData
+from service.preferenceTreeService import PreferenceTree
+from template.promptTemplate import build_context, build_query_disambiguation_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +46,6 @@ class ClarificationService:
         self.ambiguity_detector = AmbiguityDetectorService()
         self.llm = LLMService()
         self.repo = ClarificationRepository(db)
-
-    @staticmethod
-    def _effective_answer(answer: ClarificationAnswerItem) -> str:
-        """Extract effective answer from ClarificationAnswerItem."""
-        return answer.free_text if answer.selected_option == "Lainnya" and answer.free_text else answer.selected_option
 
     async def process_user_query(
         self,
@@ -115,11 +117,8 @@ class ClarificationService:
 
         source_query = original_query or ""
 
-        # Build current QA set from submitted answers only
-        current_qa_set = self._build_qa_set(clarification_answers, log_by_id)
-
-        # Build full session QA set including all answered logs + current answers
-        session_qa_set = self._build_session_qa_set(logs, current_qa_set)
+        current_qa_set = build_qa_set(clarification_answers, log_by_id)
+        session_qa_set = build_session_qa_set(logs, current_qa_set)
 
         preference_tree = PreferenceTree(llm=self.llm)
         await preference_tree.update_tree(session_qa_set)
@@ -134,14 +133,14 @@ class ClarificationService:
         )
 
         for answer in clarification_answers:
-            effective_answer = ClarificationService._effective_answer(answer)
             await self.repo.update_with_answer(
                 log_id=answer.question_id,
-                clarification_answer=effective_answer,
+                clarification_answer=effective_answer(answer),
                 free_text_answer=answer.free_text,
             )
 
-        await self.db.commit()
+        if self.db is not None:
+            await self.db.commit()
 
         next_clarification = None
         recheck_result = await self._recheck_ambiguity_after_refinement(
@@ -150,19 +149,17 @@ class ClarificationService:
             preference_tree=preference_tree,
         )
         if recheck_result and recheck_result.is_ambiguous:
-            answered_questions = {pair.question.strip().casefold() for pair in session_qa_set}
-            recheck_result.detected_ambiguities = [
-                ambiguity
-                for ambiguity in recheck_result.detected_ambiguities
-                if (ambiguity.suggested_clarifying_question or "").strip().casefold()
-                not in answered_questions
-            ]
+            recheck_result.detected_ambiguities = filter_unanswered_ambiguities(
+                recheck_result.detected_ambiguities,
+                answered_question_keys(session_qa_set),
+            )
             if recheck_result.detected_ambiguities:
                 next_clarification = await self._build_clarification_response_from_detection(
                     session_id=session_id,
                     ambiguity_result=recheck_result,
                 )
-                await self.db.commit()
+                if self.db is not None:
+                    await self.db.commit()
 
         return QueryDisambiguationResult(
             original_query=source_query,
@@ -173,80 +170,6 @@ class ClarificationService:
             clarification_message=next_clarification,
             preference_tree=preference_tree.serialize(),
         )
-
-    @staticmethod
-    def _build_qa_set(
-        clarification_answers: list[ClarificationAnswerItem],
-        log_by_id: Mapping[str, object],
-    ) -> list[QAPair]:
-        qa_set: list[QAPair] = []
-        for answer in clarification_answers:
-            log = log_by_id[str(answer.question_id)]
-            effective_answer = ClarificationService._effective_answer(answer)
-            qa_set.append(
-                QAPair(
-                    level1=getattr(log, "ambiguity_type", None) or "unknown",
-                    level2=getattr(log, "clarification_question", None) or answer.question_id,
-                    question=getattr(log, "clarification_question",
-                                     None) or answer.question_id,
-                    answer=effective_answer,
-                )
-            )
-        return qa_set
-
-    @staticmethod
-    def _build_session_qa_set(
-        logs: list[object],
-        current_qa_set: list[QAPair],
-    ) -> list[QAPair]:
-        """
-        Build full-session QAPairs from all answered logs + current answers.
-        Current answers override same question from logs.
-        Only include logs where selected_answer exists.
-        """
-        current_by_question = {
-            pair.question.strip().casefold(): pair
-            for pair in current_qa_set
-        }
-        session_pairs: list[QAPair] = []
-        seen_questions: set[str] = set()
-
-        # Process logs in reverse order (most recent first)
-        for log in reversed(logs):
-            question = (getattr(log, "clarification_question", None) or "").strip()
-            if not question:
-                continue
-            key = question.casefold()
-
-            # If current answer exists for this question, use it
-            if key in current_by_question:
-                pair = current_by_question[key]
-            else:
-                # Otherwise, use log's answer if it exists
-                selected_answer = str(getattr(log, "selected_answer", None))
-                if selected_answer is None:
-                    continue
-                pair = QAPair(
-                    level1=getattr(log, "ambiguity_type", None) or "unknown",
-                    level2=question,
-                    question=question,
-                    answer=selected_answer,
-                )
-
-            # Skip if we've already seen this question
-            if key in seen_questions:
-                continue
-            session_pairs.append(pair)
-            seen_questions.add(key)
-
-        # Add any current answers that weren't in logs
-        for pair in current_qa_set:
-            key = pair.question.strip().casefold()
-            if key not in seen_questions:
-                session_pairs.append(pair)
-                seen_questions.add(key)
-
-        return session_pairs
 
     async def _disambiguate_query(
         self,
@@ -288,8 +211,7 @@ class ClarificationService:
                 f"[ClarificationService] Disambiguation LLM error ({e}): "
                 f"Using smart fallback strategy"
             )
-            # Fallback strategy: Gunakan smart combination tanpa LLM
-            return self._build_fallback_disambiguated_query(
+            return build_fallback_disambiguated_query(
                 original_query, clarification_answers, additional_constraints
             )
 
@@ -312,31 +234,6 @@ class ClarificationService:
             logger.warning(
                 "[ClarificationService] Ambiguity re-check failed: %s", exc)
             return None
-
-    @staticmethod
-    def _build_fallback_disambiguated_query(
-            original_query: str,
-        clarification_answers: list[ClarificationAnswerItem],
-        additional_constraints: str | None = None,
-    ) -> str:
-        """
-        Fallback untuk disambiguasi query ketika LLM tidak available.
-        Menggunakan strategi deterministic untuk mengkombinasikan query dengan jawaban.
-        """
-        query = original_query.strip()
-        additions: list[str] = []
-        for answer in clarification_answers:
-            if answer.selected_option == "Lewati":
-                continue
-            if answer.selected_option == "Lainnya" and answer.free_text:
-                additions.append(answer.free_text.strip())
-            else:
-                additions.append(answer.selected_option.strip())
-        if additional_constraints:
-            additions.append(additional_constraints.strip())
-        if not additions:
-            return query
-        return f"{query} ({'; '.join(additions)})"
 
     async def _build_clarification_response_from_detection(
         self,

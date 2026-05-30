@@ -1,12 +1,3 @@
-"""
-Chat Service — Orchestrator Pipeline Structured RAG.
-Menjalankan stage secara berurutan:
-    Stage 1: NL-to-SQL (LLM)
-  Stage 2: SQLWireguard Validation
-  Stage 3: SQL Execution (PostgreSQL)
-  Stage 4: Graphic Generation (opsional, jika diminta user)
-    Stage 5: Result Analysis (LLM)
-"""
 from uuid import UUID
 import logging
 import time
@@ -28,9 +19,17 @@ from repository.clarificationRepository import ClarificationRepository
 from repository.chatQueryRepository import ChatQueryRepository
 from schema.chatSchema import ChatResponse, PipelineStageInfo, GraphicItemResponse
 from service.clarificationService import ClarificationService
+from utils.dataClass.chatPipelineTypes import ChatPipelineContext
+from utils.responses.chatResponseBuilder import (
+    build_ai_unavailable_response,
+    build_clarification_prompt_message,
+    build_graphics_payload,
+    build_security_blocked_response,
+)
 from utils.sessionContextManager import SessionContextManager
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 llm = LLMService()
 wireguard = SQLWireguardService()
@@ -58,17 +57,6 @@ class ChatService:
         show_sql: bool = False,
         context_from_clarification: Any = None,
     ) -> ChatResponse:
-        """
-        Entry point utama. Jalankan pipeline dengan clarification mechanism:
-
-        [STAGE 0 - BARU] Ambiguity Detection & Clarification
-        [STAGE 1] NL-to-SQL (LLM)
-        [STAGE 2] SQLWireguard Validation
-        [STAGE 3] SQL Execution (PostgreSQL)
-        [STAGE 4] Graphic Generation (opsional)
-        [STAGE 5] Result Analysis (LLM)
-        """
-
 
         active_chatbot = await self.chatbot_service.get_active_chatbot_for_role(user_role)
         addon_prompt = getattr(active_chatbot, "addon_prompt", None)
@@ -96,11 +84,8 @@ class ChatService:
         total_start = time.monotonic()
 
         try:
-            # STAGE 0 — AMBIGUITY DETECTION & CLARIFICATION (BARU)
             clarification_stage = self._start_stage(
                 stages, "Ambiguity Detection")
-
-            # Skip stage 0 jika sudah ada clarification context (response dari user)
             if context_from_clarification is None:
                 clarification_response = await self.clarification_service.process_user_query(
                     user_query=user_message,
@@ -111,13 +96,12 @@ class ChatService:
                 )
 
                 if clarification_response is not None:
-                    # Pertanyaan klarifikasi diajukan → hentikan pipeline dan return    
                     self._complete_stage(
                         clarification_stage, "completed", "Clarification question generated")
 
-                    query_message = (
-                        f"Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait '{user_message}', silakan jawab pertanyaan berikut."
-                        f"{chr(10) + chr(10).join(f'{i + 1}. {q.question}' for i, q in enumerate(clarification_response.questions)) if clarification_response.questions else ''}"
+                    query_message = build_clarification_prompt_message(
+                        user_message=user_message,
+                        questions=[q.question for q in clarification_response.questions],
                     )
                     await self.session_service.create_chatbot_message(
                         session_id=session_id,
@@ -136,10 +120,7 @@ class ChatService:
             else:
                 self._complete_stage(clarification_stage,
                                      "completed", "Using disambiguated query")
-                # Update session context dengan jawaban klarifikasi
                 SessionContextManager.get_session_context(session_id)
-
-            # STAGE 1 — NL-TO-SQL
             try:
                 generated_sql = await self._run_nl_to_sql_stage(
                     stages=stages,
@@ -155,15 +136,9 @@ class ChatService:
                 )
             except HTTPException as error:
                 if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
-                    pipeline["execution_status"] = "degraded"
-                    return ChatResponse(
-                        session_id=session_id,
-                        message="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
-                        pipeline_stages=stages,
-                    )
+                    pipeline.execution_status = "degraded"
+                    return build_ai_unavailable_response(session_id, stages)
                 raise
-
-            # STAGE 2 — SQL VALIDATION
             validation = self._run_sql_validation_stage(
                 stages=stages,
                 generated_sql=generated_sql,
@@ -172,18 +147,9 @@ class ChatService:
                 pipeline=pipeline,
             )
             if not validation.is_valid:
-                return ChatResponse(
-                    session_id=session_id,
-                    message=(
-                        "Permintaan Anda tidak dapat diproses karena alasan keamanan. "
-                        "Silakan ajukan pertanyaan yang berbeda tentang data KPI."
-                    ),
-                    pipeline_stages=stages,
-                )
+                return build_security_blocked_response(session_id, stages)
 
             sanitized_sql = validation.sanitized_sql
-
-            # STAGE 3 — SQL EXECUTION
             query_result, rows_count = await self._run_sql_execution_stage(
                 stages=stages,
                 sanitized_sql=sanitized_sql or "",
@@ -191,8 +157,6 @@ class ChatService:
                 user_role=user_role,
                 pipeline=pipeline,
             )
-
-            # STAGE 4 — GRAPHIC GENERATION (OPSIONAL)
             graphic_results: list[GraphicResult] = []
             if visualization_decision.is_visualize:
                 graphic_results = self._run_graphic_generation_stage(
@@ -201,8 +165,6 @@ class ChatService:
                     chart_type=visualization_decision.chart_type or "bar",
                     session_id=session_id,
                 )
-
-            # STAGE 5 — RESULT ANALYSIS
             narrative = await self._run_result_analysis_stage(
                 stages=stages,
                 user_query=user_message,
@@ -213,10 +175,7 @@ class ChatService:
             )
 
             total_ms = int((time.monotonic() - total_start) * 1000)
-            graphics_payload = [
-                {"kpi_name": r.kpi_name or None, "chart_type": r.chart_type, "image_url": r.image_url}
-                for r in graphic_results
-            ] or None
+            graphics_payload = build_graphics_payload(graphic_results)
             await self.session_service.create_chatbot_message(
                 session_id=session_id,
                 message=narrative,
@@ -253,19 +212,13 @@ class ChatService:
         user_id: UUID,
         user_role: str,
         user_message: str,
-    ) -> dict[str, Any]:
-        return {
-            "session_id": session_id,
-            "user_id": user_id,
-            "user_role": user_role,
-            "user_query": user_message,
-            "generated_sql": None,
-            "wireguard_status": None,
-            "wireguard_reason": None,
-            "execution_status": None,
-            "rows_returned": None,
-            "execution_time_ms": None,
-        }
+    ) -> ChatPipelineContext:
+        return ChatPipelineContext(
+            session_id=session_id,
+            user_id=user_id,
+            user_role=user_role,
+            user_query=user_message,
+        )
 
     @staticmethod
     def _coerce_message_id(message_id: UUID | str) -> UUID:
@@ -284,10 +237,10 @@ class ChatService:
 
     @staticmethod
     async def _handle_pipeline_error(
-            pipeline: dict[str, Any],
+            pipeline: ChatPipelineContext,
         error: Exception,
     ) -> HTTPException:
-        pipeline["execution_status"] = "error"
+        pipeline.execution_status = "error"
 
         if isinstance(error, HTTPException):
             if error.status_code in (
@@ -298,7 +251,7 @@ class ChatService:
                 return error
 
             if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-                logging.error(f"Error server saat memproses query: {error}")
+                logger.error(f"Error server saat memproses query: {error}")
                 return HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Layanan chatbot sementara tidak tersedia. Silakan coba lagi.",
@@ -309,7 +262,7 @@ class ChatService:
                 detail="Permintaan tidak dapat diproses.",
             )
 
-        logging.error(f"Error tidak terduga dalam memproses query: {error}")
+        logger.error(f"Error tidak terduga dalam memproses query: {error}")
         return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi.",
@@ -321,12 +274,11 @@ class ChatService:
         user_message: str,
         user_id: UUID,
         user_role: str,
-        pipeline: dict[str, Any],
+        pipeline: ChatPipelineContext,
         addon_prompt: str | None = None,
     ) -> str:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
-            logging.error("user_message: " + user_message + "")
             column_statistics = await self.column_statistics_service.build_nl_to_sql_statistics()
             nl_prompt = build_nl_to_sql_prompt(
                 user_query=user_message,
@@ -336,8 +288,8 @@ class ChatService:
                 column_statistics=column_statistics,
             )
             generated_sql = await llm.generate_sql(nl_prompt)
-            logging.error(f"Generated SQL: {generated_sql}")
-            pipeline["generated_sql"] = generated_sql
+            logger.debug("SQL generated for chat pipeline")
+            pipeline.generated_sql = generated_sql
             self._complete_stage(stage, "success", "SQL berhasil digenerate.")
             return generated_sql
         except HTTPException as error:
@@ -376,7 +328,7 @@ class ChatService:
         generated_sql: str,
         user_id: UUID,
         user_role: str,
-        pipeline: dict[str, Any],
+        pipeline: ChatPipelineContext,
     ):
         stage = self._start_stage(stages, "sql_validation")
         validation = wireguard.validate(
@@ -384,8 +336,8 @@ class ChatService:
             user_id=user_id,
             user_role=user_role,
         )
-        pipeline["wireguard_status"] = "PASS" if validation.is_valid else "FAIL"
-        pipeline["wireguard_reason"] = validation.reason
+        pipeline.wireguard_status = "PASS" if validation.is_valid else "FAIL"
+        pipeline.wireguard_reason = validation.reason
 
         if validation.is_valid:
             self._complete_stage(
@@ -400,21 +352,21 @@ class ChatService:
         sanitized_sql: str,
         user_id: UUID,
         user_role: str,
-        pipeline: dict[str, Any],
+        pipeline: ChatPipelineContext,
     ) -> tuple[list[dict], int]:
         stage = self._start_stage(stages, "sql_execution")
         exec_start = time.monotonic()
 
-        logging.info(
+        logger.info(
             f"Menjalankan SQL untuk user_id={user_id} role={user_role}: {sanitized_sql}"
         )
 
         query_result, rows_count = await self._execute_sql(sanitized_sql)
         exec_ms = int((time.monotonic() - exec_start) * 1000)
 
-        pipeline["execution_status"] = "success"
-        pipeline["rows_returned"] = rows_count
-        pipeline["execution_time_ms"] = exec_ms
+        pipeline.execution_status = "success"
+        pipeline.rows_returned = rows_count
+        pipeline.execution_time_ms = exec_ms
         self._complete_stage(
             stage,
             "success",
@@ -486,10 +438,6 @@ class ChatService:
     async def _execute_sql(
         self, sql: str
     ) -> tuple[list[dict], int]:
-        """
-        Eksekusi SQL ke PostgreSQL dengan timeout.
-        Mengembalikan (list_of_rows, row_count).
-        """
         try:
             timeout_seconds = settings.SQL_EXECUTION_TIMEOUT
 
@@ -504,7 +452,7 @@ class ChatService:
                 detail=f"Eksekusi query melebihi batas waktu {settings.SQL_EXECUTION_TIMEOUT} detik.",
             )
         except Exception as e:
-            logging.error(f"Error saat mengeksekusi SQL: {e}")
+            logger.error(f"Error saat mengeksekusi SQL: {e}")
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Query tidak dapat dieksekusi. Silakan coba pertanyaan yang berbeda.",

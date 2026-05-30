@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from utils.constants.graphicConstants import MONTH_LABELS, SUPPORTED_CHART_TYPES, VALUE_COLUMN_HINTS
 from service.graphicService import GraphicSeervice
 
 
@@ -25,3 +26,11 @@ def test_generate_graphic_saves_png_in_session_folder(tmp_path):
     saved_file = tmp_path / result.image_url.removeprefix("/public/")
     assert saved_file.exists()
     assert saved_file.read_bytes().startswith(b"\x89PNG")
+
+
+def test_graphic_service_uses_exported_constants():
+    service = GraphicSeervice()
+
+    assert service.SUPPORTED_CHART_TYPES == SUPPORTED_CHART_TYPES
+    assert service.value_column_hints == VALUE_COLUMN_HINTS
+    assert service.month_labels == MONTH_LABELS

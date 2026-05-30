@@ -2,7 +2,6 @@
 service/kpiGroupService.py
 """
 
-import math
 from uuid import UUID
 
 from fastapi import HTTPException

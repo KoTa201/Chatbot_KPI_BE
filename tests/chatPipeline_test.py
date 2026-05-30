@@ -17,6 +17,7 @@ import service.chatService as chat_service_module
 from schema.clarificationSchema import ClarificationMessageResponse, ClarificationQuestionResponse
 from schema.wireguardSchema import ValidationResult
 from service.chatService import ChatService
+from utils.dataClass.chatPipelineTypes import ChatPipelineContext
 from service.graphicService import GraphicResult
 from service.llmService import VisualizationDecision
 
@@ -89,7 +90,12 @@ async def test_nl_to_sql_stage_only_generates_sql(monkeypatch):
         user_message="Tampilkan KPI bulan ini",
         user_id=UUID("00000000-0000-0000-0000-000000000302"),
         user_role="Owner",
-        pipeline={},
+        pipeline=ChatPipelineContext(
+            session_id=UUID("00000000-0000-0000-0000-000000000302"),
+            user_id=UUID("00000000-0000-0000-0000-000000000302"),
+            user_role="Owner",
+            user_query="Tampilkan KPI bulan ini",
+        ),
         addon_prompt="Prompt awal.",
     )
 
