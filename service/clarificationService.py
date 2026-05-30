@@ -133,6 +133,8 @@ class ClarificationService:
                 free_text_answer=answer.free_text,
             )
 
+        await self.db.commit()
+
         recheck_result = await self._recheck_ambiguity_after_refinement(
             rewritten_query=disambiguated_query,
             user_role="User",
@@ -153,6 +155,7 @@ class ClarificationService:
                     session_id=session_id,
                     ambiguity_result=recheck_result,
                 )
+                await self.db.commit()
 
         return QueryDisambiguationResult(
             original_query=source_query,
