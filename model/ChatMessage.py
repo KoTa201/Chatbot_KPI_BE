@@ -11,6 +11,7 @@ from utils.datetime import utc_now
 if TYPE_CHECKING:
     from model.ChatSession import ChatSession
     from model.ClarificationQuestion import ClarificationQuestion
+    from model.ChatMessageGraphic import ChatMessageGraphic
 
 
 class ChatMessage(Base):
@@ -21,7 +22,6 @@ class ChatMessage(Base):
     )
     message: Mapped[str] = mapped_column(Text, nullable=False)
     is_sender_chatbot: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    graphics_json: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     send_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utc_now,
@@ -41,6 +41,13 @@ class ChatMessage(Base):
         "ClarificationQuestion",
         back_populates="message_ref",
         cascade="all, delete-orphan",
+        lazy="noload",
+    )
+    graphics: Mapped[list["ChatMessageGraphic"]] = relationship(
+        "ChatMessageGraphic",
+        back_populates="message",
+        cascade="all, delete-orphan",
+        order_by="ChatMessageGraphic.display_order",
         lazy="noload",
     )
 

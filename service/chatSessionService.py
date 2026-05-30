@@ -11,7 +11,6 @@ from model import ChatSession
 from repository.chatSessionRepository import ChatSessionRepository, ChatSessionDetailRecord
 from schema.sessionSchema import (
     SessionClarificationQuestionResponse,
-    SessionDetailResponse,
     SessionGraphicItem,
     SessionMessageResponse,
 )
@@ -51,13 +50,17 @@ class ChatSessionService:
         message: str,
         graphics: list[dict] | None = None,
     ):
-        graphics_json = json.dumps(graphics, ensure_ascii=False) if graphics else None
-        return await self.session_repo.create_message(
+        chat_message = await self.session_repo.create_message(
             session_id=session_id,
             message=message,
             is_sender_chatbot=True,
-            graphics_json=graphics_json,
         )
+        if graphics:
+            await self.session_repo.create_message_graphics(
+                message_id=chat_message.message_id,
+                graphics=graphics,
+            )
+        return chat_message
 
     async def get_sessions(self, user_id: UUID) -> list:
         return await self.session_repo.get_by_user(user_id=user_id)
@@ -81,14 +84,14 @@ class ChatSessionService:
                 )
                 for question in checked_session_detail.clarification_questions_by_message_id.get(message.message_id, [])
             ]
-            graphics: list[SessionGraphicItem] = []
-            if message.graphics_json:
-                try:
-                    raw = json.loads(message.graphics_json)
-                    if isinstance(raw, list):
-                        graphics = [SessionGraphicItem(**g) for g in raw if isinstance(g, dict)]
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            graphics = [
+                SessionGraphicItem(
+                    kpi_name=g.kpi_name,
+                    chart_type=g.chart_type,
+                    image_url=g.image_url,
+                )
+                for g in checked_session_detail.graphics_by_message_id.get(message.message_id, [])
+            ]
 
             messages.append(
                 SessionMessageResponse(

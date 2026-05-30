@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from model.ChatMessage import ChatMessage
+from model.ChatMessageGraphic import ChatMessageGraphic
 from model.ChatSession import ChatSession
 from model.ClarificationQuestion import ClarificationQuestion
 from utils.datetime import utc_now
@@ -16,6 +17,7 @@ class ChatSessionDetailRecord:
     session: ChatSession
     messages: list[ChatMessage]
     clarification_questions_by_message_id: dict[uuid.UUID, list[ClarificationQuestion]]
+    graphics_by_message_id: dict[uuid.UUID, list[ChatMessageGraphic]]
 
 
 class ChatSessionRepository:
@@ -45,13 +47,11 @@ class ChatSessionRepository:
         session_id: uuid.UUID,
         message: str,
         is_sender_chatbot: bool,
-        graphics_json: str | None = None,
     ) -> ChatMessage:
         chat_message = ChatMessage(
             session_id=session_id,
             message=message,
             is_sender_chatbot=is_sender_chatbot,
-            graphics_json=graphics_json,
         )
         self.db.add(chat_message)
         await self.db.flush()
@@ -63,6 +63,21 @@ class ChatSessionRepository:
 
         await self.db.refresh(chat_message)
         return chat_message
+
+    async def create_message_graphics(
+        self,
+        message_id: uuid.UUID,
+        graphics: list[dict],
+    ) -> None:
+        for order, g in enumerate(graphics):
+            self.db.add(ChatMessageGraphic(
+                message_id=message_id,
+                kpi_name=g.get("kpi_name"),
+                chart_type=g["chart_type"],
+                image_url=g["image_url"],
+                display_order=order,
+            ))
+        await self.db.flush()
 
     async def get_by_user(self, user_id: uuid.UUID) -> list[ChatSession]:
         result = await self.db.execute(
@@ -102,10 +117,22 @@ class ChatSessionRepository:
                 continue
             questions_by_message_id.setdefault(question.message_id, []).append(question)
 
+        message_ids = [m.message_id for m in messages]
+        graphics_by_message_id: dict[uuid.UUID, list[ChatMessageGraphic]] = {}
+        if message_ids:
+            graphics_result = await self.db.execute(
+                select(ChatMessageGraphic)
+                .where(ChatMessageGraphic.message_id.in_(message_ids))
+                .order_by(ChatMessageGraphic.message_id, ChatMessageGraphic.display_order)
+            )
+            for graphic in graphics_result.scalars().all():
+                graphics_by_message_id.setdefault(graphic.message_id, []).append(graphic)
+
         return ChatSessionDetailRecord(
             session=session,
             messages=messages,
             clarification_questions_by_message_id=questions_by_message_id,
+            graphics_by_message_id=graphics_by_message_id,
         )
 
     async def update_title(self, session: ChatSession, title: str) -> Optional[ChatSession]:
