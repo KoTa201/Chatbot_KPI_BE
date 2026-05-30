@@ -5,6 +5,7 @@ Pydantic models untuk request/response endpoint authentication.
 
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -22,7 +23,7 @@ class UserCreateRequest(BaseModel):
     email: EmailStr
     full_name: str = Field(..., min_length=1, max_length=255)
     password: str = Field(..., min_length=8, max_length=128)
-    role: RoleEnum = RoleEnum.user
+    role: RoleEnum = RoleEnum.karyawan
 
     @field_validator("password")
     @classmethod
@@ -80,7 +81,7 @@ class UpdateUserRequest(BaseModel):
 
 class UserResponse(BaseModel):
     """Data user yang dikembalikan ke client (tanpa password)."""
-    id: int
+    id: UUID
     username: str
     email: str
     full_name: str
@@ -103,3 +104,38 @@ class TokenResponse(BaseModel):
 class MessageResponse(BaseModel):
     """Response generik untuk operasi yang tidak mengembalikan data."""
     message: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    expires_in: int
+    # None saat rotate hanya return user-less response
+    refresh_token: str | None = None
+    refresh_expires_in: int | None = None
+    # None saat /refresh (tidak perlu kirim ulang)
+    user: UserResponse | None = None
+
+# Tambahkan ke file schema yang sudah ada
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyResetPinRequest(BaseModel):
+    email: EmailStr
+    pin: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class ResetPasswordRequest(BaseModel):
+    reset_token: str
+    new_password: str = Field(..., min_length=8)
+
+
+class ResetTokenResponse(BaseModel):
+    reset_token: str
+    expires_in: int  # detik

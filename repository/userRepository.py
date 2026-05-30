@@ -1,116 +1,145 @@
 """
-repository/authRepository.py
-Semua operasi CRUD ke tabel users.
+repository/UserRepository.py
+Semua operasi CRUD ke tabel users + revoked token denylist.
 Tidak ada logika bisnis di sini — hanya interaksi langsung dengan ORM.
 """
 
 from typing import Optional
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from model.PasswordReset import PasswordReset
+from datetime import datetime
 
-from model import UserORM
+from model.User import RoleEnum, User
+from model.RevokedToken import RevokedToken          # ← model baru
+from utils.datetime import utc_now
 
 
-class AuthRepository:
+class UserRepository:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        self.user: User | None = None
+        self.token: RevokedToken | None = None
 
     # ------------------------------------------------------------------ #
     #  Create                                                              #
     # ------------------------------------------------------------------ #
 
-    async def create_user(self, user: UserORM) -> UserORM:
+    async def create_user(self, user: User) -> User | None:
         """Insert user baru. Kembalikan instance yang sudah ter-refresh (id terisi)."""
-        self.db.add(user)
+        self.user = user
+        self.db.add(self.user)
         await self.db.commit()
-        await self.db.refresh(user)
-        return user
+        await self.db.refresh(self.user)
+        return self.user
 
     # ------------------------------------------------------------------ #
     #  Read                                                                #
     # ------------------------------------------------------------------ #
 
-    async def get_by_id(self, user_id: int) -> Optional[UserORM]:
-        """Cari user berdasarkan primary key. Return None jika tidak ada."""
+    async def get_by_id(self, user_id: UUID) -> Optional[User]:
         result = await self.db.execute(
-            select(UserORM).where(UserORM.id == user_id)
+            select(User).where(User.id == user_id)
         )
-        return result.scalar_one_or_none()
+        self.user = result.scalar_one_or_none()
+        return self.user
 
-    async def get_by_username_or_email(self, identifier: str) -> Optional[UserORM]:
-        """
-        Cari user berdasarkan username atau email dalam satu query.
-        Deteksi otomatis: jika identifier mengandung '@' diperlakukan sebagai email,
-        selain itu sebagai username.
-        """
+    async def get_by_username_or_email(self, identifier: str) -> Optional[User]:
         if "@" in identifier:
             result = await self.db.execute(
-                select(UserORM).where(UserORM.email == identifier)
+                select(User).where(User.email == identifier)
             )
         else:
             result = await self.db.execute(
-                select(UserORM).where(UserORM.username == identifier)
+                select(User).where(User.username == identifier)
             )
         return result.scalar_one_or_none()
 
-    async def get_by_username(self, username: str) -> Optional[UserORM]:
-        """Cari user berdasarkan username (case-sensitive). Return None jika tidak ada."""
+    async def get_by_username(self, username: str) -> Optional[User]:
         result = await self.db.execute(
-            select(UserORM).where(UserORM.username == username)
-        )
-        return result.scalar_one_or_none()
-
-    async def get_by_email(self, email: str) -> Optional[UserORM]:
-        """Cari user berdasarkan email. Return None jika tidak ada."""
-        result = await self.db.execute(
-            select(UserORM).where(UserORM.email == email)
+            select(User).where(User.username == username)
         )
         return result.scalar_one_or_none()
 
     async def get_all_users(
         self,
+        page: int = 1,
         limit: int = 20,
-        offset: int = 0,
-    ) -> list[UserORM]:
-        """Ambil semua user dengan pagination, diurutkan dari terbaru."""
+        search: str | None = None,
+        role: RoleEnum | None = None,
+        status: bool | None = None,
+    ) -> list[User]:
+        offset = (page - 1) * limit
+        query = select(User)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    User.username.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                    User.email.ilike(pattern),
+                )
+            )
+        if role is not None:
+            query = query.where(User.role == role)
+        if status is not None:
+            query = query.where(User.is_active == status)
+
         result = await self.db.execute(
-            select(UserORM)
-            .order_by(UserORM.created_at.desc())
+            query
+            .order_by(User.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
-        return result.scalars().all()
+        return list(result.scalars().all())
 
-    async def count_all_users(self) -> int:
-        """Hitung total seluruh user (untuk keperluan pagination)."""
-        from sqlalchemy import func
-        result = await self.db.execute(select(func.count()).select_from(UserORM))
+    async def count_all_users(
+        self,
+        search: str | None = None,
+        role: RoleEnum | None = None,
+        status: bool | None = None,
+    ) -> int:
+        query = select(func.count()).select_from(User)
+        if search:
+            pattern = f"%{search.strip()}%"
+            query = query.where(
+                or_(
+                    User.username.ilike(pattern),
+                    User.full_name.ilike(pattern),
+                    User.email.ilike(pattern),
+                )
+            )
+        if role is not None:
+            query = query.where(User.role == role)
+        if status is not None:
+            query = query.where(User.is_active == status)
+
+        result = await self.db.execute(query)
         return result.scalar_one()
 
     # ------------------------------------------------------------------ #
     #  Update                                                              #
     # ------------------------------------------------------------------ #
 
-    async def save(self, user: UserORM) -> UserORM:
-        """
-        Simpan perubahan pada instance ORM yang sudah di-mutasi.
-        Digunakan untuk update maupun soft-delete (is_active=False).
-        """
-        self.db.add(user)
+    async def save(self, user: User) -> User:
+        self.user = user
+        self.db.add(self.user)
         await self.db.commit()
-        await self.db.refresh(user)
-        return user
+        await self.db.refresh(self.user)
+        return self.user
 
     # ------------------------------------------------------------------ #
     #  Delete                                                              #
     # ------------------------------------------------------------------ #
 
-    async def delete_user(self, user: UserORM) -> None:
-        """Hard-delete user dari database."""
-        await self.db.delete(user)
+    async def delete_user(self, user: User) -> None:
+        self.user = user
+        await self.db.delete(self.user)
         await self.db.commit()
+        self.user = None
 
     # ------------------------------------------------------------------ #
     #  Existence checks                                                    #
@@ -118,12 +147,69 @@ class AuthRepository:
 
     async def username_exists(self, username: str) -> bool:
         result = await self.db.execute(
-            select(UserORM.id).where(UserORM.username == username)
+            select(User.id).where(User.username == username)
         )
         return result.scalar_one_or_none() is not None
 
     async def email_exists(self, email: str) -> bool:
         result = await self.db.execute(
-            select(UserORM.id).where(UserORM.email == email)
+            select(User.id).where(User.email == email)
         )
         return result.scalar_one_or_none() is not None
+
+    # ------------------------------------------------------------------ #
+    #  Refresh token denylist                                              #
+    # ------------------------------------------------------------------ #
+
+    async def revoke_token(self, token: str, user_id: UUID) -> None:
+        """
+        Simpan refresh token ke denylist agar tidak bisa dipakai ulang.
+        Dipanggil saat rotate (token lama) maupun logout (token aktif).
+        Jika token sudah ada di denylist, operasi diabaikan (idempotent).
+        """
+        already_revoked = await self.is_token_revoked(token)
+        if not already_revoked:
+            self.token = RevokedToken(token=token, user_id=user_id)
+            self.db.add(self.token)
+            await self.db.commit()
+
+    async def is_token_revoked(self, token: str) -> bool:
+        """
+        Periksa apakah refresh token sudah ada di denylist.
+        Return True jika sudah direvoke, False jika masih valid.
+        """
+        result = await self.db.execute(
+            select(RevokedToken.id).where(RevokedToken.token == token)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_active_reset_pin(self, user_id: UUID) -> PasswordReset | None:
+        """Ambil PIN reset aktif (belum dipakai, belum expired)."""
+        now = utc_now()
+        result = await self.db.execute(
+            select(PasswordReset)
+            .where(
+                PasswordReset.user_id == user_id,
+                PasswordReset.expires_at > now,
+                PasswordReset.used_at.is_(None),
+            )
+            .order_by(PasswordReset.expires_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def create_reset_pin(self, record: PasswordReset) -> PasswordReset:
+        """Hapus PIN lama user (jika ada) lalu simpan yang baru."""
+        await self.db.execute(
+            delete(PasswordReset).where(
+                PasswordReset.user_id == record.user_id)
+        )
+        self.db.add(record)
+        await self.db.commit()
+        await self.db.refresh(record)
+        return record
+
+    async def mark_reset_pin_used(self, record: PasswordReset) -> None:
+        """Tandai PIN sebagai sudah dipakai."""
+        record.used_at = utc_now()
+        await self.db.commit()

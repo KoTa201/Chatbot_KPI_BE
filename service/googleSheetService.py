@@ -17,7 +17,7 @@ import pandas as pd
 from fastapi import HTTPException
 from google.oauth2.service_account import Credentials
 
-from config import settings
+from configCredidential import settings
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
@@ -30,7 +30,6 @@ BULAN_ID = {
     "september": 9, "oktober": 10, "november": 11, "desember": 12,
 }
 
-# Kata kunci yang pasti ada di baris header kolom tabel KPI
 HEADER_KEYWORDS = [
     "nama kpi", "jenis kpi", "nama aktivitas", "realisasi",
     "keterangan", "satuan target", "tanggal", "deskripsi",
@@ -38,17 +37,9 @@ HEADER_KEYWORDS = [
 
 
 class GoogleSheetService:
-    """
-    Service untuk membaca data dari Google Sheets menggunakan Service Account.
-
-    Penggunaan:
-        service = GoogleSheetService()
-        df, spreadsheet_id, sheet_name, meta = service.fetch_sheet_as_dataframe(url)
-        tabs = service.list_sheets(url)
-    """
-
     def __init__(self):
         self._client: Optional[gspread.Client] = None
+        self.google_credentials_path: str = settings.GOOGLE_CREDENTIALS_PATH
 
     # ------------------------------------------------------------------ #
     #  Public API                                                          #
@@ -59,9 +50,14 @@ class GoogleSheetService:
         sheet_url: str,
         sheet_name: Optional[str] = None,
         sheet_index: int = 0,
+        header=True,
     ) -> tuple:
         """
-        Ambil data dari Google Sheets sebagai DataFrame + metadata dari judul.
+        Ambil data dari satu sheet sebagai DataFrame + metadata.
+
+        Args:
+            header: If None, return all rows as raw DataFrame with integer columns
+                    (no header detection). Useful for KPI Master sheets.
 
         Returns:
             (DataFrame, spreadsheet_id, sheet_name_aktif, meta: dict)
@@ -72,18 +68,107 @@ class GoogleSheetService:
         worksheet = self._select_worksheet(
             spreadsheet, sheet_name, sheet_index)
 
-        all_values = worksheet.get_all_values()
-        if not all_values:
-            raise HTTPException(status_code=422, detail="Sheet kosong.")
+        if header is None:
+            return self._process_worksheet_raw(worksheet, spreadsheet_id)
+        return self._process_worksheet(worksheet, spreadsheet_id)
 
-        header_row_idx = self._find_header_row(all_values)
-        meta = self._extract_meta_from_title(
-            all_values, header_row=header_row_idx)
-        meta["header_row"] = header_row_idx
+    def fetch_all_sheets_as_dataframes(
+        self,
+        sheet_url: str,
+        skip_on_error: bool = True,
+    ) -> list[dict]:
+        """
+        Ingest SEMUA sheet/tab dalam satu spreadsheet sekaligus.
 
-        df = self._build_dataframe(all_values, header_row_idx)
+        Args:
+            sheet_url   : URL Google Sheets.
+            skip_on_error: Jika True, sheet yang gagal di-parse dilewati
+                           dan dicatat di field 'error'. Jika False,
+                           exception langsung dilempar.
 
-        return df, spreadsheet_id, worksheet.title, meta
+        Returns:
+            List of dict, satu item per sheet:
+            [
+                {
+                    "sheet_index"   : int,
+                    "sheet_name"    : str,
+                    "sheet_id"      : int,
+                    "spreadsheet_id": str,
+                    "df"            : pd.DataFrame,  # None jika error
+                    "meta"          : dict,           # None jika error
+                    "error"         : str | None,
+                },
+                ...
+            ]
+        """
+        client = self._get_client()
+        spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
+        spreadsheet = self._open_spreadsheet(client, spreadsheet_id)
+
+        try:
+            worksheets = spreadsheet.worksheets()
+        except gspread.exceptions.APIError as e:
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            detail = str(e).strip() or f"HTTP {status_code}" if status_code else "API error"
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Gagal mengambil daftar sheet dari spreadsheet ({detail}). "
+                    "Pastikan service account memiliki izin akses minimal Viewer."
+                ),
+            )
+
+        results = []
+        for i, worksheet in enumerate(worksheets):
+            entry = {
+                "sheet_index": i,
+                "sheet_name": worksheet.title,
+                "sheet_id": worksheet.id,
+                "spreadsheet_id": spreadsheet_id,
+                "df": None,
+                "meta": None,
+                "error": None,
+            }
+
+            try:
+                df, _, _, meta = self._process_worksheet(
+                    worksheet, spreadsheet_id)
+                # Fallback: jika bulan tidak terdeteksi dari konten sheet,
+                # coba ekstrak dari nama tab (worksheet.title).
+                if not meta.get("bulan"):
+                    tab_bulan, tab_bulan_num = self._extract_bulan_from_tab_name(
+                        worksheet.title)
+                    if tab_bulan:
+                        meta["bulan"] = tab_bulan
+                        meta["bulan_num"] = tab_bulan_num
+                entry["df"] = df
+                entry["meta"] = meta
+            except HTTPException as e:
+                if not skip_on_error:
+                    raise
+                entry["error"] = e.detail
+            except Exception as e:
+                if not skip_on_error:
+                    raise
+                entry["error"] = str(e)
+
+            results.append(entry)
+
+        if not results:
+            raise HTTPException(
+                status_code=422, detail="Spreadsheet tidak memiliki sheet.")
+
+        return results
+
+    def get_spreadsheet_title(self, sheet_url: str) -> str:
+        """
+        Ambil judul/nama file spreadsheet dari Google Sheets.
+        Returns: judul spreadsheet (nama file di Google Drive).
+        """
+        client = self._get_client()
+        spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
+        spreadsheet = self._open_spreadsheet(client, spreadsheet_id)
+        return spreadsheet.title
 
     def list_sheets(self, sheet_url: str) -> list:
         """Daftar semua sheet/tab dalam satu spreadsheet."""
@@ -103,11 +188,55 @@ class GoogleSheetService:
             )
 
     # ------------------------------------------------------------------ #
+    #  Core worksheet processor (dipakai oleh fetch_sheet & fetch_all)    #
+    # ------------------------------------------------------------------ #
+
+    def _process_worksheet(
+        self,
+        worksheet: gspread.Worksheet,
+        spreadsheet_id: str,
+    ) -> tuple:
+        """
+        Proses satu worksheet menjadi (DataFrame, spreadsheet_id, sheet_name, meta).
+        Dipisah dari fetch_sheet_as_dataframe agar bisa di-reuse fetch_all.
+        """
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Sheet '{worksheet.title}' kosong.",
+            )
+
+        header_row_idx = self._find_header_row(all_values)
+        meta = self._extract_meta_from_title(
+            all_values, header_row=header_row_idx)
+        meta["header_row"] = header_row_idx
+
+        df = self._build_dataframe(all_values, header_row_idx)
+
+        return df, spreadsheet_id, worksheet.title, meta
+
+    def _process_worksheet_raw(
+        self,
+        worksheet: gspread.Worksheet,
+        spreadsheet_id: str,
+    ) -> tuple:
+        """Return all rows as a raw DataFrame with integer column indices."""
+        all_values = worksheet.get_all_values()
+        if not all_values:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Sheet '{worksheet.title}' kosong.",
+            )
+        df = pd.DataFrame(all_values)
+        df = df.replace("", None)
+        return df, spreadsheet_id, worksheet.title, {}
+
+    # ------------------------------------------------------------------ #
     #  Auth                                                                #
     # ------------------------------------------------------------------ #
 
     def _get_client(self) -> gspread.Client:
-        """Lazy-init gspread client. Instance di-cache agar tidak autentikasi berulang."""
         if self._client is None:
             self._client = self._build_client()
         return self._client
@@ -115,7 +244,7 @@ class GoogleSheetService:
     def _build_client(self) -> gspread.Client:
         try:
             creds = Credentials.from_service_account_file(
-                settings.GOOGLE_CREDENTIALS_PATH,
+                self.google_credentials_path,
                 scopes=SCOPES,
             )
             return gspread.authorize(creds)
@@ -123,7 +252,7 @@ class GoogleSheetService:
             raise HTTPException(
                 status_code=500,
                 detail=(
-                    f"File credentials tidak ditemukan: '{settings.GOOGLE_CREDENTIALS_PATH}'. "
+                    f"File credentials tidak ditemukan: '{self.google_credentials_path}'. "
                     "Pastikan file JSON Service Account sudah ada dan path-nya benar di .env"
                 ),
             )
@@ -191,18 +320,11 @@ class GoogleSheetService:
 
     @staticmethod
     def _find_header_row(all_values: list[list[str]]) -> int:
-        """
-        Cari index baris yang merupakan header kolom tabel KPI.
-
-        Strategi: baris header adalah baris yang paling banyak mengandung
-        kata kunci kolom KPI dari HEADER_KEYWORDS.
-        Minimal harus match 2 kata kunci agar tidak salah deteksi.
-        """
         best_row = None
         best_score = 0
 
         for i, row in enumerate(all_values):
-            row_text = " ".join(str(c).strip().lower() for c in row if c)
+            row_text = " ".join(c.strip().lower() for c in row if c)
             score = sum(1 for kw in HEADER_KEYWORDS if kw in row_text)
             if score > best_score:
                 best_score = score
@@ -224,15 +346,50 @@ class GoogleSheetService:
     # ------------------------------------------------------------------ #
 
     @staticmethod
+    def _extract_bulan_from_tab_name(tab_name: str) -> tuple:
+        """
+        Ekstrak nama bulan dan nomor bulan dari nama tab (worksheet.title).
+
+        Mendukung nama bulan penuh (Januari–Desember) dan singkatan umum
+        (Jan, Feb, Mar, Apr, Mei/May, Jun, Jul, Agu/Aug, Sep, Okt/Oct,
+        Nov, Des/Dec) yang muncul di mana saja dalam teks tab.
+
+        Returns:
+            (bulan_str, bulan_num) atau (None, None) jika tidak ditemukan.
+        """
+        _TAB_ALIASES: dict[str, tuple[str, int]] = {
+            # Nama penuh
+            "januari": ("Januari", 1),   "februari": ("Februari", 2),
+            "maret": ("Maret", 3),        "april": ("April", 4),
+            "mei": ("Mei", 5),            "juni": ("Juni", 6),
+            "juli": ("Juli", 7),          "agustus": ("Agustus", 8),
+            "september": ("September", 9), "oktober": ("Oktober", 10),
+            "november": ("November", 11), "desember": ("Desember", 12),
+            # Singkatan Inggris
+            "jan": ("Januari", 1),  "feb": ("Februari", 2),
+            "mar": ("Maret", 3),    "apr": ("April", 4),
+            "may": ("Mei", 5),      "jun": ("Juni", 6),
+            "jul": ("Juli", 7),     "aug": ("Agustus", 8),
+            "sep": ("September", 9), "oct": ("Oktober", 10),
+            "nov": ("November", 11), "dec": ("Desember", 12),
+            # Singkatan Indonesia
+            "agu": ("Agustus", 8),  "okt": ("Oktober", 10),
+            "des": ("Desember", 12),
+        }
+        normalized = tab_name.strip().lower()
+        # Coba exact match terlebih dulu, lalu partial match
+        if normalized in _TAB_ALIASES:
+            return _TAB_ALIASES[normalized]
+        for key, val in _TAB_ALIASES.items():
+            if re.search(r'\b' + re.escape(key) + r'\b', normalized):
+                return val
+        return None, None
+
+    @staticmethod
     def _extract_meta_from_title(
         all_values: list[list[str]],
         header_row: int,
     ) -> dict:
-        """
-        Cari baris judul di atas header_row dan ekstrak nama_orang & periode.
-
-        Format:  KPI TRACKER – PIRMADI S  |  JANUARI 2025
-        """
         meta = {
             "nama_orang": None,
             "bulan":      None,
@@ -241,7 +398,7 @@ class GoogleSheetService:
         }
 
         for row in all_values[:header_row]:
-            row_text = " ".join(str(c).strip() for c in row if c)
+            row_text = " ".join(c.strip() for c in row if c)
 
             if "KPI TRACKER" not in row_text.upper():
                 continue
@@ -265,7 +422,7 @@ class GoogleSheetService:
                 meta["bulan_num"] = BULAN_ID.get(bulan_str.lower())
                 meta["tahun"] = int(period_match.group(2))
 
-            break  # Sudah ketemu baris judul
+            break
 
         return meta
 
@@ -278,7 +435,6 @@ class GoogleSheetService:
         all_values: list[list[str]],
         header_row_idx: int,
     ) -> pd.DataFrame:
-        """Bangun DataFrame bersih dari all_values mulai baris setelah header."""
         if header_row_idx >= len(all_values) - 1:
             raise HTTPException(
                 status_code=422,
@@ -300,11 +456,6 @@ class GoogleSheetService:
 
     @staticmethod
     def _clean_headers(raw_headers: list) -> list:
-        """
-        Bersihkan header kosong/duplikat.
-        - Kosong    -> '_empty_N'  (di-drop setelah jadi DataFrame)
-        - Duplikat  -> suffix '_2', '_3', dst
-        """
         seen = {}
         cleaned = []
 
