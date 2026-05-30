@@ -93,10 +93,9 @@ class ClarificationService:
         self,
         session_id: UUID,
         clarification_answers: list[ClarificationAnswerItem],
-        user_role: str = "",
+        user_role: str = "karyawan",
         additional_constraints: str | None = None,
         original_query: str | None = None,
-        refinement_round: int = 1,
     ) -> QueryDisambiguationResult:
         """
         Handle jawaban klarifikasi dari pengguna.
@@ -144,14 +143,13 @@ class ClarificationService:
 
         await self.db.commit()
 
+        next_clarification = None
         recheck_result = await self._recheck_ambiguity_after_refinement(
             rewritten_query=disambiguated_query,
             user_role=user_role,
             preference_tree=preference_tree,
-            refinement_round=refinement_round,
         )
-        next_clarification = None
-        if recheck_result and recheck_result.is_ambiguous and refinement_round < 3:
+        if recheck_result and recheck_result.is_ambiguous:
             answered_questions = {pair.question.strip().casefold() for pair in session_qa_set}
             recheck_result.detected_ambiguities = [
                 ambiguity
@@ -174,7 +172,6 @@ class ClarificationService:
             needs_more_clarification=next_clarification is not None,
             clarification_message=next_clarification,
             preference_tree=preference_tree.serialize(),
-            refinement_round=refinement_round,
         )
 
     @staticmethod
@@ -301,10 +298,8 @@ class ClarificationService:
         rewritten_query: str,
         user_role: str,
         preference_tree: PreferenceTree,
-        refinement_round: int,
     ):
         evidence_context = (
-            f"Refinement round: {refinement_round}\n"
             f"Serialized preference tree: {json.dumps(preference_tree.serialize(), ensure_ascii=False)}"
         )
         try:
@@ -347,7 +342,7 @@ class ClarificationService:
         self,
         session_id: UUID,
         ambiguity_result,
-        message_id: UUID| None = None,
+        message_id: UUID | None = None,
     ) -> ClarificationMessageResponse | None:
         if not ambiguity_result or not ambiguity_result.is_ambiguous:
             return None
