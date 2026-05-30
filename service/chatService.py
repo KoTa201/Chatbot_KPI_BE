@@ -115,14 +115,18 @@ class ChatService:
                     self._complete_stage(
                         clarification_stage, "completed", "Clarification question generated")
 
+                    query_message = (
+                        f"Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait '{user_message}', silakan jawab pertanyaan berikut."
+                        f"{chr(10) + chr(10).join(f'{i + 1}. {q.question}' for i, q in enumerate(clarification_response.questions)) if clarification_response.questions else ''}"
+                    )
                     await self.session_service.create_chatbot_message(
                         session_id=session_id,
-                        message=f"Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait '${user_message}', silakan jawab pertanyaan Berikut.",
+                        message=query_message,
                     )
                     await self.db.commit()
                     return ChatResponse(
                         session_id=session_id,
-                        message=clarification_response.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                        message=query_message,
                         clarification_questions=clarification_response.questions,
                         pipeline_stages=stages,
                     )

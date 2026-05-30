@@ -19,27 +19,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "clarification_questions",
-        sa.Column("selected_answer", sa.String(length=255), nullable=True),
+    op.execute(
+        "ALTER TABLE clarification_questions "
+        "ADD COLUMN IF NOT EXISTS selected_answer VARCHAR(255)"
     )
-    op.add_column(
-        "clarification_questions",
-        sa.Column("free_text_answer", sa.String(length=255), nullable=True),
+    op.execute(
+        "ALTER TABLE clarification_questions "
+        "ADD COLUMN IF NOT EXISTS free_text_answer VARCHAR(255)"
     )
-    op.add_column(
-        "clarification_questions",
-        sa.Column(
-            "session_id",
-            postgresql.UUID(as_uuid=True),
-            sa.ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
-            nullable=True,
-        ),
+    op.execute(
+        "ALTER TABLE clarification_questions "
+        "ADD COLUMN IF NOT EXISTS session_id UUID "
+        "REFERENCES chat_sessions(session_id) ON DELETE CASCADE"
     )
     op.create_index(
         "ix_clarification_questions_session_id",
         "clarification_questions",
         ["session_id"],
+        if_not_exists=True,
     )
 
 

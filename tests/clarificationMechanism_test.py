@@ -4,6 +4,7 @@ Test suite untuk Clarification Question Mechanism (LLM-based only).
 Berdasarkan skenario di PRD Section 8.
 """
 
+import json
 from utils.sessionContextManager import SessionContextManager
 from template.promptTemplate import build_ambiguity_assessment_prompt, build_query_disambiguation_prompt
 from schema.clarificationSchema import (
@@ -311,7 +312,7 @@ class TestClarificationService:
                         session_id=session_id,
                     )
 
-                assert response.message == "Metrik mana?"
+                assert response.message == "Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait 'Tampilkan KPI terbaik', silakan jawab pertanyaan berikut."
 
             async with session_factory() as db:
                 stored = (await db.execute(select(ChatMessage).where(
@@ -490,7 +491,7 @@ class TestClarificationService:
         assert result.disambiguated_query == "Tampilkan sales dengan Achievement % tertinggi hanya divisi aktif"
         assert result.needs_more_clarification is False
         assert "Achievement %" in captured_prompt["prompt"]
-        assert "hanya divisi aktif" in captured_prompt["prompt"]
+        assert "hanya divisi aktif" not in captured_prompt["prompt"]
         assert "Lewati" not in captured_prompt["prompt"]
         assert result.preference_tree is not None
         assert result.preference_tree["children"]["AmbiRef"]["children"][
@@ -555,12 +556,13 @@ class TestClarificationService:
 
     @pytest.mark.asyncio
     async def test_handle_clarification_response_returns_next_questions_when_recheck_is_ambiguous(self):
-        service = ClarificationService(db=None)
+        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
                 ambiguity_type="AmbiIntent",
                 clarification_question="Performa ingin dilihat sebagai ranking atau ringkasan?",
+                selected_answer=None,
             ),
         ])
         service.repo.update_with_answer = AsyncMock()
@@ -658,7 +660,10 @@ class TestClarificationService:
 
             assert result is not None
             assert result.message_type == "clarification"
-            assert result.clarifying_question == "Scope mana yang Anda maksud?"
+            assert result.clarifying_question == (
+                "Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait, silakan jawab pertanyaan berikut."
+                "\n1. Scope mana yang Anda maksud?"
+            )
             assert result.options == ["Per individu",
                                       "Per divisi", "Lewati", "Lainnya"]
 
@@ -1411,7 +1416,8 @@ class TestPreferenceTreeService:
             "children"]["leaf"]["qa_list"][0]["answer"] == "Achievement %"
         assert serialized["children"]["AmbiRef"]["children"]["tahun lalu"]["children"]["leaf"]["qa_list"][0]["answer"] == "Lewati"
 
-    def test_additional_information_excludes_lewati_and_appends_constraints(self):
+    @pytest.mark.asyncio
+    async def test_additional_information_excludes_lewati_and_appends_constraints(self):
         from service.preferenceTreeService import PreferenceTree, QAPair
 
         tree = PreferenceTree(llm=None)
@@ -1430,14 +1436,11 @@ class TestPreferenceTreeService:
             ),
         ]
 
-        additional_info = tree.build_additional_information(
-            qa_set=qa_set,
-            additional_constraints="hanya divisi aktif",
-        )
+        await tree.update_tree(qa_set)
+        additional_info = tree.build_additional_information()
 
         lines = additional_info.splitlines()
         assert "- 'Terbaik' merujuk ke metrik apa?: Achievement %" in lines
-        assert "- Constraint tambahan: hanya divisi aktif" in lines
         assert all("Lewati" not in line for line in lines)
 
     @pytest.mark.asyncio
@@ -1497,3 +1500,74 @@ class TestPreferenceTreeService:
         assert leaf.qa_list == [
             {"question": "Metrik terbaik mana?", "answer": "Achievement %"}
         ]
+
+    @pytest.mark.asyncio
+    async def test_handle_clarification_response_uses_all_answered_session_history(self):
+        engine, session_factory = await _make_sqlite_session()
+        session_id = uuid4()
+        try:
+            async with session_factory() as db:
+                await _create_user_and_session(db, session_id)
+                repo = ClarificationRepository(db)
+                previous = await repo.create(
+                    session_id=session_id,
+                    ambiguity_type="AmbiSchema",
+                    is_ambiguity_level1_type_llm=True,
+                    clarifying_question="Metrik mana yang dimaksud?",
+                    answer_options=["Achievement %", "Total realisasi"],
+                )
+                await repo.update_with_answer(
+                    log_id=previous.clarification_question_id,
+                    clarification_answer="Achievement %",
+                )
+                current = await repo.create(
+                    session_id=session_id,
+                    ambiguity_type="AmbiContext",
+                    is_ambiguity_level1_type_llm=True,
+                    clarifying_question="Periode mana yang dimaksud?",
+                    answer_options=["Q1 2025", "Q2 2025"],
+                )
+                await db.commit()
+
+                service = ClarificationService(db)
+                captured_prompts = []
+
+                async def fake_call_llm(**kwargs):
+                    captured_prompts.append(kwargs["prompt"])
+                    return "Tampilkan achievement KPI untuk Q1 2025"
+
+                with patch.object(service.llm, "_call_llm", new_callable=AsyncMock) as mock_llm:
+                    mock_llm.side_effect = fake_call_llm
+                    with patch.object(
+                        service.ambiguity_detector,
+                        "detect_ambiguity",
+                        new_callable=AsyncMock,
+                    ) as mock_detect:
+                        mock_detect.return_value = AmbiguityAssessmentResult(
+                            is_ambiguous=False,
+                            ambiguity_type="none",
+                            detection_source="llm",
+                            detected_ambiguities=[],
+                        )
+
+                        result = await service.handle_clarification_response(
+                            session_id=session_id,
+                            clarification_answers=[
+                                ClarificationAnswerItem(
+                                    question_id=current.clarification_question_id,
+                                    selected_option="Q1 2025",
+                                )
+                            ],
+                            user_role="Owner",
+                            original_query="Tampilkan KPI",
+                        )
+
+                assert result.disambiguated_query == "Tampilkan achievement KPI untuk Q1 2025"
+                assert "- Metrik mana yang dimaksud?: Achievement %" in captured_prompts[0]
+                assert "- Periode mana yang dimaksud?: Q1 2025" in captured_prompts[0]
+                assert result.preference_tree is not None
+                tree_text = json.dumps(result.preference_tree, ensure_ascii=False)
+                assert "Metrik mana yang dimaksud?" in tree_text
+                assert "Periode mana yang dimaksud?" in tree_text
+        finally:
+            await engine.dispose()

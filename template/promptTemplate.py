@@ -100,16 +100,6 @@ def build_nl_to_sql_prompt(
     Menyertakan: pertanyaan asli, schema, statistik kolom, contoh data, few-shot, konteks user.
     """
 
-    # Tentukan scope akses berdasarkan role
-    if user_role == "Karyawan":
-        data_access_scope = "Prioritaskan data milik user yang sedang login."
-    elif user_role == "kepala_divisi":
-        data_access_scope = "Semua karyawan (semua divisi)"
-    elif user_role == "Owner":
-        data_access_scope = "Semua karyawan dan semua divisi (akses penuh read-only)"
-    else:  # Admin
-        data_access_scope = "Semua data (akses penuh read-only)"
-
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
     column_statistics_block = (column_statistics or "").strip() or "Statistik kolom belum tersedia. Jika statistik tidak tersedia, tetap gunakan schema database dan pertanyaan asli pengguna; jangan mengarang nilai unik, mean, min, max, non-zero, atau non-null."
 
@@ -148,8 +138,9 @@ def build_nl_to_sql_prompt(
     
     [CONTEXT PENGGUNA]
     Role: {user_role}
-    Karyawan ID: {user_id}
-    Akses data: {data_access_scope}
+    
+    [TAHUN SEKARANG]
+    {datetime.now().year}
     
     SQL:"""
 
@@ -209,6 +200,7 @@ def build_analysis_prompt(
     - Kolom achieve, partial, dan fail adalah deskripsi threshold. Gunakan sebagai konteks penjelasan, bukan sebagai label wajib yang harus muncul di keterangan.
     - Jangan menyatakan status tidak diketahui hanya karena keterangan tidak memuat kata ACHIEVE jika realisasi dan target membuktikan target tercapai.
     - Jika realisasi dan target tidak bisa dibandingkan secara pasti, sebutkan keterbatasan singkat dan tampilkan data mentah yang relevan.
+    - jika user meminta grafik, tidak usah ditanggapi, jangan menampilkan grafik.
 
     [PERTANYAAN PENGGUNA]
     {user_query}
@@ -218,6 +210,8 @@ def build_analysis_prompt(
     
     [DATA MENTAH — {row_count_hint} — {truncation_note}]
     {result_str}
+    
+
     
     [MULAI RESPONS]"""
 

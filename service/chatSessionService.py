@@ -1,14 +1,12 @@
-
-
 import json
-
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from model import ChatSession
-from repository.chatSessionRepository import ChatSessionRepository, ChatSessionDetailRecord
+from repository.chatSessionRepository import ChatSessionRepository
+from repository.chatMessageRepository import ChatMessageRepository, ChatSessionDetailRecord
 from schema.sessionSchema import (
     SessionClarificationQuestionResponse,
     SessionGraphicItem,
@@ -20,6 +18,7 @@ class ChatSessionService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.session_repo = ChatSessionRepository(db)
+        self.message_repo = ChatMessageRepository(db)
 
     async def create_session_if_missing(
         self,
@@ -38,7 +37,7 @@ class ChatSessionService:
             )
 
     async def create_user_message(self, session_id: UUID, message: str):
-        return await self.session_repo.create_message(
+        return await self.message_repo.create(
             session_id=session_id,
             message=message,
             is_sender_chatbot=False,
@@ -50,13 +49,13 @@ class ChatSessionService:
         message: str,
         graphics: list[dict] | None = None,
     ):
-        chat_message = await self.session_repo.create_message(
+        chat_message = await self.message_repo.create(
             session_id=session_id,
             message=message,
             is_sender_chatbot=True,
         )
         if graphics:
-            await self.session_repo.create_message_graphics(
+            await self.message_repo.create_graphics(
                 message_id=chat_message.message_id,
                 graphics=graphics,
             )
@@ -66,7 +65,7 @@ class ChatSessionService:
         return await self.session_repo.get_by_user(user_id=user_id)
 
     async def get_session_detail(self, session_id: UUID, user_id: UUID) -> dict:
-        session_detail = await self.session_repo.get_detail_by_id(session_id)
+        session_detail = await self.message_repo.get_detail_by_session_id(session_id)
         checked_session_detail = self._check_session_detail_or_404(session_detail)
         self._check_user_access(checked_session_detail, user_id)
 

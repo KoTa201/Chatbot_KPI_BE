@@ -163,7 +163,10 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
         first_message="Siapa yang paling perform?",
         chatbot_id=UUID("00000000-0000-0000-0000-000000000901"),
     )
-    assert response.message == "Anda ingin data per individu atau per divisi?"
+    assert response.message == (
+        "Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait 'Siapa yang paling perform?', silakan jawab pertanyaan berikut."
+        "\n1. Anda ingin data per individu atau per divisi?"
+    )
     assert response.clarification_questions is not None
     assert response.clarification_questions[0].options == ["Per individu", "Per divisi"]
     assert not hasattr(response, "clarification_message_answer_options")

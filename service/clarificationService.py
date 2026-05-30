@@ -40,6 +40,11 @@ class ClarificationService:
         self.llm = LLMService()
         self.repo = ClarificationRepository(db)
 
+    @staticmethod
+    def _effective_answer(answer: ClarificationAnswerItem) -> str:
+        """Extract effective answer from ClarificationAnswerItem."""
+        return answer.free_text if answer.selected_option == "Lainnya" and answer.free_text else answer.selected_option
+
     async def process_user_query(
         self,
         user_query: str,
@@ -88,6 +93,7 @@ class ClarificationService:
         self,
         session_id: UUID,
         clarification_answers: list[ClarificationAnswerItem],
+        user_role: str = "",
         additional_constraints: str | None = None,
         original_query: str | None = None,
         refinement_round: int = 1,
@@ -103,19 +109,22 @@ class ClarificationService:
 
         log_by_id = {str(log.clarification_question_id): log for log in logs}
         missing = [
-            answer.question_id for answer in clarification_answers if answer.question_id not in log_by_id]
+            str(answer.question_id) for answer in clarification_answers if str(answer.question_id) not in log_by_id]
         if missing:
             raise ValueError(
                 f"Pertanyaan klarifikasi tidak ditemukan: {', '.join(missing)}")
 
         source_query = original_query or ""
-        qa_set = self._build_qa_set(clarification_answers, log_by_id)
+
+        # Build current QA set from submitted answers only
+        current_qa_set = self._build_qa_set(clarification_answers, log_by_id)
+
+        # Build full session QA set including all answered logs + current answers
+        session_qa_set = self._build_session_qa_set(logs, current_qa_set)
+
         preference_tree = PreferenceTree(llm=self.llm)
-        await preference_tree.update_tree(qa_set)
-        additional_information = preference_tree.build_additional_information(
-            qa_set=qa_set,
-            additional_constraints=additional_constraints,
-        )
+        await preference_tree.update_tree(session_qa_set)
+        additional_information = preference_tree.build_additional_information()
 
         logger.info("[ClarificationService] Disambiguating query...")
         disambiguated_query = await self._disambiguate_query(
@@ -126,7 +135,7 @@ class ClarificationService:
         )
 
         for answer in clarification_answers:
-            effective_answer = answer.free_text if answer.selected_option == "Lainnya" and answer.free_text else answer.selected_option
+            effective_answer = ClarificationService._effective_answer(answer)
             await self.repo.update_with_answer(
                 log_id=answer.question_id,
                 clarification_answer=effective_answer,
@@ -135,13 +144,13 @@ class ClarificationService:
 
         recheck_result = await self._recheck_ambiguity_after_refinement(
             rewritten_query=disambiguated_query,
-            user_role="User",
+            user_role=user_role,
             preference_tree=preference_tree,
             refinement_round=refinement_round,
         )
         next_clarification = None
         if recheck_result and recheck_result.is_ambiguous and refinement_round < 3:
-            answered_questions = {pair.question.strip().casefold() for pair in qa_set}
+            answered_questions = {pair.question.strip().casefold() for pair in session_qa_set}
             recheck_result.detected_ambiguities = [
                 ambiguity
                 for ambiguity in recheck_result.detected_ambiguities
@@ -153,6 +162,7 @@ class ClarificationService:
                     session_id=session_id,
                     ambiguity_result=recheck_result,
                 )
+                await self.db.commit()
 
         return QueryDisambiguationResult(
             original_query=source_query,
@@ -172,8 +182,8 @@ class ClarificationService:
     ) -> list[QAPair]:
         qa_set: list[QAPair] = []
         for answer in clarification_answers:
-            log = log_by_id[answer.question_id]
-            effective_answer = answer.free_text if answer.selected_option == "Lainnya" and answer.free_text else answer.selected_option
+            log = log_by_id[str(answer.question_id)]
+            effective_answer = ClarificationService._effective_answer(answer)
             qa_set.append(
                 QAPair(
                     level1=getattr(log, "ambiguity_type", None) or "unknown",
@@ -184,6 +194,60 @@ class ClarificationService:
                 )
             )
         return qa_set
+
+    @staticmethod
+    def _build_session_qa_set(
+        logs: list[object],
+        current_qa_set: list[QAPair],
+    ) -> list[QAPair]:
+        """
+        Build full-session QAPairs from all answered logs + current answers.
+        Current answers override same question from logs.
+        Only include logs where selected_answer exists.
+        """
+        current_by_question = {
+            pair.question.strip().casefold(): pair
+            for pair in current_qa_set
+        }
+        session_pairs: list[QAPair] = []
+        seen_questions: set[str] = set()
+
+        # Process logs in reverse order (most recent first)
+        for log in reversed(logs):
+            question = (getattr(log, "clarification_question", None) or "").strip()
+            if not question:
+                continue
+            key = question.casefold()
+
+            # If current answer exists for this question, use it
+            if key in current_by_question:
+                pair = current_by_question[key]
+            else:
+                # Otherwise, use log's answer if it exists
+                selected_answer = str(getattr(log, "selected_answer", None))
+                if selected_answer is None:
+                    continue
+                pair = QAPair(
+                    level1=getattr(log, "ambiguity_type", None) or "unknown",
+                    level2=question,
+                    question=question,
+                    answer=selected_answer,
+                )
+
+            # Skip if we've already seen this question
+            if key in seen_questions:
+                continue
+            session_pairs.append(pair)
+            seen_questions.add(key)
+
+        # Add any current answers that weren't in logs
+        for pair in current_qa_set:
+            key = pair.question.strip().casefold()
+            if key not in seen_questions:
+                session_pairs.append(pair)
+                seen_questions.add(key)
+
+        return session_pairs
 
     async def _disambiguate_query(
         self,
@@ -317,10 +381,15 @@ class ClarificationService:
                 )
             )
 
+        query_message = (
+            f"Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait, silakan jawab pertanyaan berikut."
+            f"{chr(10) + chr(10).join(f'{i + 1}. {q.question}' for i, q in enumerate(questions)) if questions else ''}"
+        )
+
         return ClarificationMessageResponse(
             session_id=session_id,
             message_type="clarification",
-            clarifying_question=questions[0].question if questions else None,
+            clarifying_question=query_message,
             options=questions[0].options if questions else None,
             questions=questions,
         )
@@ -373,4 +442,8 @@ class ClarificationService:
             for log in logs
             if log.clarifying_question  # Only clarifications, not direct answers
         ]
+
+
+
+
 

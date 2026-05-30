@@ -7,7 +7,7 @@ Logika bisnis authentication:
 - Dependency FastAPI untuk mendapatkan current user dari token
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Optional
 import uuid
 
