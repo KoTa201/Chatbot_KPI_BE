@@ -7,6 +7,7 @@ from .KPIMaster import KPIMaster
 from .ChatSession import ChatSession
 from .ChatMessage import ChatMessage
 from .ClarificationQuestion import ClarificationQuestion
+from .ClarificationAnswerOption import ClarificationAnswerOption
 from .PasswordReset import PasswordReset
 from .RevokedToken import RevokedToken
 from .SchedulerConfig import SchedulerConfigModel

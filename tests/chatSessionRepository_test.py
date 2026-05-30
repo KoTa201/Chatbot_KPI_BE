@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from databaseConfig import Base
 from model.ChatMessage import ChatMessage
 from model.ChatSession import ChatSession
+from model.ClarificationAnswerOption import ClarificationAnswerOption
 from model.ClarificationQuestion import ClarificationQuestion
 from repository.chatMessageRepository import ChatMessageRepository
 
@@ -90,9 +91,13 @@ async def test_get_detail_returns_messages_with_clarification_questions():
                 ambiguity_type="level1",
                 is_ambiguity_level1_type_llm=True,
                 clarification_question="KPI mana yang dimaksud?",
-                answer_options='["Sales", "HR"]',
             )
             db_session.add(question)
+            await db_session.flush()
+            db_session.add_all([
+                ClarificationAnswerOption(clarification_question_id=question.clarification_question_id, option_text="Sales", option_order=0),
+                ClarificationAnswerOption(clarification_question_id=question.clarification_question_id, option_text="HR", option_order=1),
+            ])
             await db_session.commit()
 
             detail = await ChatMessageRepository(db_session).get_detail_by_session_id(session_id)
@@ -103,7 +108,9 @@ async def test_get_detail_returns_messages_with_clarification_questions():
                 "KPI saya gimana?",
                 "KPI mana yang dimaksud?",
             ]
-            assert detail.clarification_questions_by_message_id[user_message.message_id][0].clarification_question == "KPI mana yang dimaksud?"
+            loaded_question = detail.clarification_questions_by_message_id[user_message.message_id][0]
+            assert loaded_question.clarification_question == "KPI mana yang dimaksud?"
+            assert [option.option_text for option in loaded_question.answer_options] == ["Sales", "HR"]
             assert detail.clarification_questions_by_message_id.get(bot_message.message_id, []) == []
     finally:
         await engine.dispose()

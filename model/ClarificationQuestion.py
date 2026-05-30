@@ -11,6 +11,7 @@ from utils.datetime import utc_now
 
 if TYPE_CHECKING:
     from model.ChatMessage import ChatMessage
+    from model.ClarificationAnswerOption import ClarificationAnswerOption
 
 
 class ClarificationQuestion(Base):
@@ -22,7 +23,6 @@ class ClarificationQuestion(Base):
     ambiguity_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_ambiguity_level1_type_llm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     clarification_question: Mapped[str] = mapped_column(Text, nullable=False)
-    answer_options: Mapped[str | None] = mapped_column(Text, nullable=True)
     selected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     free_text_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -45,6 +45,14 @@ class ClarificationQuestion(Base):
 
     message_ref: Mapped["ChatMessage"] = relationship(
         "ChatMessage", back_populates="clarification_questions", lazy="noload"
+    )
+
+    answer_options: Mapped[list["ClarificationAnswerOption"]] = relationship(
+        "ClarificationAnswerOption",
+        back_populates="clarification_question",
+        cascade="all, delete-orphan",
+        order_by="ClarificationAnswerOption.option_order",
+        lazy="selectin",
     )
 
     @property

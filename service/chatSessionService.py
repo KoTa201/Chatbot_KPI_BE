@@ -1,4 +1,3 @@
-import json
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +75,7 @@ class ChatSessionService:
                     id=question.clarification_question_id,
                     ambiguity_type=question.ambiguity_type,
                     question=question.clarification_question,
-                    options=self._parse_options(question.answer_options),
+                    options=[option.option_text for option in question.answer_options],
                     selected_answer=question.selected_answer,
                     free_text_answer=question.free_text_answer,
                     created_at=question.created_at,
@@ -172,14 +171,3 @@ class ChatSessionService:
                 detail="Anda tidak memiliki akses ke session ini.",
             )
 
-    @staticmethod
-    def _parse_options(answer_options: str | None) -> list[str]:
-        if not answer_options:
-            return []
-        try:
-            options = json.loads(answer_options)
-        except json.JSONDecodeError:
-            return []
-        if not isinstance(options, list):
-            return []
-        return [str(option) for option in options]

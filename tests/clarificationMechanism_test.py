@@ -27,6 +27,7 @@ from sqlalchemy.pool import StaticPool
 from databaseConfig import Base
 from model.ChatMessage import ChatMessage
 from model.ChatSession import ChatSession
+from model.ClarificationAnswerOption import ClarificationAnswerOption
 from model.ClarificationQuestion import ClarificationQuestion
 from model.User import User, RoleEnum
 from service.ambiguityDetectorService import AmbiguityDetectorService
@@ -97,6 +98,28 @@ def test_clarification_question_has_no_user_answer_column():
     from model.ClarificationQuestion import ClarificationQuestion
 
     assert ClarificationQuestion.__table__.columns.get("user_answer") is None
+
+
+def test_clarification_question_has_no_answer_options_column():
+    """ClarificationQuestion no longer stores serialized answer options."""
+    from model.ClarificationQuestion import ClarificationQuestion
+
+    assert ClarificationQuestion.__table__.columns.get("answer_options") is None
+
+
+def test_clarification_answer_option_table_shape():
+    """Clarification answer options are stored as ordered child rows."""
+    from model.ClarificationAnswerOption import ClarificationAnswerOption
+
+    columns = ClarificationAnswerOption.__table__.columns
+
+    assert columns.get("id") is not None
+    assert columns.get("clarification_question_id") is not None
+    assert columns.get("option_text") is not None
+    assert columns.get("option_order") is not None
+    assert columns["clarification_question_id"].nullable is False
+    assert columns["option_text"].nullable is False
+    assert columns["option_order"].nullable is False
 
 
 def test_clarification_question_response_excludes_ambiguous_phrase():
@@ -411,7 +434,6 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_handle_clarification_response_rewrites_from_batched_answers(self):
         service = ClarificationService(db=None)
-        service.db = AsyncMock()
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -450,7 +472,6 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_handle_clarification_response_uses_preference_tree_additional_information(self):
         service = ClarificationService(db=None)
-        service.db = AsyncMock()
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -502,7 +523,6 @@ class TestClarificationService:
     @pytest.mark.asyncio
     async def test_handle_clarification_response_does_not_repeat_answered_questions(self):
         service = ClarificationService(db=None)
-        service.db = AsyncMock()
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -1071,21 +1091,43 @@ async def test_detector_accepts_ambisource_question_set_items():
         "is_ambiguity_level1_type_llm") is True
 
 
+
+
+@pytest.mark.asyncio
+async def test_clarification_repository_persists_answer_options_as_ordered_rows():
+    """ClarificationRepository.create persists answer_options as ordered ClarificationAnswerOption rows."""
+    engine, session_factory = await _make_sqlite_session()
+    session_id = uuid4()
+    try:
+        async with session_factory() as db:
+            await _create_user_and_session(db, session_id)
+            repo = ClarificationRepository(db)
+            question = await repo.create(
+                session_id=session_id,
+                ambiguity_type="AmbiSchema",
+                is_ambiguity_level1_type_llm=True,
+                clarifying_question="Metrik mana yang dimaksud?",
+                answer_options=["Achievement %", "Realisasi", "Lewati", "Lainnya"],
+            )
+
+            options = (await db.execute(
+                select(ClarificationAnswerOption)
+                .where(ClarificationAnswerOption.clarification_question_id == question.clarification_question_id)
+                .order_by(ClarificationAnswerOption.option_order)
+            )).scalars().all()
+
+            assert [opt.option_text for opt in options] == ["Achievement %", "Realisasi", "Lewati", "Lainnya"]
+            assert [opt.option_order for opt in options] == [0, 1, 2, 3]
+    finally:
+        await engine.dispose()
+
+
 def test_clarification_repository_preserves_text_answer():
     repo = ClarificationRepository(db=None)
 
     assert repo._serialize_answer("Achievement %") == "Achievement %"
     assert repo._serialize_answer("Lewati") == "Lewati"
     assert repo._serialize_answer(None) is None
-
-
-def test_clarification_repository_serializes_options_as_json():
-    repo = ClarificationRepository(db=None)
-
-    serialized = repo._serialize_options(
-        ["Achievement %", "Lewati", "Lainnya"])
-
-    assert serialized == '["Achievement %", "Lewati", "Lainnya"]'
 
 
 @pytest.mark.asyncio
@@ -1154,7 +1196,7 @@ def test_nl_to_sql_prompt_includes_addon_prompt_constraint():
         addon_prompt="Jawab hanya untuk KPI aktif.",
     )
 
-    assert "[Konfigurasi Chatbot Tambahan]" in prompt
+    assert "[KONSTRAINT CHATBOT AKTIF]" in prompt
     assert "Jawab hanya untuk KPI aktif." in prompt
 
 
@@ -1205,7 +1247,7 @@ def test_analysis_prompt_includes_addon_prompt_constraint():
         addon_prompt="Gunakan nada formal.",
     )
 
-    assert "[Konfigurasi Chatbot Tambahan]" in prompt
+    assert "[KONSTRAINT CHATBOT AKTIF]" in prompt
     assert "Gunakan nada formal." in prompt
 
 
@@ -1219,7 +1261,7 @@ def test_ambiguity_prompt_omits_empty_addon_prompt():
         addon_prompt="",
     )
 
-    assert "[Konfigurasi Chatbot Tambahan]" not in prompt
+    assert "[KONSTRAINT CHATBOT AKTIF]" not in prompt
 
 
 @pytest.mark.asyncio

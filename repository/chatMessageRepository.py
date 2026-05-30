@@ -7,6 +7,7 @@ from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from model.ChatMessage import ChatMessage
 from model.ChatMessageGraphic import ChatMessageGraphic
@@ -77,6 +78,7 @@ class ChatMessageRepository:
 
         questions_result = await self.db.execute(
             select(ClarificationQuestion)
+            .options(selectinload(ClarificationQuestion.answer_options))
             .where(ClarificationQuestion.session_id == session_id)
             .where(ClarificationQuestion.message_id.is_not(None))
             .order_by(ClarificationQuestion.created_at.asc())

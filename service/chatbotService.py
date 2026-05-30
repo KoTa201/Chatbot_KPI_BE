@@ -103,3 +103,4 @@ class ChatbotService:
                 detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
             )
         return chatbot
+
