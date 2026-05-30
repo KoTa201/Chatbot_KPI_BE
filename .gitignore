@@ -74,3 +74,16 @@ ehthumbs.db
 # IDE specific
 *.sublime-project
 *.sublime-workspace
+.blackboxcli/
+
+CLAUDE.md
+CLAUDE_USER.md
+
+docs/
+
+.claude/
+
+graphify-out/
+
+public/
+

@@ -5,19 +5,36 @@ FastAPI - Structured RAG Ingestion KPI Tracker
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 import model
 from databaseConfig import create_tables
-from router import ingestionRouter as ingestion, recordRouter as records, userRouter as users
+from configCredidential import settings
+from router import (
+    kpiTrackerRouter as ingestion,
+    userRouter as users,
+    chatbotRouter as chatbot_router,
+    kpiMasterRouter as kpi_master,
+    schedulerRouter as scheduler_router,
+    kpiGroupRouter as kpi_group_router,
+    chatRouter as chat_router,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from middleware.jwtMiddleware import JWTMiddleware
+from service.schedulerJobService import scheduler_job_service
+from repository.schedulerRepository import SchedulerRepository
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Buat tabel PostgreSQL saat startup jika belum ada
-    await create_tables()
+    scheduler_job_service.start()
+    repo = SchedulerRepository()
+    config = await repo.get_config()
+    if config.is_enabled:
+        scheduler_job_service.register_job(config)
     yield
+    scheduler_job_service.stop()
 
 
 app = FastAPI(
@@ -30,19 +47,36 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+PUBLIC_DIR = Path("public")
+PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/public", StaticFiles(directory=PUBLIC_DIR), name="public")
+
+app.add_middleware(JWTMiddleware)
+
+cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],          # sesuaikan dengan kebutuhan production
+    allow_origins=cors_origins,
+    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.add_middleware(JWTMiddleware)  # dieksekusi pertama sebelum router
-
-app.include_router(ingestion.router, prefix="/ingest", tags=["Ingestion"])
-app.include_router(records.router, prefix="/records", tags=["Records"])
-app.include_router(users.router, prefix="/users", tags=["Users"])
+app.include_router(
+    ingestion.router, prefix="/api/v1/ingest", tags=["Ingestion"])
+app.include_router(users.router, prefix="/api/v1/users", tags=["Users"])
+app.include_router(
+    chatbot_router.router, prefix="/api/v1/chatbots", tags=["Chatbots"])
+app.include_router(
+    kpi_master.router, prefix="/api/v1/ingest/kpi-master", tags=["KPI Master"])
+app.include_router(
+    scheduler_router.router, prefix="/api/v1/scheduler", tags=["Scheduler"])
+app.include_router(
+    kpi_group_router.router, prefix="/api/v1/kpi", tags=["KPI Groups"])
+app.include_router(chat_router.router,
+                   prefix="/api/v1/chat", tags=["Chatbot KPI"])
 
 
 @app.get("/", tags=["Health"])
