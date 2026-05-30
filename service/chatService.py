@@ -228,7 +228,7 @@ class ChatService:
                     GraphicItemResponse(
                         kpi_name=r.kpi_name or None,
                         chart_type=r.chart_type,
-                        image_base64=r.image_base64,
+                        image_url=r.image_url,
                     )
                     for r in graphic_results
                 ],

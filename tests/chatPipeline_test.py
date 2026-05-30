@@ -255,8 +255,7 @@ async def test_process_query_success_without_visualization(monkeypatch):
 
     assert response.message == "Ini adalah analisa KPI."
     assert response.generated_sql == sanitized_sql
-    assert response.graphic_chart_type is None
-    assert response.graphic_image_url is None
+    assert response.graphics == []
     assert response.rows_returned == 1
     assert _stage_by_name(response, "graphic_generation") is None
     assert _stage_by_name(response, "result_analysis").status == "success"
@@ -294,11 +293,13 @@ async def test_process_query_success_with_visualization(monkeypatch):
     )
     monkeypatch.setattr(
         chat_service_module.graphic_service,
-        "generateGraphic",
-        lambda query_result, chart_type, session_id=None: GraphicResult(
-            chart_type=chart_type,
-            image_url=f"/public/charts/{session_id}/chart-1.png",
-        ),
+        "generateGraphicPerKpi",
+        lambda query_result, chart_type, session_id=None: [
+            GraphicResult(
+                chart_type=chart_type,
+                image_url=f"/public/charts/{session_id}/chart-1.png",
+            )
+        ],
     )
 
     service = _create_chat_service(monkeypatch)
@@ -312,9 +313,10 @@ async def test_process_query_success_with_visualization(monkeypatch):
     )
 
     expected_url = f"/public/charts/{SESSION_VISUAL}/chart-1.png"
-    assert response.message == f"Analisa dengan grafik.\n\nGrafik: {expected_url}"
-    assert response.graphic_chart_type == "pie"
-    assert response.graphic_image_url == expected_url
+    assert response.message == "Analisa dengan grafik."
+    assert len(response.graphics) == 1
+    assert response.graphics[0].chart_type == "pie"
+    assert response.graphics[0].image_url == expected_url
     assert _stage_by_name(response, "graphic_generation").status == "success"
 
 
