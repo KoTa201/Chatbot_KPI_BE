@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy import UUID as SAUUID
+from uuid import uuid4
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
@@ -16,7 +17,9 @@ if TYPE_CHECKING:
 class RevokedToken(Base):
     __tablename__ = "revoked_tokens"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[UUID] = mapped_column(
+        SAUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
     token: Mapped[str] = mapped_column(
         String, unique=True, nullable=False, index=True)
     user_id: Mapped[UUID] = mapped_column(

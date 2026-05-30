@@ -101,7 +101,6 @@ class SQLWireguardService:
             self._check_forbidden_keywords,
             self._check_column_blacklist,
             self._check_injection_patterns,
-            self._check_subquery_depth,
             self._check_structural_integrity,
         )
         for check in checks:
@@ -226,20 +225,6 @@ class SQLWireguardService:
 
     # -- Rule W-08 -------------------------------------------------------------
 
-    def _check_subquery_depth(self, sql: str) -> "ValidationResult":
-        depth = self._count_subquery_depth(sql)
-        max_depth = settings.SQL_MAX_SUBQUERY_DEPTH
-
-        if depth > max_depth:
-            return ValidationResult(
-                is_valid=False,
-                reason=f"W-08: Kedalaman subquery ({depth}) melebihi batas maksimum ({max_depth}).",
-                sanitized_sql=None,
-            )
-        return ValidationResult(is_valid=True, reason=None, sanitized_sql=sql)
-
-    # -- Rule W-09 -------------------------------------------------------------
-
     def _check_structural_integrity(self, sql: str) -> "ValidationResult":
         balanced, reason = self._has_balanced_brackets_and_quotes(sql)
         if not balanced:
@@ -250,17 +235,7 @@ class SQLWireguardService:
             )
         return ValidationResult(is_valid=True, reason=None, sanitized_sql=sql)
 
-    @staticmethod
-    def _count_subquery_depth(sql: str) -> int:
-        max_depth = 0
-        current_depth = 0
-        for char in sql:
-            if char == "(":
-                current_depth += 1
-                max_depth = max(max_depth, current_depth)
-            elif char == ")":
-                current_depth -= 1
-        return max_depth
+
 
     @staticmethod
     def _has_balanced_brackets_and_quotes(sql: str) -> tuple[bool, str | None]:

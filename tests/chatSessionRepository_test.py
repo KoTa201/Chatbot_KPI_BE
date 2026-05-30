@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -8,7 +9,7 @@ from databaseConfig import Base
 from model.ChatMessage import ChatMessage
 from model.ChatSession import ChatSession
 from model.ClarificationQuestion import ClarificationQuestion
-from repository.chatSessionRepository import ChatSessionRepository
+from repository.chatMessageRepository import ChatMessageRepository
 
 
 async def _make_sqlite_session():
@@ -42,8 +43,8 @@ async def test_create_message_updates_session_end_at_to_message_send_at():
             db_session.add(session)
             await db_session.flush()
 
-            repo = ChatSessionRepository(db_session)
-            message = await repo.create_message(
+            repo = ChatMessageRepository(db_session)
+            message = await repo.create(
                 session_id=session_id,
                 message="Halo",
                 is_sender_chatbot=False,
@@ -94,7 +95,7 @@ async def test_get_detail_returns_messages_with_clarification_questions():
             db_session.add(question)
             await db_session.commit()
 
-            detail = await ChatSessionRepository(db_session).get_detail_by_id(session_id)
+            detail = await ChatMessageRepository(db_session).get_detail_by_session_id(session_id)
 
             assert detail is not None
             assert detail.session.session_id == session_id
@@ -104,5 +105,68 @@ async def test_get_detail_returns_messages_with_clarification_questions():
             ]
             assert detail.clarification_questions_by_message_id[user_message.message_id][0].clarification_question == "KPI mana yang dimaksud?"
             assert detail.clarification_questions_by_message_id.get(bot_message.message_id, []) == []
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_first_by_session_id_returns_oldest_message_for_session():
+    engine, session_factory = await _make_sqlite_session()
+    try:
+        async with session_factory() as db_session:
+            session_id = uuid4()
+            user_id = uuid4()
+            session = ChatSession(
+                session_id=session_id,
+                user_id=user_id,
+                session_name="first message test",
+            )
+            db_session.add(session)
+            await db_session.flush()
+
+            oldest = ChatMessage(
+                session_id=session_id,
+                message="first message",
+                is_sender_chatbot=False,
+            )
+            oldest.send_at = datetime(2025, 1, 1, tzinfo=timezone.utc)
+            newer = ChatMessage(
+                session_id=session_id,
+                message="second message",
+                is_sender_chatbot=False,
+            )
+            newer.send_at = datetime(2025, 6, 1, tzinfo=timezone.utc)
+            db_session.add_all([oldest, newer])
+            await db_session.commit()
+
+            repo = ChatMessageRepository(db_session)
+            result = await repo.get_first_by_session_id(session_id)
+
+            assert result is not None
+            assert result.message_id == oldest.message_id
+            assert result.message == "first message"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_first_by_session_id_returns_none_when_session_has_no_messages():
+    engine, session_factory = await _make_sqlite_session()
+    try:
+        async with session_factory() as db_session:
+            session_id = uuid4()
+            user_id = uuid4()
+            session = ChatSession(
+                session_id=session_id,
+                user_id=user_id,
+                session_name="empty session",
+            )
+            db_session.add(session)
+            await db_session.commit()
+
+            repo = ChatMessageRepository(db_session)
+            result = await repo.get_first_by_session_id(session_id)
+
+            assert result is None
     finally:
         await engine.dispose()

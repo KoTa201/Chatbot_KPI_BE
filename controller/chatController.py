@@ -90,6 +90,7 @@ class ChatController:
             disambiguation_result = await self.clarification_service.handle_clarification_response(
                 session_id=request.session_id,
                 clarification_answers=request.clarification_answers,
+                user_role=user_role,
                 additional_constraints=request.additional_constraints,
                 original_query=request.message,
             )

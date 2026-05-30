@@ -94,20 +94,31 @@ class PreferenceTree:
     def serialize(self) -> dict[str, Any]:
         return self.root.serialize()
 
-    @staticmethod
-    def build_additional_information(
-            qa_set: list[QAPair],
-        additional_constraints: str | None = None,
-    ) -> str:
+    def build_additional_information(self) -> str:
+        """
+        Build additional information string by traversing the preference tree.
+        Collects all QA pairs from leaf nodes, skips "Lewati" answers.
+        """
         lines: list[str] = []
-        for qa in qa_set:
-            if qa.answer == "Lewati":
-                continue
-            lines.append(f"- {qa.question}: {qa.answer}")
-        if additional_constraints:
-            lines.append(f"- Constraint tambahan: {additional_constraints.strip()}")
+
+        def traverse_node(node: TreeNode) -> None:
+            """Recursively traverse tree to collect QA pairs from leaf nodes."""
+            if node.node_type == "leaf" and node.qa_list:
+                for qa in node.qa_list:
+                    answer = qa.get("answer", "")
+                    if answer == "Lewati":
+                        continue
+                    question = qa.get("question", "")
+                    lines.append(f"- {question}: {answer}")
+
+            for child in node.children.values():
+                traverse_node(child)
+
+        traverse_node(self.root)
+
         if not lines:
             return "Tidak ada informasi tambahan selain klarifikasi yang dilewati."
+
         return "\n".join(lines)
 
     async def _node_merge(
