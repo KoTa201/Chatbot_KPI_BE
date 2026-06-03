@@ -41,18 +41,19 @@ from utils.constants.graphicConstants import (
     VALUE_COLUMN_HINTS,
 )
 
-
 # KpiValueParser — parse ekspresi KPI menjadi nilai numerik + metadata
+
 
 @dataclass
 class ParsedValue:
     """Hasil parse satu cell ekspresi KPI."""
-    numeric: float | None          # nilai numerik yang diekstrak
-    original: str                  # string asli
-    operator: str = ""             # "≥", "≤", ">", "<", "" (none)
-    unit: str = ""                 # "%" | "hari" | "M/org" | "juta" | "ribu" | ""
-    is_header: bool = False        # True jika cell adalah baris header dummy ("Target")
-    scale: float = 1.0             # faktor pengali (M → 1_000_000, dst.)
+
+    numeric: float | None  # nilai numerik yang diekstrak
+    original: str  # string asli
+    operator: str = ""  # "≥", "≤", ">", "<", "" (none)
+    unit: str = ""  # "%" | "hari" | "M/org" | "juta" | "ribu" | ""
+    is_header: bool = False  # True jika cell adalah baris header dummy ("Target")
+    scale: float = 1.0  # faktor pengali (M → 1_000_000, dst.)
 
     @property
     def display(self) -> str:
@@ -168,7 +169,9 @@ class KpiValueParser:
     def parse_series(self, series: pd.Series) -> list[ParsedValue]:
         return [self.parse(v) for v in series]
 
-    def to_numeric_series(self, series: pd.Series, use_scaled: bool = False) -> pd.Series:
+    def to_numeric_series(
+        self, series: pd.Series, use_scaled: bool = False
+    ) -> pd.Series:
         """
         Konversi satu kolom ke Series float.
         use_scaled=True → kalikan dengan faktor skala satuan.
@@ -191,10 +194,7 @@ class KpiValueParser:
         if len(non_null) == 0:
             return False
         parsed = self.parse_series(non_null)
-        parseable = sum(
-            1 for p in parsed
-            if not p.is_header and p.numeric is not None
-        )
+        parseable = sum(1 for p in parsed if not p.is_header and p.numeric is not None)
         return (parseable / len(parsed)) >= threshold
 
     def dominant_unit(self, series: pd.Series) -> str:
@@ -255,6 +255,7 @@ def _is_notes_column(col_name: str, series: pd.Series) -> bool:
 
 # Dataclass hasil
 
+
 @dataclass
 class GraphicResult:
     chart_type: str
@@ -263,6 +264,7 @@ class GraphicResult:
 
 
 # Service utama
+
 
 class GraphicSeervice:
     """Service untuk membuat grafik dari data hasil query SQL."""
@@ -305,12 +307,27 @@ class GraphicSeervice:
 
         # 3. Auto-detect chart type
         if chart_type == "bar":
-            chart_type = self._auto_detect_chart_type(df) or "bar"
+            chart_type = self._auto_detect_chart_type(df, kpi_meta) or "bar"
+
+        # Track which columns were originally TRL (now floats) for render fallback
+        trl_cols: set[str] = {
+            col
+            for col, pv_list in kpi_meta.items()
+            if any(pv.unit == "TRL" for pv in pv_list if pv.numeric is not None)
+        }
 
         plt = self._load_matplotlib_pyplot()
-        image_bytes = self._render_chart(df=df, chart_type=chart_type, plt=plt, kpi_meta=kpi_meta)
+        image_bytes = self._render_chart(
+            df=df,
+            chart_type=chart_type,
+            plt=plt,
+            kpi_meta=kpi_meta,
+            trl_cols=trl_cols or None,
+        )
 
-        image_url = self._save_chart_image(image_bytes=image_bytes, session_id=session_id)
+        image_url = self._save_chart_image(
+            image_bytes=image_bytes, session_id=session_id
+        )
         return GraphicResult(chart_type=chart_type, image_url=image_url)
 
     def generateGraphicPerKpi(
@@ -338,8 +355,16 @@ class GraphicSeervice:
         df = self._drop_non_data_columns(raw_df)
         df, kpi_meta = self._parse_kpi_columns(df)
 
+        # Determine which columns had TRL values BEFORE _parse_kpi_columns converted
+        # them to floats — kpi_meta records the original unit for each parsed cell.
+        trl_cols: set[str] = {
+            col
+            for col, pv_list in kpi_meta.items()
+            if any(pv.unit == "TRL" for pv in pv_list if pv.numeric is not None)
+        }
+
         if chart_type == "bar":
-            chart_type = self._auto_detect_chart_type(df) or "bar"
+            chart_type = self._auto_detect_chart_type(df, kpi_meta) or "bar"
 
         kpi_col = self._pick_kpi_column(df)
         if kpi_col is None or df[kpi_col].nunique() <= 1:
@@ -352,7 +377,7 @@ class GraphicSeervice:
         results: list[GraphicResult] = []
 
         for kpi_name in kpi_order:
-            mask   = df[kpi_col].astype(str) == kpi_name
+            mask = df[kpi_col].astype(str) == kpi_name
             subset = df[mask].copy()
             if subset.empty:
                 continue
@@ -361,7 +386,9 @@ class GraphicSeervice:
 
             # Always re-detect per subset so TRL KPIs get trl_progress
             # and integer KPIs get the right chart type independently
-            sub_chart_type = self._auto_detect_chart_type(subset) or chart_type or "bar"
+            sub_chart_type = (
+                self._auto_detect_chart_type(subset, subset_meta) or chart_type or "bar"
+            )
 
             try:
                 image_bytes = self._render_chart(
@@ -370,16 +397,20 @@ class GraphicSeervice:
                     plt=plt,
                     kpi_meta=subset_meta,
                     title_prefix=kpi_name,
+                    trl_cols=trl_cols,
                 )
                 image_url = self._save_chart_image(image_bytes, session_id)
-                results.append(GraphicResult(
-                    chart_type=sub_chart_type,
-                    image_url=image_url,
-                    kpi_name=kpi_name,
-                ))
+                results.append(
+                    GraphicResult(
+                        chart_type=sub_chart_type,
+                        image_url=image_url,
+                        kpi_name=kpi_name,
+                    )
+                )
             except Exception as exc:
                 # Satu KPI gagal tidak menghentikan seluruh proses
                 import warnings
+
                 warnings.warn(f"Gagal render KPI '{kpi_name}': {exc}")
                 continue
 
@@ -447,9 +478,19 @@ class GraphicSeervice:
         return df, meta
 
     # Auto-detect chart type
-    def _auto_detect_chart_type(self, df: pd.DataFrame) -> str | None:
+    def _auto_detect_chart_type(
+        self, df: pd.DataFrame, kpi_meta: dict[str, list[ParsedValue]] | None = None
+    ) -> str | None:
         cols_lower = [c.lower() for c in df.columns]
 
+        # 1. Check kpi_meta first for TRL columns (already parsed, unit="TRL")
+        #    This avoids re-checking float columns that lost the "TRL" prefix.
+        if kpi_meta:
+            for col, pv_list in kpi_meta.items():
+                if any(p.unit == "TRL" for p in pv_list if not p.is_header):
+                    return "trl_progress"
+
+        # 2. Fallback: check raw column data (for cases where kpi_meta not passed)
         for col in df.columns:
             if _is_trl_column(df[col]):
                 return "trl_progress"
@@ -459,7 +500,7 @@ class GraphicSeervice:
         if has_actual and has_target:
             return "progress"
 
-        has_kpi  = any("kpi" in c or "nama" in c or "kategori" in c for c in cols_lower)
+        has_kpi = any("kpi" in c or "nama" in c or "kategori" in c for c in cols_lower)
         has_time = any(h in c for c in cols_lower for h in self.month_column_hints)
         if has_kpi and has_time:
             return "grouped_bar"
@@ -474,20 +515,49 @@ class GraphicSeervice:
         plt,
         kpi_meta: dict[str, list[ParsedValue]],
         title_prefix: str = "",
+        trl_cols: set[str] | None = None,
     ) -> bytes:
         if chart_type == "trl_progress":
-            return self._render_trl_progress(df=df, plt=plt, title_prefix=title_prefix)
+            return self._render_trl_progress(
+                df=df, plt=plt, title_prefix=title_prefix, trl_cols=trl_cols
+            )
         if chart_type == "progress":
-            return self._render_progress(df=df, plt=plt, kpi_meta=kpi_meta)
+            return self._render_progress(
+                df=df, plt=plt, kpi_meta=kpi_meta, title_prefix=title_prefix
+            )
         if chart_type in ("grouped_bar", "stacked_bar"):
-            return self._render_multi_series(df=df, chart_type=chart_type, plt=plt, title_prefix=title_prefix)
+            return self._render_multi_series(
+                df=df, chart_type=chart_type, plt=plt, title_prefix=title_prefix
+            )
         if chart_type == "line":
             return self._render_line(df=df, plt=plt, title_prefix=title_prefix)
-        return self._render_simple(df=df, chart_type=chart_type, plt=plt, kpi_meta=kpi_meta, title_prefix=title_prefix)
+        return self._render_simple(
+            df=df,
+            chart_type=chart_type,
+            plt=plt,
+            kpi_meta=kpi_meta,
+            title_prefix=title_prefix,
+        )
 
     # Render: TRL Progress
-    def _render_trl_progress(self, df: pd.DataFrame, plt, title_prefix: str = "") -> bytes:
+    def _render_trl_progress(
+        self,
+        df: pd.DataFrame,
+        plt,
+        title_prefix: str = "",
+        trl_cols: set[str] | None = None,
+    ) -> bytes:
         trl_col, trl_numeric = self._find_trl_column(df)
+
+        # _find_trl_column relies on raw "TRL N" strings; if values were already
+        # converted to floats by _parse_kpi_columns, fall back to the metadata hint.
+        if trl_col is None and trl_cols:
+            for col in trl_cols:
+                if col in df.columns:
+                    trl_col = col
+                    trl_numeric = pd.to_numeric(df[col], errors="coerce")
+                    break
+
         if trl_col is None:
             raise ValueError("Kolom TRL tidak ditemukan.")
 
@@ -495,29 +565,161 @@ class GraphicSeervice:
         df["__trl_num__"] = trl_numeric
 
         time_col = self._pick_time_column(df, exclude=[trl_col])
-        kpi_col  = self._pick_kpi_column(df, exclude=[c for c in [trl_col, time_col] if c])
+        kpi_col = self._pick_kpi_column(
+            df, exclude=[c for c in [trl_col, time_col] if c]
+        )
 
-        fig, ax = plt.subplots(figsize=(10, 5))
+        # Also look for a target column to compare against
+        target_col = self._find_column_by_hints(df, self.target_column_hints)
+        has_target = target_col and target_col != trl_col
 
-        if kpi_col and time_col:
-            for kpi_name, group in df.groupby(kpi_col):
-                grp = group.sort_values(time_col)
-                xs  = self._month_labels_for(grp[time_col])
-                ax.plot(xs, grp["__trl_num__"], marker="o", label=str(kpi_name))
-                ax.fill_between(xs, grp["__trl_num__"], alpha=0.08)
-            ax.legend(title=kpi_col, bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=8)
-        elif time_col:
-            grp = df.sort_values(time_col)
-            ax.plot(self._month_labels_for(grp[time_col]), grp["__trl_num__"], marker="o", color="#2563EB")
-        else:
-            ax.bar(range(len(df)), df["__trl_num__"], color="#2563EB")
+        chart_title = (
+            f"{title_prefix} — TRL Progress" if title_prefix else "TRL Progress"
+        )
 
-        ax.set_yticks(range(1, 10))
-        ax.set_ylabel("TRL Level")
-        ax.set_xlabel(time_col or "")
-        ax.set_title(f"{title_prefix} — TRL Progress per Bulan" if title_prefix else "TRL Progress per Bulan")
-        ax.grid(axis="y", alpha=0.3)
-        ax.tick_params(axis="x", rotation=30)
+        # --- Case 1: Has time series → line chart over months ---
+        if time_col:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            if kpi_col:
+                for kpi_name, group in df.groupby(kpi_col):
+                    grp = group.sort_values(time_col)
+                    xs = self._month_labels_for(grp[time_col])
+                    ax.plot(xs, grp["__trl_num__"], marker="o", label=str(kpi_name))
+                    ax.fill_between(xs, grp["__trl_num__"], alpha=0.08)
+                ax.legend(
+                    title=kpi_col,
+                    bbox_to_anchor=(1.01, 1),
+                    loc="upper left",
+                    fontsize=8,
+                )
+            else:
+                grp = df.sort_values(time_col)
+                ax.plot(
+                    self._month_labels_for(grp[time_col]),
+                    grp["__trl_num__"],
+                    marker="o",
+                    color="#2563EB",
+                )
+                if has_target:
+                    target_vals = pd.to_numeric(df[target_col], errors="coerce")
+                    ax.axhline(
+                        y=float(target_vals.dropna().iloc[0])
+                        if target_vals.notna().any()
+                        else 7,
+                        color="#DC2626",
+                        linestyle="--",
+                        linewidth=1.5,
+                        label="Target",
+                    )
+                    ax.legend(fontsize=8)
+
+            ax.set_yticks(range(1, 10))
+            ax.set_yticklabels([f"TRL {i}" for i in range(1, 10)], fontsize=8)
+            ax.set_ylabel("TRL Level")
+            ax.set_xlabel(time_col)
+            ax.set_title(chart_title + " per Bulan")
+            ax.grid(axis="y", alpha=0.3)
+            ax.tick_params(axis="x", rotation=30)
+            fig.tight_layout()
+            return self._fig_to_bytes(fig=fig, plt=plt)
+
+        # --- Case 2: Static / single point → TRL gauge bar ---
+        # Show a horizontal bar chart with all 9 TRL levels,
+        # highlighting current level and marking the target.
+        current_trl = (
+            float(df["__trl_num__"].dropna().iloc[0])
+            if df["__trl_num__"].notna().any()
+            else 0
+        )
+        target_trl = 9.0  # default max
+        if has_target:
+            t_vals = pd.to_numeric(df[target_col], errors="coerce").dropna()
+            if not t_vals.empty:
+                target_trl = float(t_vals.iloc[0])
+
+        TRL_COLORS = [
+            "#f1f5f9",  # not reached
+            "#2563EB",  # reached
+        ]
+        TRL_DESCRIPTIONS = [
+            "",
+            "Basic research",
+            "Concept formulated",
+            "Proof of concept",
+            "Lab validation",
+            "Environment validation",
+            "Demo prototype",
+            "System prototype",
+            "System complete",
+            "Deployment ready",
+        ]
+
+        fig, ax = plt.subplots(figsize=(9, 5))
+        levels = list(range(1, 10))
+        bar_colors = [
+            TRL_COLORS[1] if lvl <= int(current_trl) else TRL_COLORS[0]
+            for lvl in levels
+        ]
+        bars = ax.barh(
+            levels, [1] * 9, color=bar_colors, edgecolor="#e2e8f0", height=0.7
+        )
+
+        # Add TRL level labels inside bars
+        for lvl, bar in zip(levels, bars):
+            label_color = "white" if lvl <= int(current_trl) else "#94a3b8"
+            desc = TRL_DESCRIPTIONS[lvl] if lvl < len(TRL_DESCRIPTIONS) else ""
+            ax.text(
+                0.5,
+                lvl,
+                f"TRL {lvl}  •  {desc}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color=label_color,
+                fontweight="bold" if lvl == int(current_trl) else "normal",
+            )
+
+        # Mark target line
+        ax.axhline(
+            y=target_trl,
+            color="#DC2626",
+            linestyle="--",
+            linewidth=1.8,
+            label=f"Target: TRL {int(target_trl)}",
+        )
+
+        # Mark current level
+        ax.axhline(
+            y=current_trl,
+            color="#2563EB",
+            linestyle="-",
+            linewidth=2,
+            label=f"Realisasi: TRL {int(current_trl)}",
+        )
+
+        pct = (current_trl / target_trl * 100) if target_trl else 0
+        status_color = (
+            "#16A34A" if pct >= 100 else ("#D97706" if pct >= 85 else "#DC2626")
+        )
+        ax.text(
+            1.02,
+            current_trl,
+            f"  {int(current_trl)}/{int(target_trl)}  ({pct:.0f}%)",
+            va="center",
+            fontsize=9,
+            color=status_color,
+            fontweight="bold",
+            transform=ax.get_yaxis_transform(),
+        )
+
+        ax.set_yticks(levels)
+        ax.set_yticklabels([])
+        ax.set_xticks([])
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0.4, 9.6)
+        ax.set_title(chart_title)
+        ax.legend(loc="lower right", fontsize=8)
+        ax.grid(False)
 
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
@@ -528,12 +730,15 @@ class GraphicSeervice:
         df: pd.DataFrame,
         plt,
         kpi_meta: dict[str, list[ParsedValue]],
+        title_prefix: str = "",
     ) -> bytes:
         actual_col = self._find_column_by_hints(df, ACTUAL_COLUMN_HINTS)
         target_col = self._find_column_by_hints(df, self.target_column_hints)
-        exclude    = [c for c in [actual_col, target_col] if c]
-        kpi_col    = self._pick_kpi_column(df, exclude=exclude)
-        time_col   = self._pick_time_column(df, exclude=exclude + [kpi_col] if kpi_col else exclude)
+        exclude = [c for c in [actual_col, target_col] if c]
+        kpi_col = self._pick_kpi_column(df, exclude=exclude)
+        time_col = self._pick_time_column(
+            df, exclude=exclude + [kpi_col] if kpi_col else exclude
+        )
 
         df = df.copy()
 
@@ -544,47 +749,79 @@ class GraphicSeervice:
                     df[col] = _parse_trl_value(df[col])
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
+        # Deteksi apakah ini KPI "lower is better" (operator ≤ pada target)
+        lower_is_better = False
+        if target_col and target_col in kpi_meta:
+            target_ops = [
+                p.operator
+                for p in kpi_meta[target_col]
+                if not p.is_header and p.numeric is not None
+            ]
+            lower_is_better = bool(
+                target_ops and all(op in ("≤", "<", "<=") for op in target_ops if op)
+            )
+
+        # Deteksi unit dominan dari target atau actual
+        dominant_unit = ""
+        for col in [target_col, actual_col]:
+            if col and col in kpi_meta:
+                u = self.parser.dominant_unit(
+                    pd.Series([p.original for p in kpi_meta[col]])
+                )
+                if u:
+                    dominant_unit = u
+                    break
+
         # Bangun label sumbu Y
         if kpi_col and time_col:
-            df["__label__"] = df[kpi_col].astype(str) + " (Bln " + df[time_col].astype(str) + ")"
+            df["__label__"] = (
+                df[kpi_col].astype(str) + " (Bln " + df[time_col].astype(str) + ")"
+            )
         elif kpi_col:
             df["__label__"] = df[kpi_col].astype(str)
         elif time_col:
             df["__label__"] = self._month_labels_for(df[time_col])
         else:
-            df["__label__"] = [f"Baris {i+1}" for i in range(len(df))]
+            df["__label__"] = [f"Baris {i + 1}" for i in range(len(df))]
 
         df = df.tail(15)
 
-        # Satuan untuk label sumbu X
-        x_unit = ""
-        if actual_col and actual_col in kpi_meta:
-            x_unit = self.parser.dominant_unit(
-                pd.Series([p.original for p in kpi_meta[actual_col]])
-            )
-        xlabel = f"Nilai ({x_unit})" if x_unit and x_unit != "%" else "Nilai"
+        # Label sumbu X dengan satuan
+        if dominant_unit and dominant_unit not in ("%", "TRL"):
+            xlabel = f"Nilai ({dominant_unit})"
+        else:
+            xlabel = "Nilai"
 
-        fig, ax = plt.subplots(figsize=(10, max(4, len(df) * 0.5)))
+        fig, ax = plt.subplots(figsize=(10, max(4, len(df) * 0.55)))
         y_pos = list(range(len(df)))
 
         if target_col and actual_col:
             ax.barh(y_pos, df[target_col], color="#CBD5E1", label="Target", height=0.55)
-            ax.barh(y_pos, df[actual_col], color="#2563EB", label="Actual", height=0.35)
+            ax.barh(
+                y_pos, df[actual_col], color="#2563EB", label="Realisasi", height=0.35
+            )
 
             for i, (a, t) in enumerate(zip(df[actual_col], df[target_col])):
-                pct   = (a / t * 100) if t else 0
-                color = "#16A34A" if pct >= 100 else ("#D97706" if pct >= 67 else "#DC2626")
-                # Tampilkan label dari metadata asli jika ada
+                # Achievement logic: lower-is-better → invert ratio
+                if lower_is_better:
+                    pct = (t / a * 100) if a else 0
+                else:
+                    pct = (a / t * 100) if t else 0
+
+                color = (
+                    "#16A34A" if pct >= 100 else ("#D97706" if pct >= 67 else "#DC2626")
+                )
+
+                # Label dari metadata asli (menampilkan format asli "≥90%", "20 M", dll)
                 actual_label = ""
-                target_label = ""
                 if actual_col in kpi_meta and i < len(kpi_meta[actual_col]):
                     actual_label = kpi_meta[actual_col][i].display
-                if target_col in kpi_meta and i < len(kpi_meta[target_col]):
-                    target_label = kpi_meta[target_col][i].display
 
-                annotation = f"{pct:.0f}%"
-                if actual_label:
-                    annotation = f"{actual_label}  ({pct:.0f}%)"
+                annotation = (
+                    f"{pct:.0f}%"
+                    if not actual_label
+                    else f"{actual_label}  ({pct:.0f}%)"
+                )
 
                 ax.text(
                     max(t, a) * 1.02 + 0.01,
@@ -604,26 +841,39 @@ class GraphicSeervice:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(df["__label__"].tolist(), fontsize=8)
         ax.set_xlabel(xlabel)
-        ax.set_title("KPI Progress: Actual vs Target")
+        chart_title = (
+            f"{title_prefix} — Realisasi vs Target"
+            if title_prefix
+            else "KPI Progress: Realisasi vs Target"
+        )
+        ax.set_title(chart_title)
         ax.grid(axis="x", alpha=0.3)
 
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
     # Render: Grouped / Stacked Bar
-    def _render_multi_series(self, df: pd.DataFrame, chart_type: str, plt, title_prefix: str = "") -> bytes:
-        value_col = self._find_column_by_hints(df, self.value_column_hints) or self._pick_best_numeric(df)
+    def _render_multi_series(
+        self, df: pd.DataFrame, chart_type: str, plt, title_prefix: str = ""
+    ) -> bytes:
+        value_col = self._find_column_by_hints(
+            df, self.value_column_hints
+        ) or self._pick_best_numeric(df)
         if not value_col:
             raise ValueError("Tidak ada kolom numerik ditemukan.")
 
         time_col = self._pick_time_column(df, exclude=[value_col])
-        kpi_col  = self._pick_kpi_column(df, exclude=[c for c in [value_col, time_col] if c])
+        kpi_col = self._pick_kpi_column(
+            df, exclude=[c for c in [value_col, time_col] if c]
+        )
 
         df = df.copy()
         df[value_col] = pd.to_numeric(df[value_col], errors="coerce").fillna(0)
 
         if time_col and kpi_col:
-            pivot = df.pivot_table(index=time_col, columns=kpi_col, values=value_col, aggfunc="sum")
+            pivot = df.pivot_table(
+                index=time_col, columns=kpi_col, values=value_col, aggfunc="sum"
+            )
             pivot.index = self._month_labels_for(pd.Series(pivot.index))
         elif kpi_col:
             pivot = df.set_index(kpi_col)[[value_col]]
@@ -633,9 +883,15 @@ class GraphicSeervice:
         pivot = pivot.fillna(0).tail(12)
 
         fig, ax = plt.subplots(figsize=(11, 5))
-        pivot.plot(kind="bar", stacked=(chart_type == "stacked_bar"), ax=ax, colormap="tab10")
+        pivot.plot(
+            kind="bar", stacked=(chart_type == "stacked_bar"), ax=ax, colormap="tab10"
+        )
 
-        ax.set_title(f"{title_prefix} ({chart_type})" if title_prefix else f"Visualisasi KPI ({chart_type})")
+        ax.set_title(
+            f"{title_prefix} ({chart_type})"
+            if title_prefix
+            else f"Visualisasi KPI ({chart_type})"
+        )
         ax.set_xlabel(time_col or "")
         ax.set_ylabel(value_col)
         ax.tick_params(axis="x", rotation=30)
@@ -647,12 +903,16 @@ class GraphicSeervice:
 
     # Render: Line
     def _render_line(self, df: pd.DataFrame, plt, title_prefix: str = "") -> bytes:
-        value_col = self._find_column_by_hints(df, self.value_column_hints) or self._pick_best_numeric(df)
+        value_col = self._find_column_by_hints(
+            df, self.value_column_hints
+        ) or self._pick_best_numeric(df)
         if not value_col:
             raise ValueError("Tidak ada kolom numerik ditemukan.")
 
         time_col = self._pick_time_column(df, exclude=[value_col])
-        kpi_col  = self._pick_kpi_column(df, exclude=[c for c in [value_col, time_col] if c])
+        kpi_col = self._pick_kpi_column(
+            df, exclude=[c for c in [value_col, time_col] if c]
+        )
 
         df = df.copy()
         df[value_col] = pd.to_numeric(df[value_col], errors="coerce").fillna(0)
@@ -662,15 +922,29 @@ class GraphicSeervice:
         if kpi_col and time_col:
             for label, grp in df.groupby(kpi_col):
                 grp = grp.sort_values(time_col)
-                ax.plot(self._month_labels_for(grp[time_col]), grp[value_col], marker="o", label=str(label))
-            ax.legend(title=kpi_col, bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=8)
+                ax.plot(
+                    self._month_labels_for(grp[time_col]),
+                    grp[value_col],
+                    marker="o",
+                    label=str(label),
+                )
+            ax.legend(
+                title=kpi_col, bbox_to_anchor=(1.01, 1), loc="upper left", fontsize=8
+            )
         elif time_col:
             df = df.sort_values(time_col)
-            ax.plot(self._month_labels_for(df[time_col]), df[value_col], marker="o", color="#2563EB")
+            ax.plot(
+                self._month_labels_for(df[time_col]),
+                df[value_col],
+                marker="o",
+                color="#2563EB",
+            )
         else:
             ax.plot(df[value_col].tolist(), marker="o", color="#2563EB")
 
-        ax.set_title(f"{title_prefix} — Tren" if title_prefix else "Tren KPI (Line Chart)")
+        ax.set_title(
+            f"{title_prefix} — Tren" if title_prefix else "Tren KPI (Line Chart)"
+        )
         ax.set_xlabel(time_col or "")
         ax.set_ylabel(value_col)
         ax.tick_params(axis="x", rotation=30)
@@ -715,7 +989,9 @@ class GraphicSeervice:
                                 rect.get_x() + rect.get_width() / 2,
                                 rect.get_height() * 1.01,
                                 pv.display,
-                                ha="center", va="bottom", fontsize=7,
+                                ha="center",
+                                va="bottom",
+                                fontsize=7,
                             )
         else:
             wedges, *_ = ax.pie(
@@ -731,7 +1007,11 @@ class GraphicSeervice:
                 wedge.set_linewidth(1)
                 wedge.set_edgecolor("white")
 
-        ax.set_title(f"{title_prefix} ({chart_type})" if title_prefix else f"Visualisasi KPI ({chart_type})")
+        ax.set_title(
+            f"{title_prefix} ({chart_type})"
+            if title_prefix
+            else f"Visualisasi KPI ({chart_type})"
+        )
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
@@ -748,7 +1028,9 @@ class GraphicSeervice:
 
         numeric_valid_counts: dict[str, int] = {}
         for col in data.columns:
-            n = int(cast(pd.Series, pd.to_numeric(data[col], errors="coerce")).notna().sum())
+            n = int(
+                cast(pd.Series, pd.to_numeric(data[col], errors="coerce")).notna().sum()
+            )
             if n > 0:
                 numeric_valid_counts[col] = n
 
@@ -761,10 +1043,12 @@ class GraphicSeervice:
         if data.empty:
             raise ValueError("Nilai numerik tidak valid untuk pembuatan grafik.")
 
-        category_col = self._pick_category_column(data, best_numeric, numeric_valid_counts)
+        category_col = self._pick_category_column(
+            data, best_numeric, numeric_valid_counts
+        )
         if not category_col:
             category_col = "__baris__"
-            data[category_col] = [f"Baris {i+1}" for i in range(len(data))]
+            data[category_col] = [f"Baris {i + 1}" for i in range(len(data))]
 
         chart_df = data[[category_col, best_numeric]].copy()
 
@@ -773,7 +1057,12 @@ class GraphicSeervice:
             if mn.notna().all() and mn.between(1, 12).all():
                 chart_df["__o__"] = mn.astype(int)
                 chart_df = chart_df.sort_values("__o__").drop(columns=["__o__"])
-                chart_df[category_col] = mn.astype(int).map(self.month_labels).fillna(chart_df[category_col]).astype(str)
+                chart_df[category_col] = (
+                    mn.astype(int)
+                    .map(self.month_labels)
+                    .fillna(chart_df[category_col])
+                    .astype(str)
+                )
             else:
                 chart_df[category_col] = chart_df[category_col].astype(str)
         else:
@@ -797,7 +1086,10 @@ class GraphicSeervice:
         return max(numeric_valid_counts, key=score)
 
     def _pick_category_column(
-        self, data: pd.DataFrame, value_column: str, numeric_valid_counts: dict[str, int]
+        self,
+        data: pd.DataFrame,
+        value_column: str,
+        numeric_valid_counts: dict[str, int],
     ) -> str | None:
         candidates = [c for c in data.columns if c != value_column]
         if not candidates:
@@ -807,7 +1099,11 @@ class GraphicSeervice:
         if month_cands:
             return month_cands[0]
 
-        hint_cands = [c for c in candidates if any(h in c.lower() for h in self.category_column_hints)]
+        hint_cands = [
+            c
+            for c in candidates
+            if any(h in c.lower() for h in self.category_column_hints)
+        ]
         if hint_cands:
             return hint_cands[0]
 
@@ -825,20 +1121,26 @@ class GraphicSeervice:
                 return col, parsed
         return None, None
 
-    def _find_column_by_hints(self, df: pd.DataFrame, hints: tuple | list) -> str | None:
+    def _find_column_by_hints(
+        self, df: pd.DataFrame, hints: tuple | list
+    ) -> str | None:
         for col in df.columns:
             if any(h in col.lower() for h in hints):
                 return col
         return None
 
-    def _pick_time_column(self, df: pd.DataFrame, exclude: list[str | None] | None = None) -> str | None:
+    def _pick_time_column(
+        self, df: pd.DataFrame, exclude: list[str | None] | None = None
+    ) -> str | None:
         excl = [c for c in (exclude or []) if c]
         for col in df.columns:
             if col not in excl and self._is_month_like_column(col):
                 return col
         return None
 
-    def _pick_kpi_column(self, df: pd.DataFrame, exclude: list[str | None] | None = None) -> str | None:
+    def _pick_kpi_column(
+        self, df: pd.DataFrame, exclude: list[str | None] | None = None
+    ) -> str | None:
         excl = [c for c in (exclude or []) if c]
         for col in df.columns:
             if col not in excl and any(h in col.lower() for h in KPI_COLUMN_HINTS):
@@ -857,10 +1159,13 @@ class GraphicSeervice:
                 counts[col] = n
         if not counts:
             return None
-        return max(counts, key=lambda c: (
-            sum(1 for h in self.value_column_hints if h in c.lower()),
-            counts[c],
-        ))
+        return max(
+            counts,
+            key=lambda c: (
+                sum(1 for h in self.value_column_hints if h in c.lower()),
+                counts[c],
+            ),
+        )
 
     def _month_labels_for(self, series: pd.Series) -> list[str]:
         numeric = pd.to_numeric(series, errors="coerce")
@@ -882,9 +1187,9 @@ class GraphicSeervice:
 
     def _save_chart_image(self, image_bytes: bytes, session_id: UUID | None) -> str:
         folder = str(session_id) if session_id else "unsessioned"
-        fname  = f"{_uuid_module.uuid4()}.png"
-        rel    = Path("charts") / folder / fname
-        out    = self.public_dir / rel
+        fname = f"{_uuid_module.uuid4()}.png"
+        rel = Path("charts") / folder / fname
+        out = self.public_dir / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_bytes(image_bytes)
         return f"/public/{rel.as_posix()}"
@@ -893,8 +1198,10 @@ class GraphicSeervice:
     def _load_matplotlib_pyplot():
         try:
             import matplotlib
+
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
+
             return plt
         except ImportError as err:
             raise HTTPException(

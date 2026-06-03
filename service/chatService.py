@@ -1,8 +1,10 @@
 from uuid import UUID
+import json
 import logging
 import time
 import uuid
 import asyncio
+from collections.abc import AsyncIterator
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
@@ -203,6 +205,229 @@ class ChatService:
         except Exception as error:
             await self.db.rollback()
             raise await self._handle_pipeline_error(pipeline, error)
+
+    async def process_query_stream(
+        self,
+        user_message: str,
+        user_id: UUID,
+        user_role: str,
+        session_id: UUID | None,
+        show_sql: bool = False,
+        context_from_clarification: Any = None,
+    ) -> AsyncIterator[str]:
+        """
+        Streaming version of process_query.
+        Yields SSE events (metadata first, then LLM token chunks, then done).
+        """
+        active_chatbot = await self.chatbot_service.get_active_chatbot_for_role(user_role)
+        addon_prompt = getattr(active_chatbot, "addon_prompt", None)
+
+        session_id = session_id or uuid.uuid4()
+        await self.session_service.create_session_if_missing(
+            session_id=session_id,
+            user_id=user_id,
+            first_message=user_message,
+            chatbot_id=active_chatbot.id,
+        )
+        user_chat_message = None
+        if context_from_clarification is None:
+            user_chat_message = await self.session_service.create_user_message(
+                session_id=session_id,
+                message=user_message,
+            )
+        pipeline = self._build_pipeline_context(
+            session_id=session_id,
+            user_id=user_id,
+            user_role=user_role,
+            user_message=user_message,
+        )
+        stages: list[PipelineStageInfo] = []
+        total_start = time.monotonic()
+
+        try:
+            clarification_stage = self._start_stage(stages, "Ambiguity Detection")
+            if context_from_clarification is None:
+                clarification_response = await self.clarification_service.process_user_query(
+                    user_query=user_message,
+                    user_role=user_role,
+                    session_id=session_id,
+                    addon_prompt=addon_prompt,
+                    message_id=self._coerce_message_id(user_chat_message.message_id) if user_chat_message is not None else None,
+                )
+
+                if clarification_response is not None:
+                    self._complete_stage(clarification_stage, "completed", "Clarification question generated")
+                    query_message = build_clarification_prompt_message(
+                        user_message=user_message,
+                        questions=[q.question for q in clarification_response.questions],
+                    )
+                    await self.session_service.create_chatbot_message(
+                        session_id=session_id,
+                        message=query_message,
+                    )
+                    await self.db.commit()
+                    # Yield the clarification response as a non-streamed metadata+message
+                    clarify_resp = ChatResponse(
+                        session_id=session_id,
+                        message=query_message,
+                        clarification_questions=clarification_response.questions,
+                        pipeline_stages=stages,
+                    )
+                    payload = clarify_resp.model_dump(mode="json")
+                    metadata = {k: v for k, v in payload.items() if k != "message"}
+                    message = payload.get("message") or ""
+                    yield f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+                    for word in self._message_chunks(message):
+                        yield f"event: message\ndata: {json.dumps({'chunk': word}, ensure_ascii=False)}\n\n"
+                    yield "event: done\ndata: {}\n\n"
+                    return
+                else:
+                    self._complete_stage(clarification_stage, "completed", "No clarification needed")
+            else:
+                self._complete_stage(clarification_stage, "completed", "Using disambiguated query")
+                SessionContextManager.get_session_context(session_id)
+
+            try:
+                generated_sql = await self._run_nl_to_sql_stage(
+                    stages=stages,
+                    user_message=user_message,
+                    user_id=user_id,
+                    user_role=user_role,
+                    pipeline=pipeline,
+                    addon_prompt=addon_prompt,
+                )
+                visualization_decision = await self._run_visualization_decision_stage(
+                    stages=stages,
+                    user_message=user_message,
+                )
+            except HTTPException as error:
+                if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+                    pipeline.execution_status = "degraded"
+                    resp = build_ai_unavailable_response(session_id, stages)
+                    payload = resp.model_dump(mode="json")
+                    metadata = {k: v for k, v in payload.items() if k != "message"}
+                    message = payload.get("message") or ""
+                    yield f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+                    for word in self._message_chunks(message):
+                        yield f"event: message\ndata: {json.dumps({'chunk': word}, ensure_ascii=False)}\n\n"
+                    yield "event: done\ndata: {}\n\n"
+                    return
+                raise
+
+            validation = self._run_sql_validation_stage(
+                stages=stages,
+                generated_sql=generated_sql,
+                user_id=user_id,
+                user_role=user_role,
+                pipeline=pipeline,
+            )
+            if not validation.is_valid:
+                resp = build_security_blocked_response(session_id, stages)
+                payload = resp.model_dump(mode="json")
+                metadata = {k: v for k, v in payload.items() if k != "message"}
+                message = payload.get("message") or ""
+                yield f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+                for word in self._message_chunks(message):
+                    yield f"event: message\ndata: {json.dumps({'chunk': word}, ensure_ascii=False)}\n\n"
+                yield "event: done\ndata: {}\n\n"
+                return
+
+            sanitized_sql = validation.sanitized_sql
+            query_result, rows_count = await self._run_sql_execution_stage(
+                stages=stages,
+                sanitized_sql=sanitized_sql or "",
+                user_id=user_id,
+                user_role=user_role,
+                pipeline=pipeline,
+            )
+            graphic_results: list[GraphicResult] = []
+            if visualization_decision.is_visualize:
+                graphic_results = self._run_graphic_generation_stage(
+                    stages=stages,
+                    query_result=query_result,
+                    chart_type=visualization_decision.chart_type or "bar",
+                    session_id=session_id,
+                )
+
+            # --- Begin streaming narrative ---
+            analysis_stage = self._start_stage(stages, "result_analysis")
+            analysis_prompt = build_analysis_prompt(
+                user_query=user_message,
+                executed_sql=sanitized_sql or "",
+                query_result=query_result,
+                rows_count=rows_count,
+                addon_prompt=addon_prompt,
+            )
+
+            total_ms = int((time.monotonic() - total_start) * 1000)
+            graphics_payload = build_graphics_payload(graphic_results)
+
+            # Build metadata payload (without the narrative message — not known yet)
+            metadata_resp = ChatResponse(
+                session_id=session_id,
+                message="",
+                generated_sql=sanitized_sql if show_sql else None,
+                graphics=[
+                    GraphicItemResponse(
+                        kpi_name=r.kpi_name or None,
+                        chart_type=r.chart_type,
+                        image_url=r.image_url,
+                    )
+                    for r in graphic_results
+                ],
+                rows_returned=rows_count,
+                execution_time_ms=total_ms,
+                pipeline_stages=stages,
+            )
+            payload = metadata_resp.model_dump(mode="json")
+            metadata = {k: v for k, v in payload.items() if k != "message"}
+            yield f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+
+            # Stream LLM tokens
+            full_narrative = ""
+            try:
+                async for token in llm.analyze_result_stream(analysis_prompt):
+                    full_narrative += token
+                    yield f"event: message\ndata: {json.dumps({'chunk': token}, ensure_ascii=False)}\n\n"
+                self._complete_stage(analysis_stage, "success", "Analisis naratif berhasil dibuat.")
+            except HTTPException as e:
+                if e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+                    self._complete_stage(analysis_stage, "degraded", "Dilewati karena rate limit.")
+                    fallback = (
+                        "Data berhasil diambil, namun analisis AI belum tersedia "
+                        "karena kuota/rate limit LLM tercapai. Silakan coba lagi nanti."
+                    )
+                    yield f"event: message\ndata: {json.dumps({'chunk': fallback}, ensure_ascii=False)}\n\n"
+                    full_narrative = fallback
+                else:
+                    raise
+
+            yield "event: done\ndata: {}\n\n"
+
+            # Persist the completed narrative
+            await self.session_service.create_chatbot_message(
+                session_id=session_id,
+                message=full_narrative,
+                graphics=graphics_payload,
+            )
+            await self.db.commit()
+
+        except Exception as error:
+            await self.db.rollback()
+            raise await self._handle_pipeline_error(pipeline, error)
+
+    @staticmethod
+    def _message_chunks(message: str) -> list[str]:
+        if not message:
+            return []
+        words = message.split(" ")
+        if len(words) == 1:
+            return words
+        chunks: list[str] = []
+        last_index = len(words) - 1
+        for index, word in enumerate(words):
+            chunks.append(f"{word} " if index < last_index else word)
+        return chunks
 
 
 
