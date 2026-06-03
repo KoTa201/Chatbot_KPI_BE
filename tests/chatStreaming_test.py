@@ -61,6 +61,20 @@ async def test_handle_chat_returns_stream_with_message_words(monkeypatch):
         async def process_query(self, **kwargs):
             return expected
 
+        def process_query_stream(self, **kwargs):
+            async def _stream():
+                payload = expected.model_dump(mode="json")
+                metadata = {key: value for key, value in payload.items() if key != "message"}
+                yield f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+                
+                message = payload.get("message") or ""
+                words = message.split(" ")
+                chunks = [f"{w} " if i < len(words) - 1 else w for i, w in enumerate(words)] if len(words) > 1 else words if words != [""] else []
+                for chunk in chunks:
+                    yield f"event: message\ndata: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+                yield "event: done\ndata: {}\n\n"
+            return _stream()
+
     monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
 
     controller = ChatController(db=None)  # type: ignore[arg-type]
@@ -119,6 +133,21 @@ async def test_handle_clarification_streams_message_and_keeps_metadata_non_strea
         async def process_query(self, **kwargs):
             captured["user_message"] = kwargs["user_message"]
             return expected
+
+        def process_query_stream(self, **kwargs):
+            captured["user_message"] = kwargs["user_message"]
+            async def _stream():
+                payload = expected.model_dump(mode="json")
+                metadata = {key: value for key, value in payload.items() if key != "message"}
+                yield f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+                
+                message = payload.get("message") or ""
+                words = message.split(" ")
+                chunks = [f"{w} " if i < len(words) - 1 else w for i, w in enumerate(words)] if len(words) > 1 else words if words != [""] else []
+                for chunk in chunks:
+                    yield f"event: message\ndata: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
+                yield "event: done\ndata: {}\n\n"
+            return _stream()
 
     monkeypatch.setattr(chat_controller_module, "ClarificationService", FakeClarificationService)
     monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
@@ -189,6 +218,10 @@ async def test_handle_clarification_streams_next_clarification_without_rag(monke
             captured["rag_called"] = True
             raise AssertionError("RAG pipeline should not run when more clarification is needed")
 
+        def process_query_stream(self, **kwargs):
+            captured["rag_called"] = True
+            raise AssertionError("RAG pipeline should not run when more clarification is needed")
+
     monkeypatch.setattr(chat_controller_module, "ClarificationService", FakeClarificationService)
     monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
 
@@ -230,6 +263,13 @@ async def test_handle_chat_passes_authority_role_to_service(monkeypatch):
         async def process_query(self, **kwargs):
             captured.update(kwargs)
             return expected
+
+        def process_query_stream(self, **kwargs):
+            captured.update(kwargs)
+            async def _stream():
+                yield f"event: metadata\ndata: {{}}\n\n"
+                yield f"event: done\ndata: {{}}\n\n"
+            return _stream()
 
     monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
 
