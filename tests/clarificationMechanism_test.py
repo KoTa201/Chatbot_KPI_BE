@@ -6,7 +6,11 @@ Berdasarkan skenario di PRD Section 8.
 
 import json
 from utils.sessionContextManager import SessionContextManager
-from template.promptTemplate import build_ambiguity_assessment_prompt, build_query_disambiguation_prompt
+from template.promptTemplate import (
+    build_ambiguity_assessment_prompt,
+    build_clarification_choice_generation_prompt,
+    build_query_disambiguation_prompt,
+)
 from schema.clarificationSchema import (
     AmbiguityAssessmentResult,
     DetectedAmbiguity,
@@ -399,6 +403,11 @@ class TestClarificationService:
             SimpleNamespace(clarification_question_id="q2"),
         ])
 
+        service.llm._call_llm = AsyncMock(side_effect=[
+            json.dumps({"choices": ["Achievement %", "Realisasi", "Abstain", "Others"]}),
+            json.dumps({"choices": ["Calendar Year 2025", "Fiscal Year 2025", "Abstain", "Others"]}),
+        ])
+
         with patch.object(service.ambiguity_detector, 'detect_ambiguity', new_callable=AsyncMock) as mock_detect:
             mock_detect.return_value = AmbiguityAssessmentResult(
                 is_ambiguous=True,
@@ -430,6 +439,60 @@ class TestClarificationService:
         assert len(result.questions) == 2
         assert result.questions[0].options[-2:] == ["Lewati", "Lainnya"]
         assert service.repo.create.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_generate_clarifying_question_always_uses_cq_generation_llm(self):
+        service = ClarificationService(db=None)
+        service.llm._call_llm = AsyncMock(return_value=json.dumps({
+            "choices": [
+                "achievement::kpi_tracker, gunakan persentase pencapaian KPI",
+                "actual_value::kpi_tracker, gunakan nilai aktual KPI",
+                "Abstain",
+                "Others",
+            ]
+        }))
+
+        result = await service._generate_clarifying_question(
+            ambiguity_type="AmbiSchema",
+            suggested_question="Metrik mana yang dimaksud?",
+            suggested_options=[
+                "kpi_tracker::achievement, persentase pencapaian KPI",
+                "kpi_tracker::actual_value, nilai aktual KPI",
+            ],
+            metadata={"level_1_label": "Database-sourced ambiguity"},
+        )
+
+        assert service.llm._call_llm.await_count == 1
+        assert result.clarifying_question == "Metrik mana yang dimaksud?"
+        assert result.options == [
+            "achievement::kpi_tracker, gunakan persentase pencapaian KPI",
+            "actual_value::kpi_tracker, gunakan nilai aktual KPI",
+            "Lewati",
+            "Lainnya",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_generate_clarifying_question_falls_back_to_detector_options_when_cq_generation_fails(self):
+        service = ClarificationService(db=None)
+        service.llm._call_llm = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+
+        result = await service._generate_clarifying_question(
+            ambiguity_type="AmbiView",
+            suggested_question="Perkembangan ingin dilihat dari aspek apa?",
+            suggested_options=[
+                "Pencapaian KPI per periode",
+                "Tren performa dari waktu ke waktu",
+            ],
+            metadata={},
+        )
+
+        assert service.llm._call_llm.await_count == 1
+        assert result.options == [
+            "Pencapaian KPI per periode",
+            "Tren performa dari waktu ke waktu",
+            "Lewati",
+            "Lainnya",
+        ]
 
     @pytest.mark.asyncio
     async def test_handle_clarification_response_rewrites_from_batched_answers(self):
@@ -663,6 +726,9 @@ class TestClarificationService:
         service = ClarificationService(db=None)
         service.repo.create = AsyncMock(
             return_value=SimpleNamespace(clarification_question_id=uuid4()))
+        service.llm._call_llm = AsyncMock(return_value=json.dumps({
+            "choices": ["Per individu", "Per divisi", "Abstain", "Others"]
+        }))
 
         with patch.object(
             service.ambiguity_detector,
@@ -1324,6 +1390,80 @@ async def test_clarification_service_passes_addon_prompt_to_detector(monkeypatch
 
 
 class TestKPIPrompts:
+    def test_build_clarification_choice_generation_prompt_uses_question_description_and_templates(self):
+        prompt = build_clarification_choice_generation_prompt(
+            question="Metrik mana yang dimaksud?",
+            description=[
+                "kpi_tracker::achievement, persentase pencapaian KPI",
+                "kpi_tracker::actual_value, nilai aktual KPI",
+            ],
+            templates="AmbiSchema: list each column choice clearly.",
+        )
+
+        assert "Metrik mana yang dimaksud?" in prompt
+        assert "kpi_tracker::achievement" in prompt
+        assert "AmbiSchema: list each column choice clearly." in prompt
+        assert '"choices"' in prompt
+        assert "Abstain" in prompt
+        assert "Others" in prompt
+
+    def test_ambiguity_prompt_treats_description_options_as_candidate_context(self):
+        prompt = build_ambiguity_assessment_prompt(
+            user_query="bagaimana perkembangan andi",
+            user_role="karyawan",
+            kpi_context="schema context",
+        )
+
+        assert "description.options" in prompt
+        assert "candidate" in prompt.lower() or "kandidat" in prompt.lower()
+        assert "final user-facing" in prompt.lower() or "final pilihan" in prompt.lower()
+
+    def test_ambiguity_prompt_uses_general_options_for_name_without_evidence(self):
+        prompt = build_ambiguity_assessment_prompt(
+            user_query="bagaimana perkembangan andi",
+            user_role="karyawan",
+            kpi_context="schema context without employee candidates",
+        )
+
+        assert "Andi Susanto" not in prompt
+        assert "Andi Pratama" not in prompt
+        assert "Andi Wijaya" not in prompt
+        assert "does not provide real candidate records" in prompt
+        assert "must not invent specific names, IDs, divisions, or database values" in prompt
+        assert 'Search employees whose name contains "Andi"' in prompt
+        assert 'Treat "Andi" as the full employee name' in prompt
+        assert "provide the intended employee name manually" in prompt
+
+    def test_ambiguity_prompt_keeps_name_and_progress_ambiguities(self):
+        prompt = build_ambiguity_assessment_prompt(
+            user_query="bagaimana perkembangan andi",
+            user_role="karyawan",
+            kpi_context="schema context",
+        )
+
+        assert '"andi" → cannot be matched to a single unique employee → AmbiValue' in prompt
+        assert '"perkembangan" → unclear metric/operation → AmbiView' in prompt
+        assert '"level_2_label": "AmbiValue"' in prompt
+        assert '"level_2_label": "AmbiView"' in prompt
+
+    def test_choice_generation_prompt_forbids_new_specific_database_values(self):
+        prompt = build_clarification_choice_generation_prompt(
+            question="Andi yang dimaksud merujuk ke karyawan yang mana?",
+            description={
+                "options": [
+                    'Search employees whose name contains "Andi"',
+                    'Treat "Andi" as the full employee name',
+                    "I will provide the intended employee name manually",
+                ]
+            },
+            templates="AmbiValue: rewrite intent choices clearly.",
+        )
+
+        assert "must not introduce specific names, IDs, divisions, or database values" in prompt
+        assert "not present in the input description" in prompt
+        assert "may rewrite input options into clearer user-facing sentences" in prompt
+        assert "must not add new facts" in prompt
+
     def test_ambiguity_prompt_uses_ambisql_question_set_format(self):
         prompt = build_ambiguity_assessment_prompt(
             user_query="Tampilkan pengguna berdasarkan tanggal registrasi",
@@ -1333,10 +1473,10 @@ class TestKPIPrompts:
 
         assert "question_set" in prompt
         assert "has_ambiguity" in prompt
-        assert "Question:" in prompt
-        assert "Schema:" in prompt
+        assert "Question :" in prompt
+        assert "Schema   :" in prompt
         assert "Evidence:" in prompt
-        assert "AmbiIntent" in prompt
+        assert "AmbiView" in prompt
         assert "AmbiSource" not in prompt
         assert "Abstain" in prompt
 
@@ -1377,7 +1517,7 @@ class TestKPIPrompts:
 
         assert "AmbiSchema" in prompt
         assert "AmbiValue" in prompt
-        assert "AmbiIntent" in prompt
+        assert "AmbiView" in prompt
         assert "AmbiRef" in prompt
         assert "question_set" in prompt
         assert "KPI Master dan KPI Tracker context" in prompt

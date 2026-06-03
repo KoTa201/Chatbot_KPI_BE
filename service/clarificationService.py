@@ -31,7 +31,11 @@ from utils.helper.clarificationHelpers import (
 )
 from service.llmService import LLMService
 from service.preferenceTreeService import PreferenceTree
-from template.promptTemplate import build_context, build_query_disambiguation_prompt
+from template.promptTemplate import (
+    build_clarification_choice_generation_prompt,
+    build_context,
+    build_query_disambiguation_prompt,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -288,38 +292,88 @@ class ClarificationService:
             questions=questions,
         )
 
-    @staticmethod
     async def _generate_clarifying_question(
-            ambiguity_type: str,
+        self,
+        ambiguity_type: str,
         suggested_question: Optional[str],
         suggested_options: Optional[list[str]],
         metadata: dict | None = None,
     ) -> ClarifyingQuestionData:
-        if suggested_question and suggested_options:
-            logger.info(
-                "[ClarificationGenerator] Formatting detector question")
-            default_options = ["Lewati", "Lainnya"]
-            raw_options = [
-                option for option in suggested_options if option not in default_options]
-            options = raw_options[:5] + default_options
-            return ClarifyingQuestionData(
-                clarifying_question=suggested_question,
-                options=options,
-                default_if_no_answer="Lewati",
-                ambiguity_type=ambiguity_type,
-                metadata=metadata or {},
+        question = suggested_question or ""
+        candidate_options = suggested_options or []
+        try:
+            prompt = build_clarification_choice_generation_prompt(
+                question=question,
+                description=candidate_options,
+                templates=self._choice_generation_templates(),
             )
+            response = await self.llm._call_llm(
+                prompt=prompt,
+                temperature=0.2,
+                max_output_tokens=300,
+                model=settings.LLM_MODEL_DISAMBIGUATION,
+            )
+            options = self._normalize_generated_choices(response)
+            logger.info("[ClarificationGenerator] Generated options via standalone CQ prompt")
+        except Exception as exc:
+            logger.warning(
+                "[ClarificationGenerator] CQ generation failed (%s); using detector options fallback",
+                exc,
+            )
+            options = self._fallback_choices(candidate_options)
 
-        logger.warning(
-            "[ClarificationGenerator] Detector did not provide a complete clarification question"
-        )
         return ClarifyingQuestionData(
-            clarifying_question="",
-            options=["Lewati", "Lainnya"],
+            clarifying_question=question,
+            options=options,
             default_if_no_answer="Lewati",
             ambiguity_type=ambiguity_type,
             metadata=metadata or {},
         )
+
+    @staticmethod
+    def _choice_generation_templates() -> str:
+        return """
+        AmbiSchema: list every plausible column as a descriptive sentence using column_name::table_name and the column description.
+        AmbiValue: list every plausible database value or WHERE interpretation with short evidence.
+        AmbiView: list every plausible metric, aggregation, or SQL operation with a clear user-facing meaning.
+        AmbiContext: list concrete values, ranges, or constraints the user can choose.
+        AmbiFallacy: list likely corrections for the contradictory reference.
+        AmbiRef: list concrete temporal or spatial interpretations.
+        """.strip()
+
+    @classmethod
+    def _normalize_generated_choices(cls, response: str) -> list[str]:
+        payload = json.loads(response.strip())
+        raw_choices = payload.get("choices")
+        if not isinstance(raw_choices, list):
+            raise ValueError("CQ generation response must contain choices list")
+
+        content_choices = [
+            str(choice).strip()
+            for choice in raw_choices
+            if str(choice).strip() and str(choice).strip() not in {"Abstain", "Others", "Lewati", "Lainnya"}
+        ]
+        if not content_choices:
+            raise ValueError("CQ generation returned no content choices")
+
+        return cls._limit_content_choices(content_choices) + ["Lewati", "Lainnya"]
+
+    @classmethod
+    def _fallback_choices(cls, candidate_options: list[str]) -> list[str]:
+        content_choices = [
+            str(option).strip()
+            for option in candidate_options
+            if str(option).strip() and str(option).strip() not in {"Abstain", "Others", "Lewati", "Lainnya"}
+        ]
+        return cls._limit_content_choices(content_choices) + ["Lewati", "Lainnya"]
+
+    @staticmethod
+    def _limit_content_choices(content_choices: list[str]) -> list[str]:
+        seen = []
+        for choice in content_choices:
+            if choice not in seen:
+                seen.append(choice)
+        return seen[:5]
 
     async def get_session_clarification_history(
         self, session_id: UUID

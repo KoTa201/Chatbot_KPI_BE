@@ -221,8 +221,6 @@ def build_analysis_prompt(
 # ================================================================ #
 #  CLARIFICATION PROMPTS                                           #
 # ================================================================ #
-
-
 def build_ambiguity_assessment_prompt(
     user_query: str,
     user_role: str,
@@ -233,116 +231,302 @@ def build_ambiguity_assessment_prompt(
     Membangun prompt untuk LLM-based ambiguity detection dengan format AmbiSQL.
     Menggunakan question_set format dengan level-1 dan level-2 ambiguity taxonomy.
     Output JSON mengikuti spec ketat: has_ambiguity + question_set dengan structure yang tepat.
+
+    Fixes applied:
+    - Scope check hanya gagal jika topik tidak relevan, bukan jika nilai spesifik tidak dikenal
+    - LLM dilarang self-resolve ambiguity (nama tidak unik → AmbiValue, metric ambigu → AmbiView)
+    - Few-shot examples konkret untuk kasus seperti "bagaimana perkembangan andi"
+    - Instruksi analisis diperkuat agar tidak bias ke false negative
     """
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
-    prompt = f"""Given a user question, database schema, and optional evidence, identify ambiguities in the user question and generate clarification questions to resolve them.
-    Contents in the evidence are user provided clarifications to resolve previous detected ambiguities.
-    Note that the user question might use both data inside the database and external parametrized knowledge from the Large Language Model (LLM).
-    {addon_prompt_block}
-    ════════════════════════════════════════════════════════════════
-    INPUT ELEMENTS:
-    ════════════════════════════════════════════════════════════════
-    
-    Question: "{user_query}"
-    Role: {user_role}
-    Schema: {DB_SCHEMA}
-    Evidence: {kpi_context}
-    
-    ## Ambiguity Definition & Taxonomy:
-    A user question is identifies as ambiguous when there is more than one reasonable interpretation due to unclear, incomplete, or conflicting information.
-    The ambiguity in a user question are defined as two different levels.
-    - level_1 ambiguity type are defined from two different dimensions, database and LLM repectively:
-        - "Database-sourced ambiguity": Ambiguity that leads to incorrect or incomplete data retrieval directly from the database, due to unclear or underspecified aspects of the user query with respect to the database schema or content.
-        - "LLM-sourced ambiguity": Ambiguity that results in the misuse of LLM external knowledge, causing difficulties in correctly retrieving or applying information beyond the database.
-    - level_2 ambiguity type are defined under each level_1 ambiguity type as follows:
-        - Database-sourced ambiguity:
-          - "AmbiSchema": The question lacks sufficient context to determine which table or specific column to use for operations(e.g., filtering, grouping, ranking, joining, aggregation, etc.), resulting in multiple plausible interpretations.
-            - (e.g., "the oldest user" could refer to 'age' column or 'registration_date' column, representing different aspects of user's age or registration date).
-          - "AmbiValue": The question refers to a value that does not correctly correspond to the actual values stored in the database, making it unclear how to formulate the WHERE clause condition and potentially causing relevant results to be omitted or producing inaccurate results.
-            - (e.g., querying posts mentioning the "R programming language", the WHERE clause might be "posts.Body LIKE '%R%'", or "posts.Body = 'programming language'", etc)
-            - (e.g., querying for users living in "New York City", the WHERE clause might be "users.City = 'New York City'", or "users.City = 'NYC'", etc)
-            - (e.g., querying for posts about coronavirus, the WHERE clause might be "posts.Body LIKE '%COVID-19%'", or "posts.Body = 'coronavirus'", etc)
-          - "AmbiView": Key terms clarifying the intended operation are absent, leading to ambiguity about the desired SQL operation 
-            - (e.g., query as 'Top 5 popular tags's star', which can list each tag's star or the amount of stars).
-        - LLM-sourced ambiguity:
-          - "AmbiContext": The question lacks adequate information to guide LLM reasoning effectively.
-            - (e.g., requesting dynamic or time-sensitive external information like "current exchange rate" without specifying the target currencies or date).
-          - "AmbiFallacy": Knowledge assumptions embedded within the question contradicts real-world facts or database contents 
-            - (e.g., querying entities or participants in events that never occurred, like 2001 Olympic Games).
-          - "AmbiRef": Spatial or temporal constraints are underspecified, resulting in multiple possible interpretations at different granularities 
-            - (e.g., querying for records "after the 2018 World Cup" could mean immediately after the final match or after the entire tournament year).
-            - (e.g., querying for records in the 'Middle East Region' might cause missing countries in the list for "Middle East" due to vague or imprecise geographic constraints from different sources).
-          
-    ## Instructions
-    1. Analyze user question, database schema and evidence(if provided) to identify all possible ambiguous phrases in the user question.
-    2. For each unresolved ambiguity: **(1)** Assign exactly one level-1 and one level-2 label. **(2)** Write a multi-choice question for user to further clarify their intent.
-    3. For each multi-choice question: provide several possible options for users to choose from, add a description for each option, and add an explanation for the whole question through thinking. Formulate options and corresponding description based on the ambiguity type detected as follows:
-      i. For "AmbiSchema", list all plausible columns with the format of 'table_name::column_name', with relevant descriptive schema info retrieved from the input database schema.
-      ii. For "AmbiValue", list most likely 2-3 possible interpretations of WHERE clause, with concise explanation for each interpretation.
-      iii. For "AmbiView", list most likely 2-3 possible interpretations of SQL operations, with concise explanation for each interpretation.
-      v. For "AmbiContext", list most likely 2-3 possible values, ranges or constraints with concise explanation for each interpretation.
-      vi. For "AmbiFallacy", list most likely 2-3 best-guessing interpretations of the 'fallacy' info considering it as a typo.
-      vii. For "AmbiRef", list most likey 2-3 interpretations according to the reference part in the original user query.
-    **Important Note**: 
-    - All possible options should be in complete with concise description for user to select(Do not use such as or etc to omit some necessary options).
-    - Not each input question is ambiguous. If all ambiguities are resolved or the original user input is unambiguous, return an empty question_set. (e.g., If only one column in the database is plausible, it should not be an unclear schema reference)
-    - If the user's response in evidence to a specific ambiguity is 'Abstain', it means the identified ambiguity is not an actual ambiguity, and you can skip this ambiguity and not identify it again.
-    
-    ════════════════════════════════════════════════════════════════
-    OUTPUT FORMAT (Strict JSON — FOLLOW EXACTLY):
-    ════════════════════════════════════════════════════════════════
-    
+    prompt = f"""You are a strict question classifier and ambiguity detector for a data analytics system.
+{addon_prompt_block}
+
+════════════════════════════════════════════════════════════════
+INPUT ELEMENTS:
+════════════════════════════════════════════════════════════════
+
+Question : "{user_query}"
+Role     : {user_role}
+Schema   : {DB_SCHEMA}
+Evidence : {kpi_context}
+
+════════════════════════════════════════════════════════════════
+STEP 1 — SCOPE CHECK (EXECUTE THIS FIRST, NO EXCEPTIONS):
+════════════════════════════════════════════════════════════════
+
+Evaluate whether the DOMAIN/TOPIC of the question is answerable
+using the schema, evidence, or KPI definitions.
+
+CRITICAL DISTINCTION — these are NOT the same:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ Unknown/unclear specific values (names, dates, terms)       │
+  │ → NOT a scope failure → they are AMBIGUITIES → go to STEP 2│
+  │                                                             │
+  │ Topic entirely unrelated to any table/column/KPI            │
+  │ → IS a scope failure → return out-of-scope string           │
+  └─────────────────────────────────────────────────────────────┘
+
+A question is IN SCOPE if:
+  ✓ The topic could plausibly map to at least one table, column, or KPI
+  ✓ Even if specific values (names, dates, entities) are unrecognized or ambiguous
+
+A question is OUT OF SCOPE only if:
+  ✗ The topic is completely unrelated to the database domain
+  ✗ No table, column, KPI, or evidence could even partially answer it
+
+Scope check examples:
+  ✓ IN SCOPE  → "bagaimana perkembangan andi"
+                Topic = employee progress → matches schema domain
+                "andi" being unrecognized = AmbiValue, NOT a scope failure
+
+  ✓ IN SCOPE  → "siapa karyawan terbaik bulan ini"
+                Topic = employee performance → matches schema
+
+  ✓ IN SCOPE  → "tunjukkan data divisi X"
+                Topic matches schema even if "divisi X" is unclear
+
+  ✗ OUT OF SCOPE → "apa resep nasi goreng yang enak"
+                   Topic = cooking → zero relation to schema
+
+  ✗ OUT OF SCOPE → "berapa harga saham Apple hari ini"
+                   Topic = stock market → no table/KPI covers this
+
+If OUT OF SCOPE:
+  ✗ Do NOT analyze ambiguity
+  ✗ Do NOT generate clarifying questions
+  ✗ Do NOT output JSON
+  ✓ Output EXACTLY this string and nothing else:
+    The question is out of my scope
+
+If IN SCOPE → proceed to STEP 2.
+
+════════════════════════════════════════════════════════════════
+STEP 2 — AMBIGUITY ANALYSIS (only if in scope):
+════════════════════════════════════════════════════════════════
+
+## Ambiguity Taxonomy:
+
+level_1 types:
+  - "Database-sourced ambiguity": Causes incorrect/incomplete DB retrieval
+  - "LLM-sourced ambiguity": Causes misuse of LLM external knowledge
+
+level_2 types under Database-sourced:
+  - "AmbiSchema": Unclear which table or column to use for the operation
+    (e.g., "oldest user" → 'users::age' column vs 'users::registration_date' column)
+  - "AmbiValue": A name, term, or value in the question cannot be uniquely matched
+    to a specific record or value stored in the database
+    (e.g., "andi" → multiple employees named Andi exist, unclear which one)
+    (e.g., "New York City" → stored as 'NYC', 'New York', or 'New York City'?)
+    (e.g., "coronavirus" → stored as 'COVID-19', 'coronavirus', 'SARS-CoV-2'?)
+  - "AmbiView": The intended SQL operation, metric, or aggregation is unclear
+    (e.g., "perkembangan" → KPI achievement? trend over time? comparison vs target?)
+    (e.g., "terbaik" → highest total? highest average? most consistent?)
+
+level_2 types under LLM-sourced:
+  - "AmbiContext": Insufficient context for LLM reasoning
+    (e.g., "nilai tukar saat ini" without specifying currencies or reference date)
+  - "AmbiFallacy": Question references something that contradicts real-world facts
+    (e.g., "Olimpiade 2001" — no such event exists)
+  - "AmbiRef": Spatial or temporal reference is underspecified
+    (e.g., "setelah Piala Dunia 2018" → after the final match vs after the whole year)
+    (e.g., "wilayah Asia Tenggara" → exact country list varies by source)
+
+## Analysis Instructions:
+
+1. Carefully read the question and identify every phrase that could be interpreted
+   in more than one way relative to the schema, evidence, and KPI definitions.
+
+2. CRITICAL — Do NOT self-resolve ambiguities. Apply these rules strictly:
+   ┌──────────────────────────────────────────────────────────────────────┐
+   │ RULE A: If a person/entity name appears but cannot be matched to     │
+   │ exactly ONE record in the DB → it is ALWAYS AmbiValue. Ask the user. │
+   │                                                                      │
+   │ RULE B: If an action/metric word ("perkembangan", "progress",        │
+   │ "performa", "terbaik", "terbanyak") can map to more than one SQL     │
+   │ operation or KPI → it is ALWAYS AmbiView. Ask the user.             │
+   │                                                                      │
+   │ RULE C: Never assume the most likely interpretation and skip asking. │
+   │ Never use general knowledge to resolve what should be asked.         │
+   └──────────────────────────────────────────────────────────────────────┘
+
+3. For each unresolved ambiguity:
+   - Assign exactly one level_1 and one level_2 label
+   - Write a concise clarification question in Bahasa Indonesia
+   - Put 2–5 complete, mutually exclusive candidate option contexts/evidence in description.options
+   - These description.options are NOT final user-facing choices; a separate clarification-choice generator will rewrite them
+
+4. Option format per ambiguity type:
+   - AmbiSchema  → list all plausible columns as 'table_name::column_name'
+                   with relevant descriptive info from the schema
+   - AmbiValue   → 2–3 possible WHERE clause interpretations with explanation
+   - AmbiView    → 2–3 possible SQL operations or KPI metrics with explanation
+   - AmbiContext → 2–3 possible values, ranges, or constraints with explanation
+   - AmbiFallacy → 2–3 best-guess corrections treating the reference as a typo
+   - AmbiRef     → 2–3 interpretations of the temporal/spatial reference
+
+5. Completeness rules:
+   - List ALL plausible options — never use "dll." or "etc." to omit options
+   - If only one column is plausible for a term → NOT an AmbiSchema
+   - Evidence marked "Abstain" → skip that specific ambiguity permanently
+   - If genuinely zero ambiguities remain → return empty question_set
+
+════════════════════════════════════════════════════════════════
+FEW-SHOT EXAMPLES:
+════════════════════════════════════════════════════════════════
+
+--- EXAMPLE 1: Multiple ambiguities (typical case) ---
+
+Question : "bagaimana perkembangan andi"
+Analysis :
+  - "andi" → cannot be matched to a single unique employee → AmbiValue
+  - "perkembangan" → unclear metric/operation → AmbiView
+
+Expected output:
+{{
+  "has_ambiguity": true,
+  "question_set": [
     {{
-      "has_ambiguity": true,
-      "question_set": [
-        {{
-          "question": "Progress KPI Akmal ingin dilihat dari sisi apa?",
-          "level_1_label": "LLM-sourced ambiguity",
-          "level_2_label": "AmbiIntent",
-          "description": {{
-            "options": [
-              "Realisasi KPI terbaru",
-              "Persentase pencapaian terhadap target",
-              "Tren progress dari waktu ke waktu"
-            ]
-          }}
-        }},
-        {{
-          "question": "Akmal merujuk ke karyawan atau KPI yang mana?",
-          "level_1_label": "Database-sourced ambiguity",
-          "level_2_label": "AmbiValue",
-          "description": {{
-            "options": [
-              "Karyawan bernama Akmal",
-              "KPI yang mengandung kata Akmal"
-            ]
-          }}
+      "question": "Andi yang dimaksud merujuk ke karyawan yang mana?",
+      "level_1_label": "Database-sourced ambiguity",
+      "level_2_label": "AmbiValue",
+      "description": {{
+        "options": [
+              "Berdasarkan nama lengkap — nama karyawan yang mengandung kata Andi,
+              "Berdasarkan nama kpi - nama kpi mengandung kata Andi",
+        ]
+      }}
+    }},
+    {{
+      "question": "Perkembangan Andi ingin dilihat dari aspek apa?",
+      "level_1_label": "Database-sourced ambiguity",
+      "level_2_label": "AmbiView",
+      "description": {{
+        "options": [
+          "Pencapaian KPI per periode — membandingkan target vs nilai aktual setiap periode",
+          "Tren performa dari waktu ke waktu — melihat naik/turunnya nilai KPI antar periode",
+          "Perbandingan performa terhadap rata-rata tim — posisi Andi relatif terhadap rekan satu divisi"
+        ]
+      }}
+    }}
+  ]
+}}
+
+--- EXAMPLE 2: Unambiguous question ---
+
+Question : "tampilkan total penjualan bulan Januari 2024"
+Analysis :
+  - "total penjualan" → maps clearly to one aggregation
+  - "Januari 2024" → specific and unambiguous time range
+
+Expected output:
+{{
+  "has_ambiguity": false,
+  "question_set": []
+}}
+
+--- EXAMPLE 3: Out of scope ---
+
+Question : "apa rekomendasi saham yang bagus minggu ini"
+Analysis :
+  - Topic = stock investment recommendation → no table/column/KPI covers this
+
+Expected output:
+  The question is out of my scope
+
+════════════════════════════════════════════════════════════════
+OUTPUT FORMAT — THREE POSSIBLE OUTPUTS ONLY:
+════════════════════════════════════════════════════════════════
+
+OUT OF SCOPE → plain string, no JSON:
+  The question is out of my scope
+
+IN SCOPE + AMBIGUOUS → strict JSON:
+  {{
+    "has_ambiguity": true,
+    "question_set": [
+      {{
+        "question": "<pertanyaan klarifikasi dalam Bahasa Indonesia>",
+        "level_1_label": "<Database-sourced ambiguity | LLM-sourced ambiguity>",
+        "level_2_label": "<AmbiSchema | AmbiValue | AmbiView | AmbiContext | AmbiFallacy | AmbiRef>",
+        "description": {{
+          "options": [
+            "<opsi 1 dengan deskripsi singkat>",
+            "<opsi 2 dengan deskripsi singkat>",
+            "<opsi 3 dengan deskripsi singkat>"
+          ]
         }}
-      ]
-    }}
-    
-    CONTOH OUTPUT TIDAK AMBIGUOUS:
-    {{
-      "has_ambiguity": false,
-      "question_set": []
-    }}
-    
-    CRITICAL JSON STRUCTURE RULES:
-    - NO per-item "metadata" field
-    - "description" MUST be an object with ONLY "options" key containing array of strings
-    - "options" array contains ONLY the clarifying options (2-5 items)
-    - question_set is array of objects, each with exactly: question, level_1_label, level_2_label, description
-    
-    ════════════════════════════════════════════════════════════════
-    REMEMBER:
-    ════════════════════════════════════════════════════════════════
-    - Data source ALWAYS database. DO NOT create source-selection ambiguity category.
-    - "Abstain" means: skip that ambiguity type and do not identify it again in future queries
-    - Return ONLY valid JSON. NO markdown, NO explanation, NO comments.
-    - Respect the strict JSON shape above. Do not add extra fields."""
+      }}
+    ]
+  }}
+
+IN SCOPE + UNAMBIGUOUS → strict JSON:
+  {{
+    "has_ambiguity": false,
+    "question_set": []
+  }}
+
+════════════════════════════════════════════════════════════════
+CRITICAL RULES (must be followed in every response):
+════════════════════════════════════════════════════════════════
+  - STEP 1 always runs first — unknown specific values → AmbiValue, NOT out of scope
+  - NEVER self-resolve ambiguities; always ask the user (see RULE A, B, C above)
+  - "description" must be an object with ONLY an "options" key (array of candidate context/evidence strings)
+  - description.options are raw candidate context/evidence, not final user-facing choices
+  - NO "metadata" field, NO extra fields anywhere in the JSON
+  - question_set items must have exactly: question, level_1_label, level_2_label, description
+  - Return ONLY valid JSON for in-scope questions
+  - Return ONLY the plain scope string for out-of-scope questions
+  - NO markdown formatting, NO code fences, NO explanation text, NO comments
+  - Data source is ALWAYS the database — never create source-selection ambiguity
+  - "Abstain" in evidence = skip that specific ambiguity permanently and do not re-identify it"""
 
     return prompt
+
+
+def build_clarification_choice_generation_prompt(
+    question: str,
+    description,
+    templates: str = "",
+) -> str:
+    return f'''## Task
+    Your task is to analyze a clarification question and its accompanying description, and then generate a list of choices for the clarification question.
+    Each choice should be a self-contained, natural language sentence that is easy for a non-technical user to understand and select.
+    
+    ## Instructions:
+    - Make sure all choices follow similar formats (e.g, choice + a concise and clear explanation/evidence for the choice)
+    - If there are columns to be chosen, list each column choice as "column_name::table_name, column_description" in a descriptive sentence.
+    - Choose the most appropriate question template to formulate choices based on the given templates.
+    - You MUST always add two compulsory choices: "Abstain" and "Others" into the choice list.
+    
+    ## Input
+    - **Question**: The clarification question that needs to be answered.
+    - **Description**: The context, explanations or data evidences containing the potential choices for the clarification question. This can be a simple string or a structured JSON object.
+    
+    ## Output format
+    You MUST respond with ONLY a single, valid JSON string without any additional text, explanations, or markdown formatting. The string must contain a single key, "choices", which is a list of strings as follows:
+    {{
+      "choices": [
+        "choice1",
+        "choice2",
+        "choice3",
+        ...,
+        "Abstain",
+        "Others"
+      ]
+    }}
+    ---
+    **Templates:**
+    {templates}
+    ---
+    **Input:**
+    Input question: {question}
+    Input description: {description}
+    ---
+    The choices are:
+    '''
+
 
 def build_query_disambiguation_prompt(
     original_query: str,
