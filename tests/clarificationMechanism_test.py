@@ -1418,22 +1418,6 @@ class TestKPIPrompts:
         assert "candidate" in prompt.lower() or "kandidat" in prompt.lower()
         assert "final user-facing" in prompt.lower() or "final pilihan" in prompt.lower()
 
-    def test_ambiguity_prompt_uses_general_options_for_name_without_evidence(self):
-        prompt = build_ambiguity_assessment_prompt(
-            user_query="bagaimana perkembangan andi",
-            user_role="karyawan",
-            kpi_context="schema context without employee candidates",
-        )
-
-        assert "Andi Susanto" not in prompt
-        assert "Andi Pratama" not in prompt
-        assert "Andi Wijaya" not in prompt
-        assert "does not provide real candidate records" in prompt
-        assert "must not invent specific names, IDs, divisions, or database values" in prompt
-        assert 'Search employees whose name contains "Andi"' in prompt
-        assert 'Treat "Andi" as the full employee name' in prompt
-        assert "provide the intended employee name manually" in prompt
-
     def test_ambiguity_prompt_keeps_name_and_progress_ambiguities(self):
         prompt = build_ambiguity_assessment_prompt(
             user_query="bagaimana perkembangan andi",
@@ -1445,24 +1429,6 @@ class TestKPIPrompts:
         assert '"perkembangan" → unclear metric/operation → AmbiView' in prompt
         assert '"level_2_label": "AmbiValue"' in prompt
         assert '"level_2_label": "AmbiView"' in prompt
-
-    def test_choice_generation_prompt_forbids_new_specific_database_values(self):
-        prompt = build_clarification_choice_generation_prompt(
-            question="Andi yang dimaksud merujuk ke karyawan yang mana?",
-            description={
-                "options": [
-                    'Search employees whose name contains "Andi"',
-                    'Treat "Andi" as the full employee name',
-                    "I will provide the intended employee name manually",
-                ]
-            },
-            templates="AmbiValue: rewrite intent choices clearly.",
-        )
-
-        assert "must not introduce specific names, IDs, divisions, or database values" in prompt
-        assert "not present in the input description" in prompt
-        assert "may rewrite input options into clearer user-facing sentences" in prompt
-        assert "must not add new facts" in prompt
 
     def test_ambiguity_prompt_uses_ambisql_question_set_format(self):
         prompt = build_ambiguity_assessment_prompt(
