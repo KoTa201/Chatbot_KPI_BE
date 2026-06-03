@@ -2,20 +2,22 @@
 Chat Controller — validasi request/response untuk endpoint chatbot.
 Mengekstrak konteks user dari JWT dan meneruskan ke ChatService.
 """
+
+import asyncio
 import json
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
 
 from databaseConfig import get_db
+from model.User import User
+from schema.chatSchema import ChatRequest, ChatResponse
 from service.authService import get_current_user
 from service.chatService import ChatService
 from service.clarificationService import ClarificationService
-from schema.chatSchema import ChatRequest, ChatResponse
-from model.User import User
 
 
 class ChatController:
@@ -46,15 +48,21 @@ class ChatController:
                 detail="Token tidak memuat informasi user yang valid.",
             )
 
-
-        response = await self.service.process_query(
+        event_stream = self.service.process_query_stream(
             user_message=request.message,
             user_id=UUID(user_id),
             user_role=user_role,
             session_id=request.session_id,
             show_sql=request.show_sql,
         )
-        return self._build_streaming_response(response)
+        return StreamingResponse(
+            event_stream,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     async def handle_clarification(
         self,
@@ -87,12 +95,14 @@ class ChatController:
 
         # Proses clarification response
         try:
-            disambiguation_result = await self.clarification_service.handle_clarification_response(
-                session_id=request.session_id,
-                clarification_answers=request.clarification_answers,
-                user_role=user_role,
-                additional_constraints=request.additional_constraints,
-                original_query=request.message,
+            disambiguation_result = (
+                await self.clarification_service.handle_clarification_response(
+                    session_id=request.session_id,
+                    clarification_answers=request.clarification_answers,
+                    user_role=user_role,
+                    additional_constraints=request.additional_constraints,
+                    original_query=request.message,
+                )
             )
         except ValueError as e:
             raise HTTPException(
@@ -104,14 +114,14 @@ class ChatController:
             clarification_message = disambiguation_result.clarification_message
             response = ChatResponse(
                 session_id=request.session_id,
-                message=clarification_message.clarifying_question or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
+                message=clarification_message.clarifying_question
+                or "Klarifikasi diperlukan sebelum query KPI dijalankan.",
                 clarification_questions=clarification_message.questions,
             )
             return self._build_streaming_response(response)
 
         # Lanjutkan ke pipeline RAG dengan query yang sudah disambiguasi
-
-        response = await self.service.process_query(
+        event_stream = self.service.process_query_stream(
             user_message=disambiguation_result.disambiguated_query,
             user_id=UUID(user_id),
             user_role=user_role,
@@ -119,13 +129,22 @@ class ChatController:
             show_sql=request.show_sql,
             context_from_clarification=disambiguation_result,
         )
-        return self._build_streaming_response(response)
-
+        return StreamingResponse(
+            event_stream,
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @staticmethod
     def _extract_role_value(current_user: User) -> str:
-        role = current_user.role.value if hasattr(
-            current_user.role, "value") else str(current_user.role)
+        role = (
+            current_user.role.value
+            if hasattr(current_user.role, "value")
+            else str(current_user.role)
+        )
         return role.strip().lower()
 
     @staticmethod
@@ -148,14 +167,12 @@ class ChatController:
 
     def _build_streaming_response(self, response: ChatResponse) -> StreamingResponse:
         payload = response.model_dump(mode="json")
-        metadata = {key: value for key,
-                    value in payload.items() if key != "message"}
+        metadata = {key: value for key, value in payload.items() if key != "message"}
         message = payload.get("message") or ""
 
         async def _event_stream() -> AsyncIterator[str]:
             yield (
-                "event: metadata\n"
-                f"data: {json.dumps(metadata, ensure_ascii=False)}\n\n"
+                f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
             )
 
             for chunk in self._message_chunks(message):
@@ -163,6 +180,7 @@ class ChatController:
                     "event: message\n"
                     f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
                 )
+                await asyncio.sleep(0.02)  # 20ms delay — ensures chunks flush visibly
 
             yield "event: done\ndata: {}\n\n"
 

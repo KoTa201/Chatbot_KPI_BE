@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, cast, NoReturn
 import httpx
@@ -96,6 +97,40 @@ class LLMService:
             temperature=0.4,
             max_output_tokens=3000,
         )
+
+    async def analyze_result_stream(self, prompt: str) -> AsyncIterator[str]:
+        """
+        Stage 4 (streaming): Yield token chunks satu per satu dari LLM.
+        Menggunakan stream=True agar respon muncul secara token-by-token.
+        """
+        self._ensure_runtime_config(settings.LLM_MODEL_ANALYSIS)
+        try:
+            stream = await self.client.chat.completions.create(
+                model=settings.LLM_MODEL_ANALYSIS,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+                max_tokens=3000,
+                stream=True,
+            )
+            async for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield delta.content
+        except (APITimeoutError, APIConnectionError, httpx.TimeoutException, httpx.HTTPError):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
+            )
+        except APIStatusError as error:
+            if error.status_code == 429:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Terlalu banyak permintaan. Silakan coba lagi nanti.",
+                )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
+            )
 
     async def decide_visualization_request(self, prompt: str) -> VisualizationDecision:
         """
