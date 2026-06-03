@@ -42,6 +42,7 @@ PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
     ("POST",    r"^/api/v1/users/forgot-password$"),
     ("POST",    r"^/api/v1/users/verify-reset-pin$"),
     ("POST",    r"^/api/v1/users/reset-password$"),
+    (None,      r"^/public($|/).*"),
     (None,      r"^/docs$"),
     (None,      r"^/redoc$"),
     (None,      r"^/openapi\.json$"),
