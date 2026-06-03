@@ -519,7 +519,7 @@ class GraphicSeervice:
     ) -> bytes:
         if chart_type == "trl_progress":
             return self._render_trl_progress(
-                df=df, plt=plt, title_prefix=title_prefix, trl_cols=trl_cols
+                df=df, plt=plt, title_prefix=title_prefix, trl_cols=trl_cols, kpi_meta=kpi_meta
             )
         if chart_type == "progress":
             return self._render_progress(
@@ -546,6 +546,7 @@ class GraphicSeervice:
         plt,
         title_prefix: str = "",
         trl_cols: set[str] | None = None,
+        kpi_meta: dict[str, list[ParsedValue]] | None = None,
     ) -> bytes:
         trl_col, trl_numeric = self._find_trl_column(df)
 
@@ -554,6 +555,16 @@ class GraphicSeervice:
         if trl_col is None and trl_cols:
             for col in trl_cols:
                 if col in df.columns:
+                    trl_col = col
+                    trl_numeric = pd.to_numeric(df[col], errors="coerce")
+                    break
+
+        # Last resort: find TRL column from kpi_meta (unit=="TRL") even if trl_cols is empty
+        if trl_col is None and kpi_meta:
+            for col, pv_list in kpi_meta.items():
+                if col in df.columns and any(
+                    p.unit == "TRL" for p in pv_list if p.numeric is not None
+                ):
                     trl_col = col
                     trl_numeric = pd.to_numeric(df[col], errors="coerce")
                     break
@@ -569,9 +580,20 @@ class GraphicSeervice:
             df, exclude=[c for c in [trl_col, time_col] if c]
         )
 
-        # Also look for a target column to compare against
-        target_col = self._find_column_by_hints(df, self.target_column_hints)
-        has_target = target_col and target_col != trl_col
+        # Find target column — must not be the same as the TRL realization column.
+        # Also prefer columns whose kpi_meta shows they were originally a "target" string
+        # (not another TRL realization column that happens to match the hint).
+        target_col = None
+        for cand in df.columns:
+            if cand == trl_col:
+                continue
+            if any(h in cand.lower() for h in self.target_column_hints):
+                # Exclude if this candidate column is also a TRL column (in trl_cols)
+                if trl_cols and cand in trl_cols:
+                    continue
+                target_col = cand
+                break
+        has_target = target_col is not None
 
         chart_title = (
             f"{title_prefix} — TRL Progress" if title_prefix else "TRL Progress"
@@ -623,7 +645,54 @@ class GraphicSeervice:
             fig.tight_layout()
             return self._fig_to_bytes(fig=fig, plt=plt)
 
-        # --- Case 2: Static / single point → TRL gauge bar ---
+        # --- Case 2: Multiple rows but no time column → bar chart per row ---
+        # Show all rows as individual bars instead of picking only iloc[0].
+        n_rows = df["__trl_num__"].notna().sum()
+
+        # Use per-row bar chart when there are multiple distinct data points
+        if n_rows > 1:
+            label_col = kpi_col
+            if label_col is None:
+                # Build generic row labels
+                df["__row_label__"] = [f"Baris {i + 1}" for i in range(len(df))]
+                label_col = "__row_label__"
+
+            plot_df = df[[label_col, "__trl_num__"]].dropna(subset=["__trl_num__"])
+            labels = plot_df[label_col].astype(str).tolist()
+            values = plot_df["__trl_num__"].tolist()
+
+            target_trl = 9.0
+            if has_target:
+                t_vals = pd.to_numeric(df[target_col], errors="coerce").dropna()
+                if not t_vals.empty:
+                    target_trl = float(t_vals.iloc[0])
+
+            fig, ax = plt.subplots(figsize=(max(6, len(labels) * 0.9 + 2), 5))
+            bar_colors = [
+                "#2563EB" if v >= target_trl else ("#D97706" if v >= target_trl * 0.85 else "#DC2626")
+                for v in values
+            ]
+            bars = ax.bar(labels, values, color=bar_colors, edgecolor="#e2e8f0", width=0.6)
+            ax.axhline(y=target_trl, color="#DC2626", linestyle="--", linewidth=1.5, label=f"Target: TRL {int(target_trl)}")
+            for bar, val in zip(bars, values):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + 0.1,
+                    f"TRL {int(val)}",
+                    ha="center", va="bottom", fontsize=8, fontweight="bold",
+                )
+            ax.set_yticks(range(1, 10))
+            ax.set_yticklabels([f"TRL {i}" for i in range(1, 10)], fontsize=8)
+            ax.set_ylim(0, 9.8)
+            ax.set_ylabel("TRL Level")
+            ax.set_title(chart_title)
+            ax.legend(fontsize=8)
+            ax.tick_params(axis="x", rotation=30)
+            ax.grid(axis="y", alpha=0.3)
+            fig.tight_layout()
+            return self._fig_to_bytes(fig=fig, plt=plt)
+
+        # --- Case 3: Single data point → TRL gauge bar ---
         # Show a horizontal bar chart with all 9 TRL levels,
         # highlighting current level and marking the target.
         current_trl = (

@@ -389,6 +389,9 @@ class ChatService:
                 async for token in llm.analyze_result_stream(analysis_prompt):
                     full_narrative += token
                     yield f"event: message\ndata: {json.dumps({'chunk': token}, ensure_ascii=False)}\n\n"
+                    # Yield control to the event loop so each chunk is flushed
+                    # to the TCP buffer immediately (prevents batch buffering).
+                    await asyncio.sleep(0)
                 self._complete_stage(analysis_stage, "success", "Analisis naratif berhasil dibuat.")
             except HTTPException as e:
                 if e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
