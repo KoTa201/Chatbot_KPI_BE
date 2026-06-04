@@ -113,7 +113,7 @@ class SQLWireguardService:
 
     def _sanitize_sql(self, sql: str, user_id: UUID, user_role: str) -> str:
         sanitized = self._enforce_limit(sql)
-        return self._enforce_rls(sanitized, user_id, user_role)
+        return sanitized
 
     # -- Rule W-01 -------------------------------------------------------------
 
@@ -173,42 +173,6 @@ class SQLWireguardService:
                     sanitized_sql=None,
                 )
         return ValidationResult(is_valid=True, reason=None, sanitized_sql=sql)
-
-    # -- Rule W-06 -------------------------------------------------------------
-
-    def _enforce_rls(self, sql: str, user_id: UUID, user_role: str) -> str:
-        if user_role.strip().lower() != "karyawan":
-            return sql
-
-        if self._has_owner_filter(sql):
-            return sql
-
-        if self.where_pattern.search(sql):
-            return self._inject_owner_filter_existing_where(sql, user_id)
-
-        return self._inject_owner_filter_no_where(sql, user_id)
-
-    def _has_owner_filter(self, sql: str) -> bool:
-        return bool(self.owner_filter_pattern.search(sql))
-
-    def _inject_owner_filter_existing_where(self, sql: str, user_id: UUID) -> str:
-        return self.where_pattern.sub(
-            f"WHERE karyawan_id = '{user_id}' AND", sql, count=1
-        )
-
-    def _inject_owner_filter_no_where(self, sql: str, user_id: UUID) -> str:
-        match = self.insertion_pattern.search(sql)
-        if not match:
-            return sql.rstrip("; \n") + f" WHERE karyawan_id = '{user_id}'"
-
-        insert_pos = match.start()
-        return (
-            sql[:insert_pos].rstrip()
-            + f" WHERE karyawan_id = '{user_id}' "
-            + sql[insert_pos:]
-        )
-
-    # -- Rule W-07 -------------------------------------------------------------
 
     def _enforce_limit(self, sql: str) -> str:
         max_limit = settings.SQL_MAX_LIMIT

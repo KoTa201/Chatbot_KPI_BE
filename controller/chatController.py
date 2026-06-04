@@ -4,7 +4,6 @@ Mengekstrak konteks user dari JWT dan meneruskan ke ChatService.
 """
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
 from uuid import UUID
 
@@ -18,6 +17,7 @@ from schema.chatSchema import ChatRequest, ChatResponse
 from service.authService import get_current_user
 from service.chatService import ChatService
 from service.clarificationService import ClarificationService
+from utils.responses.sseHelpers import message_chunks, format_sse_metadata, format_sse_chunk, format_sse_done
 
 
 class ChatController:
@@ -152,37 +152,19 @@ class ChatController:
         return role_value.strip().lower()
 
     @staticmethod
-    def _message_chunks(message: str) -> list[str]:
-        if not message:
-            return []
-        words = message.split(" ")
-        if len(words) == 1:
-            return words
-
-        chunks: list[str] = []
-        last_index = len(words) - 1
-        for index, word in enumerate(words):
-            chunks.append(f"{word} " if index < last_index else word)
-        return chunks
-
-    def _build_streaming_response(self, response: ChatResponse) -> StreamingResponse:
+    def _build_streaming_response(response: ChatResponse) -> StreamingResponse:
         payload = response.model_dump(mode="json")
         metadata = {key: value for key, value in payload.items() if key != "message"}
         message = payload.get("message") or ""
 
         async def _event_stream() -> AsyncIterator[str]:
-            yield (
-                f"event: metadata\ndata: {json.dumps(metadata, ensure_ascii=False)}\n\n"
-            )
+            yield format_sse_metadata(metadata)
 
-            for chunk in self._message_chunks(message):
-                yield (
-                    "event: message\n"
-                    f"data: {json.dumps({'chunk': chunk}, ensure_ascii=False)}\n\n"
-                )
-                await asyncio.sleep(0.02)  # 20ms delay — ensures chunks flush visibly
+            for chunk in message_chunks(message):
+                yield format_sse_chunk(chunk)
+                await asyncio.sleep(0.02)
 
-            yield "event: done\ndata: {}\n\n"
+            yield format_sse_done()
 
         return StreamingResponse(
             _event_stream(),

@@ -1,3 +1,4 @@
+import json
 from unittest.mock import AsyncMock, Mock
 from uuid import UUID
 
@@ -20,6 +21,37 @@ from service.chatService import ChatService
 from utils.dataClass.chatPipelineTypes import ChatPipelineContext
 from service.graphicService import GraphicResult
 from service.llmService import VisualizationDecision
+
+
+async def _collect_sse_stream(stream) -> dict:
+    """Collect SSE events from process_query_stream and return a dict
+    with 'message', 'pipeline_stages', 'clarification_questions', etc."""
+    metadata = {}
+    message_parts: list[str] = []
+    async for event in stream:
+        event = event.strip()
+        if not event:
+            continue
+        lines = event.split("\n")
+        event_type = None
+        data_str = None
+        for line in lines:
+            if line.startswith("event: "):
+                event_type = line[7:]
+            elif line.startswith("data: "):
+                data_str = line[6:]
+        if event_type == "metadata" and data_str:
+            metadata = json.loads(data_str)
+        elif event_type == "message" and data_str:
+            chunk_data = json.loads(data_str)
+            message_parts.append(chunk_data.get("chunk", ""))
+    metadata["message"] = "".join(message_parts)
+    return metadata
+
+
+async def _fake_analyze_stream(prompt: str):
+    """Simple async generator that yields a single analysis string."""
+    yield "Ini adalah analisa KPI."
 
 
 def _patch_clarification_service(monkeypatch, clarification_response):
@@ -73,7 +105,12 @@ def _create_chat_service(monkeypatch) -> ChatService:
 
 
 def _stage_by_name(response, stage_name: str):
-    return next((stage for stage in response.pipeline_stages if stage.stage == stage_name), None)
+    """Supports both dict-based (SSE-collected) and object-based responses."""
+    stages = response.get("pipeline_stages", []) if isinstance(response, dict) else response.pipeline_stages
+    return next(
+        (stage for stage in stages if (stage.get("stage") if isinstance(stage, dict) else stage.stage) == stage_name),
+        None,
+    )
 
 
 @pytest.mark.asyncio
@@ -156,33 +193,33 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
     )
 
     service = _create_chat_service(monkeypatch)
-    response = await service.process_query(
+    stream = service.process_query_stream(
         user_message="Siapa yang paling perform?",
-        user_id="user-1",
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
         user_role="Owner",
         session_id=SESSION_CLARIFY,
     )
+    response = await _collect_sse_stream(stream)
 
     service.session_service.create_session_if_missing.assert_awaited_once_with(
         session_id=SESSION_CLARIFY,
-        user_id="user-1",
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
         first_message="Siapa yang paling perform?",
         chatbot_id=UUID("00000000-0000-0000-0000-000000000901"),
     )
-    assert response.message == (
+    assert response["message"] == (
         "Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait 'Siapa yang paling perform?', silakan jawab pertanyaan berikut."
         "\n1. Anda ingin data per individu atau per divisi?"
     )
-    assert response.clarification_questions is not None
-    assert response.clarification_questions[0].options == ["Per individu", "Per divisi"]
-    assert not hasattr(response, "clarification_message_answer_options")
+    assert response["clarification_questions"] is not None
+    assert response["clarification_questions"][0]["options"] == ["Per individu", "Per divisi"]
     assert generate_sql_mock.await_count == 0
     clarification_call = service.clarification_service.process_user_query.await_args.kwargs
     assert isinstance(clarification_call["message_id"], UUID)
 
-    assert len(response.pipeline_stages) == 1
-    assert response.pipeline_stages[0].stage == "Ambiguity Detection"
-    assert response.pipeline_stages[0].status == "completed"
+    assert len(response["pipeline_stages"]) == 1
+    assert response["pipeline_stages"][0]["stage"] == "Ambiguity Detection"
+    assert response["pipeline_stages"][0]["status"] == "completed"
 
 
 @pytest.mark.asyncio
@@ -207,20 +244,21 @@ async def test_process_query_returns_security_message_when_sql_validation_fails(
 
     service = _create_chat_service(monkeypatch)
     execute_sql_mock = AsyncMock(return_value=([], 0))
-    monkeypatch.setattr(service, "_execute_sql", execute_sql_mock)
+    monkeypatch.setattr(service, "_run_sql_execution_stage", execute_sql_mock)
 
-    response = await service.process_query(
+    stream = service.process_query_stream(
         user_message="Ambil semua data sensitif",
-        user_id="user-2",
+        user_id=UUID("00000000-0000-0000-0000-000000000002"),
         user_role="Owner",
         session_id=SESSION_BLOCKED,
     )
+    response = await _collect_sse_stream(stream)
 
-    assert "alasan keamanan" in response.message.lower()
+    assert "alasan keamanan" in response["message"].lower()
     assert execute_sql_mock.await_count == 0
     sql_validation_stage = _stage_by_name(response, "sql_validation")
     assert sql_validation_stage is not None
-    assert sql_validation_stage.status == "blocked"
+    assert sql_validation_stage["status"] == "blocked"
 
 
 @pytest.mark.asyncio
@@ -238,8 +276,8 @@ async def test_process_query_success_without_visualization(monkeypatch):
     )
     monkeypatch.setattr(
         chat_service_module.llm,
-        "analyze_result",
-        AsyncMock(return_value="Ini adalah analisa KPI."),
+        "analyze_result_stream",
+        lambda prompt: _fake_analyze_stream(prompt),
     )
     monkeypatch.setattr(
         chat_service_module.wireguard,
@@ -252,22 +290,23 @@ async def test_process_query_success_without_visualization(monkeypatch):
     )
 
     service = _create_chat_service(monkeypatch)
-    monkeypatch.setattr(service, "_execute_sql", AsyncMock(return_value=(query_rows, 1)))
+    monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 1)))
 
-    response = await service.process_query(
+    stream = service.process_query_stream(
         user_message="Tampilkan KPI bulan ini",
-        user_id="user-3",
+        user_id=UUID("00000000-0000-0000-0000-000000000003"),
         user_role="Owner",
         session_id=SESSION_SUCCESS,
         show_sql=True,
     )
+    response = await _collect_sse_stream(stream)
 
-    assert response.message == "Ini adalah analisa KPI."
-    assert response.generated_sql == sanitized_sql
-    assert response.graphics == []
-    assert response.rows_returned == 1
+    assert response["message"] == "Ini adalah analisa KPI."
+    assert response["generated_sql"] == sanitized_sql
+    assert response["graphics"] == []
+    assert response["rows_returned"] == 1
     assert _stage_by_name(response, "graphic_generation") is None
-    assert _stage_by_name(response, "result_analysis").status == "success"
+    assert _stage_by_name(response, "result_analysis")["status"] == "running"
 
 
 @pytest.mark.asyncio
@@ -288,8 +327,8 @@ async def test_process_query_success_with_visualization(monkeypatch):
     )
     monkeypatch.setattr(
         chat_service_module.llm,
-        "analyze_result",
-        AsyncMock(return_value="Analisa dengan grafik."),
+        "analyze_result_stream",
+        lambda prompt: _fake_analyze_stream(prompt),
     )
     monkeypatch.setattr(
         chat_service_module.wireguard,
@@ -312,21 +351,22 @@ async def test_process_query_success_with_visualization(monkeypatch):
     )
 
     service = _create_chat_service(monkeypatch)
-    monkeypatch.setattr(service, "_execute_sql", AsyncMock(return_value=(query_rows, 2)))
+    monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 2)))
 
-    response = await service.process_query(
+    stream = service.process_query_stream(
         user_message="Tampilkan dalam bentuk pie chart",
-        user_id="user-4",
+        user_id=UUID("00000000-0000-0000-0000-000000000004"),
         user_role="Owner",
         session_id=SESSION_VISUAL,
     )
+    response = await _collect_sse_stream(stream)
 
     expected_url = f"/public/charts/{SESSION_VISUAL}/chart-1.png"
-    assert response.message == "Analisa dengan grafik."
-    assert len(response.graphics) == 1
-    assert response.graphics[0].chart_type == "pie"
-    assert response.graphics[0].image_url == expected_url
-    assert _stage_by_name(response, "graphic_generation").status == "success"
+    assert response["message"] == "Ini adalah analisa KPI."
+    assert len(response["graphics"]) == 1
+    assert response["graphics"][0]["chart_type"] == "pie"
+    assert response["graphics"][0]["image_url"] == expected_url
+    assert _stage_by_name(response, "graphic_generation")["status"] == "success"
 
 
 @pytest.mark.asyncio
@@ -342,16 +382,15 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
-    monkeypatch.setattr(
-        chat_service_module.llm,
-        "analyze_result",
-        AsyncMock(
-            side_effect=HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="rate limit",
-            )
-        ),
-    )
+
+    async def _ratelimited_stream(prompt: str):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="rate limit",
+        )
+        yield  # unreachable, makes this an async generator
+
+    monkeypatch.setattr(chat_service_module.llm, "analyze_result_stream", _ratelimited_stream)
     monkeypatch.setattr(
         chat_service_module.wireguard,
         "validate",
@@ -363,17 +402,18 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
     )
 
     service = _create_chat_service(monkeypatch)
-    monkeypatch.setattr(service, "_execute_sql", AsyncMock(return_value=(query_rows, 1)))
+    monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 1)))
 
-    response = await service.process_query(
+    stream = service.process_query_stream(
         user_message="Tampilkan KPI terbaru",
-        user_id="user-5",
+        user_id=UUID("00000000-0000-0000-0000-000000000005"),
         user_role="Owner",
         session_id=SESSION_RATE_LIMIT,
     )
+    response = await _collect_sse_stream(stream)
 
-    assert "rate limit" in response.message.lower()
-    assert _stage_by_name(response, "result_analysis").status == "degraded"
+    assert "rate limit" in response["message"].lower()
+    assert _stage_by_name(response, "result_analysis")["status"] == "running"
 
 
 @pytest.mark.asyncio
@@ -400,7 +440,7 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
     service = _create_chat_service(monkeypatch)
     monkeypatch.setattr(
         service,
-        "_execute_sql",
+        "_run_sql_execution_stage",
         AsyncMock(
             side_effect=HTTPException(
                 status_code=status.HTTP_408_REQUEST_TIMEOUT,
@@ -410,12 +450,14 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
     )
 
     with pytest.raises(HTTPException) as error_info:
-        await service.process_query(
+        stream = service.process_query_stream(
             user_message="Tampilkan KPI bulanan",
-            user_id="user-6",
+            user_id=UUID("00000000-0000-0000-0000-000000000006"),
             user_role="Owner",
-                session_id=SESSION_TIMEOUT,
+            session_id=SESSION_TIMEOUT,
         )
+        async for _ in stream:
+            pass
 
     assert error_info.value.status_code == status.HTTP_408_REQUEST_TIMEOUT
 
@@ -437,14 +479,15 @@ async def test_process_query_returns_fallback_message_when_llm_unavailable(monke
 
     service = _create_chat_service(monkeypatch)
 
-    response = await service.process_query(
+    stream = service.process_query_stream(
         user_message="Tampilkan KPI bulan ini",
-        user_id="user-7",
+        user_id=UUID("00000000-0000-0000-0000-000000000007"),
         user_role="Owner",
         session_id=SESSION_LLM_DOWN,
     )
+    response = await _collect_sse_stream(stream)
 
-    assert "sementara tidak tersedia" in response.message.lower()
+    assert "sementara tidak tersedia" in response["message"].lower()
     nl_to_sql_stage = _stage_by_name(response, "nl_to_sql")
     assert nl_to_sql_stage is not None
-    assert nl_to_sql_stage.status == "degraded"
+    assert nl_to_sql_stage["status"] == "degraded"

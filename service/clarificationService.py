@@ -6,7 +6,7 @@ Mengkoordinasikan: ambiguity detection → question generation → response hand
 
 import json
 import logging
-from typing import Optional
+from typing import Optional, Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,7 +58,7 @@ class ClarificationService:
         session_id: UUID,
         addon_prompt: str | None = None,
         message_id: UUID | None = None,
-    ) -> ClarificationMessageResponse | None:
+    ) -> None | dict[str, bool | str | list[Any]] | ClarificationMessageResponse:
         """
         Process query dan tentukan: clarify atau direct?
 
@@ -244,11 +244,19 @@ class ClarificationService:
         session_id: UUID,
         ambiguity_result,
         message_id: UUID | None = None,
-    ) -> ClarificationMessageResponse | None:
+    ) -> None | ClarificationMessageResponse:
         if not ambiguity_result or not ambiguity_result.is_ambiguous:
             return None
 
         detected = ambiguity_result.detected_ambiguities
+
+        if ambiguity_result.is_out_of_scope:
+            return ClarificationMessageResponse(
+                session_id=session_id,
+                message_type="out_of_scope",
+                is_out_of_scope=True,  # 👈 consistent type, no more dict
+            )
+
         if not detected:
             return None
 
