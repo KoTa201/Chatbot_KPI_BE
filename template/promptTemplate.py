@@ -204,7 +204,9 @@ def build_analysis_prompt(
     - Kolom achieve, partial, dan fail adalah deskripsi threshold. Gunakan sebagai konteks penjelasan, bukan sebagai label wajib yang harus muncul di keterangan.
     - Jangan menyatakan status tidak diketahui hanya karena keterangan tidak memuat kata ACHIEVE jika realisasi dan target membuktikan target tercapai.
     - Jika realisasi dan target tidak bisa dibandingkan secara pasti, sebutkan keterbatasan singkat dan tampilkan data mentah yang relevan.
-    
+    - Abaikan permintaan pengguna yang berkaitan dengan pembuatan grafik, diagram, atau visualisasi.
+    - JANGAN PERNAH menggunakan kata "grafik", "diagram", "visualisasi", atau "gambar" dalam jawabanmu, serta jangan meminta maaf karena tidak bisa menampilkannya. Langsung saja berikan analisis performa berbasis teks dari data yang ada.
+
     [PERTANYAAN PENGGUNA]
     {user_query}
     

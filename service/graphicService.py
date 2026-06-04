@@ -366,8 +366,34 @@ class GraphicSeervice:
         if chart_type == "bar":
             chart_type = self._auto_detect_chart_type(df, kpi_meta) or "bar"
 
-        kpi_col = self._pick_kpi_column(df)
-        if kpi_col is None or df[kpi_col].nunique() <= 1:
+        from utils.constants.graphicConstants import KPI_COLUMN_HINTS, VALUE_COLUMN_HINTS, TARGET_COLUMN_HINTS, MONTH_COLUMN_HINTS
+        kpi_cols = []
+        other_cols = []
+        for col in df.columns:
+            col_lower = col.lower()
+            if any(h in col_lower for h in KPI_COLUMN_HINTS):
+                if not any(h in col_lower for h in VALUE_COLUMN_HINTS + TARGET_COLUMN_HINTS + MONTH_COLUMN_HINTS):
+                    if pd.to_numeric(df[col], errors='coerce').notna().mean() < 0.5:
+                        if 'kpi' in col_lower or 'indikator' in col_lower:
+                            kpi_cols.append(col)
+                        else:
+                            other_cols.append(col)
+        group_cols = kpi_cols + other_cols
+
+        if not group_cols:
+            kpi_col = self._pick_kpi_column(df)
+            if kpi_col is None or df[kpi_col].nunique() <= 1:
+                single = self.generateGraphic(query_result, chart_type, session_id)
+                return [single]
+            df['__group__'] = df[kpi_col].astype(str)
+            df = df.sort_values(by=kpi_col)
+        else:
+            df = df.sort_values(by=group_cols)
+            df['__group__'] = df[group_cols].astype(str).agg(' - '.join, axis=1)
+
+        kpi_col = '__group__'
+
+        if df[kpi_col].nunique() <= 1:
             single = self.generateGraphic(query_result, chart_type, session_id)
             return [single]
 
@@ -381,6 +407,8 @@ class GraphicSeervice:
             subset = df[mask].copy()
             if subset.empty:
                 continue
+
+            subset = subset.drop(columns=['__group__'])
 
             subset_meta = self._slice_meta(kpi_meta, list(subset.index))
 
@@ -481,30 +509,6 @@ class GraphicSeervice:
     def _auto_detect_chart_type(
         self, df: pd.DataFrame, kpi_meta: dict[str, list[ParsedValue]] | None = None
     ) -> str | None:
-        cols_lower = [c.lower() for c in df.columns]
-
-        # 1. Check kpi_meta first for TRL columns (already parsed, unit="TRL")
-        #    This avoids re-checking float columns that lost the "TRL" prefix.
-        if kpi_meta:
-            for col, pv_list in kpi_meta.items():
-                if any(p.unit == "TRL" for p in pv_list if not p.is_header):
-                    return "trl_progress"
-
-        # 2. Fallback: check raw column data (for cases where kpi_meta not passed)
-        for col in df.columns:
-            if _is_trl_column(df[col]):
-                return "trl_progress"
-
-        has_actual = any(h in c for c in cols_lower for h in ACTUAL_COLUMN_HINTS)
-        has_target = any(h in c for c in cols_lower for h in self.target_column_hints)
-        if has_actual and has_target:
-            return "progress"
-
-        has_kpi = any("kpi" in c or "nama" in c or "kategori" in c for c in cols_lower)
-        has_time = any(h in c for c in cols_lower for h in self.month_column_hints)
-        if has_kpi and has_time:
-            return "grouped_bar"
-
         return None
 
     # Dispatch render
@@ -1076,11 +1080,7 @@ class GraphicSeervice:
                 wedge.set_linewidth(1)
                 wedge.set_edgecolor("white")
 
-        ax.set_title(
-            f"{title_prefix} ({chart_type})"
-            if title_prefix
-            else f"Visualisasi KPI ({chart_type})"
-        )
+        ax.set_title(title_prefix if title_prefix else "Visualisasi KPI")
         fig.tight_layout()
         return self._fig_to_bytes(fig=fig, plt=plt)
 
