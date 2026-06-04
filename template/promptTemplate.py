@@ -126,6 +126,7 @@ def build_nl_to_sql_prompt(
     16. Kolom km.target, km.achieve, km.partial, dan km.fail adalah definisi threshold KPI, bukan nilai realisasi. DILARANG membandingkan kt.realisasi langsung dengan km.achieve, km.partial, atau km.fail menggunakan =, IN, atau perbandingan string lain.
     17. Untuk pertanyaan tentang mencapai target, mendekati target, achieve, partial, fail, progress, atau kinerja, ambil data mentah untuk dianalisis: kt.user_id, kt.bulan_num, km.kpi_name, kt.realisasi, km.target, km.achieve, km.partial, km.fail, kt.keterangan.
     18. Untuk konteks "sampai bulan terakhir", "terbaru", atau "latest", ambil realisasi terbaru berdasarkan bulan_num untuk KPI/karyawan yang relevan, biasanya dengan MAX(bulan_num); jangan menyaring hasil dengan kt.realisasi = km.achieve atau kt.realisasi = km.partial.
+    19. DILARANG melakukan cast atau konversi tipe data (misalnya ::NUMERIC atau CAST(... AS NUMERIC)) pada kolom kt.realisasi dan km.target. Kolom tersebut bisa berisi teks seperti 'TRL 3' yang akan menyebabkan error di PostgreSQL jika dikonversi ke angka.
 
     [PERTANYAAN ASLI PENGGUNA (q)]
     {user_query}
@@ -200,7 +201,8 @@ def build_analysis_prompt(
     - Kolom achieve, partial, dan fail adalah deskripsi threshold. Gunakan sebagai konteks penjelasan, bukan sebagai label wajib yang harus muncul di keterangan.
     - Jangan menyatakan status tidak diketahui hanya karena keterangan tidak memuat kata ACHIEVE jika realisasi dan target membuktikan target tercapai.
     - Jika realisasi dan target tidak bisa dibandingkan secara pasti, sebutkan keterbatasan singkat dan tampilkan data mentah yang relevan.
-    - PENTING: Sistem sudah otomatis membuatkan dan menampilkan grafik ke layar pengguna. Tugasmu HANYA menganalisis data dalam bentuk teks. DILARANG KERAS menuliskan kalimat apa pun yang menyinggung soal grafik (misalnya: "Ini grafiknya", "Saya tidak bisa membuat grafik", dll). Cukup langsung berikan analisis angkanya.
+    - Abaikan permintaan pengguna yang berkaitan dengan pembuatan grafik, diagram, atau visualisasi.
+    - JANGAN PERNAH menggunakan kata "grafik", "diagram", "visualisasi", atau "gambar" dalam jawabanmu, serta jangan meminta maaf karena tidak bisa menampilkannya. Langsung saja berikan analisis performa berbasis teks dari data yang ada.
 
     [PERTANYAAN PENGGUNA]
     {user_query}

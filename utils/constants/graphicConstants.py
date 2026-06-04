@@ -28,9 +28,7 @@ TRL_PATTERN = re.compile(r"(?i)trl\s*(\d+)")
 COLOR_THRESHOLD_RE = re.compile(r"^\d+[–—\-]\d+%$|^[<≥≤>]=?\d+%$")
 NOTES_HINTS = ("note", "notes", "keterangan", "catatan", "deskripsi", "description")
 SUPPORTED_CHART_TYPES = {
-    "bar", "pie", "donut", "line",
-    "grouped_bar", "stacked_bar",
-    "progress", "trl_progress",
+    "bar", "pie", "donut",
 }
 VALUE_COLUMN_HINTS = (
     "total", "jumlah", "sum", "avg", "average", "rata", "nilai",
