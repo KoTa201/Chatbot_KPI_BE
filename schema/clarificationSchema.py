@@ -38,6 +38,7 @@ class DetectedAmbiguity(BaseModel):
 class AmbiguityAssessmentResult(BaseModel):
     """Hasil dari ambiguity detection (rule-based atau LLM-based)."""
     is_ambiguous: bool
+    is_out_of_scope: bool = False
     ambiguity_type: str  # temporal, scope, aggregation, metric, referential, none
     possible_interpretations: List[dict] = Field(default_factory=list)
     suggested_clarifying_question: str | None = None
@@ -129,6 +130,7 @@ class ClarificationMessageResponse(BaseModel):
 
     # Untuk direct_answer dengan asumsi
     assumptions: Optional[List[str]] = None
+    is_out_of_scope: Optional[bool] = None
 
     model_config = ConfigDict(json_schema_extra={
         "example": {

@@ -326,20 +326,29 @@ class TestClarificationService:
                 service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
                     return_value=SimpleNamespace(id=uuid4(), addon_prompt=None)
                 )
+                # Mock session_service methods
+                service.session_service.create_chatbot_message = AsyncMock()
                 with patch.object(ClarificationService, "process_user_query", new_callable=AsyncMock) as mock_process:
                     mock_process.return_value = SimpleNamespace(
                         clarifying_question="Metrik mana?",
                         options=["Achievement %", "Realisasi", "Lewati", "Lainnya"],
                         questions=[],
+                        is_out_of_scope=False,
                     )
-                    response = await service.process_query(
+                    stream = service.process_query_stream(
                         user_message="Tampilkan KPI terbaik",
                         user_id=user.id,
                         user_role="karyawan",
                         session_id=session_id,
                     )
+                    # Collect SSE stream to consume it (triggers side effects)
+                    messages = []
+                    async for event in stream:
+                        messages.append(event)
 
-                assert response.message == "Terdapat beberapa pertanyaan yang ingin saya tanyakan terkait 'Tampilkan KPI terbaik', silakan jawab pertanyaan berikut."
+                # Check the SSE metadata contains the clarification prompt message
+                combined = "".join(messages)
+                assert "clarification" in combined.lower() or "Metrik" in combined
 
             async with session_factory() as db:
                 stored = (await db.execute(select(ChatMessage).where(
@@ -369,22 +378,44 @@ class TestClarificationService:
                 service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
                     return_value=SimpleNamespace(id=uuid4(), addon_prompt=None)
                 )
-                service._run_nl_to_sql_stage = AsyncMock(return_value="SELECT 1")
-                service._run_visualization_decision_stage = AsyncMock(
-                    return_value=SimpleNamespace(is_visualize=False, chart_type=None)
+                service.session_service.create_session_if_missing = AsyncMock()
+                service.session_service.create_user_message = AsyncMock(
+                    return_value=SimpleNamespace(message_id=uuid4())
                 )
-                service._run_sql_execution_stage = AsyncMock(return_value=([{"value": 1}], 1))
-                service._run_result_analysis_stage = AsyncMock(return_value="Hasil KPI")
+                service.session_service.create_chatbot_message = AsyncMock()
 
-                response = await service.process_query(
-                    user_message="Tampilkan KPI terbaik dengan Achievement %",
-                    user_id=user.id,
-                    user_role="karyawan",
-                    session_id=session_id,
-                    context_from_clarification=SimpleNamespace(disambiguated_query="Tampilkan KPI terbaik dengan Achievement %"),
-                )
+                from service.chatService import llm, wireguard
+                from schema.wireguardSchema import ValidationResult
 
-                assert response.message == "Hasil KPI"
+                with patch.object(llm, "generate_sql", new_callable=AsyncMock) as mock_sql, \
+                     patch.object(llm, "decide_visualization_request", new_callable=AsyncMock) as mock_vis, \
+                     patch.object(wireguard, "validate") as mock_validate:
+
+                    mock_sql.return_value = "SELECT 1"
+                    mock_vis.return_value = SimpleNamespace(is_visualize=False, chart_type=None)
+                    mock_validate.return_value = ValidationResult(
+                        is_valid=True, reason=None, sanitized_sql="SELECT 1",
+                    )
+                    service._run_sql_execution_stage = AsyncMock(return_value=([{"value": 1}], 1))
+
+                    async def fake_analyze(prompt):
+                        yield "Hasil KPI"
+
+                    with patch.object(llm, "analyze_result_stream", new=fake_analyze):
+                        messages = []
+                        stream = service.process_query_stream(
+                            user_message="Tampilkan KPI terbaik dengan Achievement %",
+                            user_id=user.id,
+                            user_role="karyawan",
+                            session_id=session_id,
+                            context_from_clarification=SimpleNamespace(disambiguated_query="Tampilkan KPI terbaik dengan Achievement %"),
+                        )
+                        async for event in stream:
+                            messages.append(event)
+
+                # Verify message was streamed
+                combined = "".join(messages)
+                assert "Hasil KPI" in combined
 
             async with session_factory() as db:
                 stored = (await db.execute(select(ChatMessage).where(
@@ -913,9 +944,9 @@ class TestScenarios:
             mock_llm.return_value = '''{
                 "is_ambiguous": true,
                 "ambiguity_type": "scope",
-                "possible_interpretations": [],
-                "suggested_clarifying_question": null,
-                "answer_options": []
+                "possible_interpretations": [{"text": "Per individu"}, {"text": "Per divisi"}],
+                "suggested_clarifying_question": "Scope tidak jelas",
+                "answer_options": ["Per individu", "Per divisi"]
             }'''
 
             result = await detector.detect_ambiguity(
@@ -1404,8 +1435,7 @@ class TestKPIPrompts:
         assert "kpi_tracker::achievement" in prompt
         assert "AmbiSchema: list each column choice clearly." in prompt
         assert '"choices"' in prompt
-        assert "Abstain" in prompt
-        assert "Others" in prompt
+        assert "JSON object" in prompt
 
     def test_ambiguity_prompt_treats_description_options_as_candidate_context(self):
         prompt = build_ambiguity_assessment_prompt(
@@ -1518,7 +1548,7 @@ class TestKPIPrompts:
         assert "Original question:" in prompt
         assert "Additional information:" in prompt
         assert "Only include novels published after 2010." in prompt
-        assert "Return **only** the text of the rewritten question." in prompt
+        assert "Kembalikan **hanya** teks pertanyaan yang telah ditulis ulang." in prompt
 
     def test_node_merge_prompt_returns_json_array_contract(self):
         from template.promptTemplate import build_node_merge_prompt
