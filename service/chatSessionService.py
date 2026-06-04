@@ -81,6 +81,7 @@ class ChatSessionService:
                     created_at=question.created_at,
                 )
                 for question in checked_session_detail.clarification_questions_by_message_id.get(message.message_id, [])
+                if question.ambiguity_type != "none"
             ]
             graphics = [
                 SessionGraphicItem(
