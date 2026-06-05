@@ -127,6 +127,28 @@ class ClarificationService:
         preference_tree = PreferenceTree(llm=self.llm)
         await preference_tree.update_tree(session_qa_set)
         additional_information = preference_tree.build_additional_information()
+        from model.ChatMessage import ChatMessage
+        from sqlalchemy import select
+        # Ambil maksimal 6 pesan terakhir untuk mempertahankan konteks riwayat percakapan (sekitar 3 turn)
+        history_res = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.send_at.desc())
+            .limit(6)
+        )
+        history_msgs = list(history_res.scalars().all())
+        history_msgs.reverse()  # Urutkan secara kronologis
+        
+        history_str = ""
+        for msg in history_msgs:
+            # Lewati pesan terakhir jika pesan tersebut adalah query saat ini (untuk menghindari duplikasi)
+            if not msg.is_sender_chatbot and msg.message.strip().casefold() == source_query.strip().casefold():
+                continue
+            role = "User" if not msg.is_sender_chatbot else "Chatbot"
+            history_str += f"- {role}: {msg.message}\n"
+
+        if history_str:
+            additional_information = f"[RIWAYAT PERCAKAPAN TERBARU]\n{history_str}\n" + (additional_information or "")
 
         logger.info("[ClarificationService] Disambiguating query...")
         disambiguated_query = await self._disambiguate_query(
