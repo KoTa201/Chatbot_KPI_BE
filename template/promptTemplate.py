@@ -129,23 +129,26 @@ KEAMANAN:
 QUERY:
 - Gunakan tabel/kolom dari schema. Inferensi via (pertanyaan + schema + statistik kolom). Untuk numerik manfaatkan mean, maksimum, minimum, non-zero, non-null; untuk string/boolean manfaatkan nilai unik, non-zero, non-null.
 - Nama: UPPER(u.full_name) LIKE UPPER('%nama%'). JOIN users u ON u.id = kt.user_id.
-- Periode: gunakan bulan_num (1=Jan..12=Des). "Bulan terakhir" = MAX(bulan_num).
+- Periode & Tahun: gunakan bulan_num (1=Jan..12=Des) untuk bulan. Untuk filter tahun, ALWAYS gunakan `kg.tahun` (JOIN kpi_groups kg ON kt.group_id = kg.id atau km.group_id = kg.id). JANGAN gunakan EXTRACT(YEAR FROM kt.created_at) karena created_at adalah tanggal input data ke DB. "Bulan terakhir" = MAX(bulan_num). Jika pengguna bertanya tentang periode relatif (seperti "bulan lalu", "bulan ini", "kuartal ini", dll.) tanpa menyebutkan tahun secara spesifik, gunakan tahun terbaru yang tersedia di database berdasarkan nilai max pada statistik kolom `kpi_groups.tahun` (misal: jika statistik menunjukkan max tahun adalah 2025, gunakan 2025, bukan tahun berjalan dari [CONTEXT]).
 - Tambahkan LIMIT 1000 jika tidak ada limit spesifik.
 - Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
+- Rata-rata & Performa: JANGAN langsung menggunakan fungsi agregasi SQL (seperti AVG) jika pertanyaan menanyakan rata-rata/performa campuran dari berbagai KPI (yang mungkin berisi nilai TRL). Lebih baik SELECT data detail per baris (km.kpi_name, kt.realisasi, km.target, kt.bulan_num) agar LLM pada tahap analisis dapat menghitung rata-rata untuk KPI numerik dan melaporkan status TRL secara terpisah.
 
 PILIHAN TABEL:
 - GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
     JOIN kpi_master_records km ON kt.kpi_master_id = km.id
     JOIN users u ON u.id = kt.user_id  ← jika perlu nama
+    JOIN kpi_groups kg ON kt.group_id = kg.id  ← jika perlu filter tahun/group
 - GUNAKAN kpi_master_users kmu untuk assignment/daftar KPI per orang
     JOIN users u ON u.id = kmu.user_id
     JOIN kpi_master_records km ON km.id = kmu.kpi_master_id
+    JOIN kpi_groups kg ON km.group_id = kg.id  ← jika perlu filter tahun/group
 
 KOLOM KPI:
 - km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
   Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
 - Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
-  kt.keterangan, kt.bulan_num. Tambah km.achieve/partial/fail hanya jika
+  kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu (misal Adiansyah, Andi, dll.), wajib sertakan juga nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
   pertanyaan eksplisit minta threshold/status/kategori.
 
 CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
@@ -157,7 +160,7 @@ CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", "
 - Jika hanya menampilkan nilai, SELECT as TEXT — tidak perlu cast.
 
 [CONTEXT]
-Role: {user_role} | user_id: {user_id} | Tahun: {datetime.now().year}
+Role: {user_role} | user_id: {user_id} | Tanggal Hari Ini: {datetime.now().strftime('%Y-%m-%d')} | Bulan Hari Ini: {datetime.now().month}
 
 SQL:"""
 
@@ -211,13 +214,11 @@ def build_analysis_prompt(
        - Pertanyaan level tim/agregat → rangkum per KPI, bukan per orang.
        - Pertanyaan per-individu → tampilkan per orang.
        Jangan tampilkan field yang tidak relevan dengan pertanyaan.
-    5. Jika data kosong: tulis "Mohon maaf, tidak ada data valid untuk pertanyaan anda 
-       atau pertanyaan anda diluar konteks domain sistem ini" dan berhenti.
-    6. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
-    7. Jangan tambahkan insight umum kecuali pengguna memintanya.
-    8. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
-    9. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
-    10. Jangan menambahkan kalimat penutup, ringkasan akhir, atau kesimpulan 
+    5. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
+    6. Jangan tambahkan insight umum kecuali pengguna memintanya.
+    7. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
+    8. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
+    9. Jangan menambahkan kalimat penutup, ringkasan akhir, atau kesimpulan 
         generatif di luar data. Jawaban berhenti setelah data terakhir disajikan.
 
     ATURAN KHUSUS KPI TARGET / PROGRESS:
@@ -394,6 +395,12 @@ def build_ambiguity_assessment_prompt(
        │                                                                      │
        │ RULE C: Never assume the most likely interpretation and skip asking. │
        │ Never use general knowledge to resolve what should be asked.         │
+       │                                                                      │
+       │ RULE D: If the user query contains a month, quarter, or relative     │
+       │ temporal reference ("bulan lalu", "bulan ini", "kuartal 1", dsb.)    │
+       │ but does NOT explicitly specify the year (e.g., 2025, 2026),         │
+       │ it is ALWAYS AmbiRef. Ask the user to clarify the year (e.g. 2025,   │
+       │ 2026) instead of defaulting or guessing.                             │
        └──────────────────────────────────────────────────────────────────────┘
 
     3. For each unresolved ambiguity:
@@ -409,7 +416,7 @@ def build_ambiguity_assessment_prompt(
        - AmbiView    → 2–3 possible SQL operations or KPI metrics with explanation
        - AmbiContext → 2–3 possible values, ranges, or constraints with explanation
        - AmbiFallacy → 2–3 best-guess corrections treating the reference as a typo
-       - AmbiRef     → 2–3 interpretations of the temporal/spatial reference
+       - AmbiRef     → 2–3 interpretations of the temporal/spatial reference (e.g., years)
 
     5. Completeness rules:
        - List ALL plausible options — never use "dll." or "etc." to omit options
@@ -484,6 +491,31 @@ def build_ambiguity_assessment_prompt(
       "has_ambiguity": false,
       "is_out_of_scope": true,
       "question_set": []
+    }}
+
+    --- EXAMPLE 4: Missing Year for Temporal Query ---
+
+    Question : "Tampilkan aktivitas KPI yang berstatus 'fail' bulan lalu"
+    Analysis :
+      - "bulan lalu" → month is specified but year is NOT specified → AmbiRef
+
+    Expected output:
+    {{
+      "has_ambiguity": true,
+      "is_out_of_scope": false,
+      "question_set": [
+        {{
+          "question": "Aktivitas KPI bulan lalu merujuk pada tahun yang mana?",
+          "level_1_label": "LLM-sourced ambiguity",
+          "level_2_label": "AmbiRef",
+          "description": {{
+            "options": [
+              "Tahun 2025 — melihat data tahun lalu",
+              "Tahun 2026 — melihat data tahun berjalan"
+            ]
+          }}
+        }}
+      ]
     }}
 
     ════════════════════════════════════════════════════════════════
@@ -598,6 +630,7 @@ def build_query_disambiguation_prompt(
         clarification_answers: list,
         additional_constraints: str | None = None,
         additional_information: str | None = None,
+        chat_history: str | None = None,
 ) -> str:
     if additional_information is None:
         answer_lines = []
@@ -613,27 +646,17 @@ def build_query_disambiguation_prompt(
             answer_lines.append(f"- Constraint tambahan: {additional_constraints}")
         additional_information = "\n".join(answer_lines) if answer_lines else "Tidak ada informasi tambahan."
 
+    history_block = f"\n    Recent chat history (for context only, DO NOT integrate entities/filters from here unless mentioned in original question):\n    {chat_history}\n" if chat_history else ""
+
     return f'''## Task
     Gabungkan `original_question` dengan `additional_information` menjadi satu pertanyaan analitik KPI yang koheren, lengkap, dan mudah dipahami.
+    Gunakan `Recent chat history` sebagai konteks percakapan saja. Jangan mengintegrasikan entitas, karyawan, atau filter dari riwayat percakapan ke dalam pertanyaan baru jika tidak disebutkan dalam original_question.
 
     ## Core Principles
     1.  **Absolute Preservation**: PERTAHANKAN semua metrik, dimensi, periode waktu, dan filter dari `original_question`. Tidak ada yang boleh dihilangkan atau diubah, kecuali jika secara langsung dan eksplisit bertentangan dengan `additional_information`.
     2.  **Full Integration**: Integrasikan SEMUA segmentasi, filter, target, atau konteks bisnis baru dari `additional_information` ke dalam pertanyaan baru secara mulus.
-    3.  **Conflict Resolution**: Jika ada bagian dari `additional_information` yang secara langsung bertentangan dengan `original_question` (misalnya periode waktu yang berbeda, metrik yang diganti), maka `additional_information` yang berlaku. Ini adalah **satu-satunya** kondisi di mana informasi original boleh dimodifikasi.
+    3.  **Conflict Resolution**: Jika ada bagian dari `additional_information` yang secara langsung bertentangan dengan `original_question` (misalnya periode waktu yang berbeda, metrik yang diganti), maka `additional_information` yang berlaku. Ini adalah **satu-satunya** kondisi di mana informasi original boleh modifikasi.
     4.  **Natural Language**: Output akhir harus berupa satu pertanyaan analitik yang terdengar natural, bukan daftar kriteria.
-
-    ## Examples
-    Original question: Tampilkan total revenue per region untuk Q3 2024.
-    Additional information: Hanya tampilkan region dengan revenue di atas 500 juta dan bandingkan dengan Q3 2023.
-    Rewritten question: Tampilkan total revenue per region untuk Q3 2024 yang melebihi 500 juta, beserta perbandingannya dengan Q3 2023.
-
-    Original question: Berapa rata-rata customer acquisition cost (CAC) per channel marketing bulan ini?
-    Additional information: Fokus hanya pada channel digital, dan sertakan juga nilai customer lifetime value (CLV) untuk menghitung rasio CLV:CAC.
-    Rewritten question: Berapa rata-rata CAC per channel marketing digital bulan ini, beserta nilai CLV masing-masing channel untuk menghitung rasio CLV:CAC?
-
-    Original question: Tampilkan tren tingkat retensi pelanggan selama 6 bulan terakhir berdasarkan segmen produk.
-    Additional information: Saya hanya tertarik pada segmen produk premium, dan tambahkan churn rate sebagai metrik pembanding.
-    Rewritten question: Tampilkan tren tingkat retensi dan churn rate pelanggan segmen produk premium selama 6 bulan terakhir.
 
     ## Response Format
     - Kembalikan **hanya** teks pertanyaan yang telah ditulis ulang.
@@ -641,7 +664,7 @@ def build_query_disambiguation_prompt(
 
     ---
     **Input:**
-    Original question: {original_query}
+    Original question: {original_query}{history_block}
     Additional information: {additional_information}
 
     The rewritten question is:

@@ -69,9 +69,15 @@ def build_session_qa_set(
     """Build full-session QAPairs from all answered logs + current answers.
 
     Current answers override same question from logs.
+    If a certain ambiguity type (level1) is answered in current_qa_set,
+    historical logs of that same ambiguity type are discarded to prevent contamination.
     Only include logs where selected_answer exists.
     Deduplicates by question (case-insensitive).
     """
+    current_ambiguity_types = {
+        pair.level1 for pair in current_qa_set if pair.level1 != UNKNOWN_AMBIGUITY_TYPE
+    }
+
     current_by_question = {
         question_key(pair.question): pair for pair in current_qa_set
     }
@@ -89,12 +95,16 @@ def build_session_qa_set(
         if key in current_by_question:
             pair = current_by_question[key]
         else:
+            log_ambiguity_type = getattr(log, "ambiguity_type", None) or UNKNOWN_AMBIGUITY_TYPE
+            if log_ambiguity_type in current_ambiguity_types:
+                continue
+
             # Otherwise, use log's answer if it exists and is not "Lewati"
             selected_answer = getattr(log, "selected_answer", None)
             if selected_answer is None or str(selected_answer) == SKIP_OPTION:
                 continue
             pair = QAPair(
-                level1=getattr(log, "ambiguity_type", None) or UNKNOWN_AMBIGUITY_TYPE,
+                level1=log_ambiguity_type,
                 level2=q_text,
                 question=q_text,
                 answer=str(selected_answer),

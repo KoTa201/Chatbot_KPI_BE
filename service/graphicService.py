@@ -1011,9 +1011,29 @@ class GraphicSeervice:
                 df[value_col],
                 marker="o",
                 color="#2563EB",
+                label="Realisasi"
             )
         else:
-            ax.plot(df[value_col].tolist(), marker="o", color="#2563EB")
+            ax.plot(df[value_col].tolist(), marker="o", color="#2563EB", label="Realisasi")
+
+        # Plot Target and adjust Y-limit if target column is present
+        target_col = self._find_column_by_hints(df, self.target_column_hints)
+        if target_col:
+            target_series = pd.to_numeric(df[target_col], errors="coerce").dropna()
+            if not target_series.empty:
+                t_val = target_series.iloc[0]
+                if (target_series == t_val).all():
+                    ax.axhline(y=float(t_val), color="#DC2626", linestyle="--", linewidth=1.5, label=f"Target ({t_val})")
+                else:
+                    xs = self._month_labels_for(df[time_col]) if time_col else list(range(len(df)))
+                    ax.plot(xs, target_series, color="#DC2626", linestyle="--", linewidth=1.5, label="Target")
+                
+                v_max = df[value_col].max()
+                t_max = target_series.max()
+                max_val = max(v_max if not pd.isna(v_max) else 0, t_max)
+                if max_val > 0:
+                    ax.set_ylim(0, max_val * 1.15)
+                ax.legend(fontsize=8)
 
         ax.set_title(
             f"{title_prefix} — Tren" if title_prefix else "Tren KPI (Line Chart)"
@@ -1040,7 +1060,7 @@ class GraphicSeervice:
         fig, ax = plt.subplots(figsize=(9, 5))
 
         if chart_type == "bar":
-            bars = ax.bar(chart_df[category_col], chart_df[value_col], color="#2563EB")
+            bars = ax.bar(chart_df[category_col], chart_df[value_col], color="#2563EB", label="Realisasi")
             ax.set_xlabel(category_col)
             # Label sumbu Y dengan satuan jika diketahui
             unit_label = ""
@@ -1050,6 +1070,25 @@ class GraphicSeervice:
                 )
             ax.set_ylabel(f"{value_col} ({unit_label})" if unit_label else value_col)
             ax.tick_params(axis="x", rotation=30)
+
+            # Plot Target and adjust Y-limit if target column is present
+            target_col = self._find_column_by_hints(df, self.target_column_hints)
+            if target_col:
+                target_series = pd.to_numeric(df[target_col], errors="coerce").dropna()
+                if not target_series.empty:
+                    t_val = target_series.iloc[0]
+                    if (target_series == t_val).all():
+                        ax.axhline(y=float(t_val), color="#DC2626", linestyle="--", linewidth=1.5, label=f"Target ({t_val})")
+                    else:
+                        ax.plot(chart_df[category_col], target_series.head(len(chart_df)), color="#DC2626", linestyle="--", linewidth=1.5, label="Target")
+                    
+                    v_max = chart_df[value_col].max()
+                    t_max = target_series.max()
+                    max_val = max(v_max if not pd.isna(v_max) else 0, t_max)
+                    if max_val > 0:
+                        ax.set_ylim(0, max_val * 1.15)
+                    ax.legend(fontsize=8)
+
             # Anotasi di atas bar dengan label asli
             if value_col in kpi_meta:
                 meta_list = kpi_meta[value_col]

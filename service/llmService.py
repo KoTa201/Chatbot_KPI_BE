@@ -80,7 +80,7 @@ class LLMService:
             prompt=prompt,
             temperature=0.1,
             max_output_tokens=1024,
-            stop_sequences=["```"],
+            stop_sequences=None,
         )
 
         logger.debug("Raw SQL output from LLM: %s", raw)

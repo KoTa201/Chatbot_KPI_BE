@@ -272,6 +272,19 @@ class ChatService:
         yield format_sse_metadata(metadata)
 
         full_narrative = ""
+        if rows_count == 0 or not query_result:
+            fallback = "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
+            self._complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
+            yield format_sse_chunk(fallback)
+            yield format_sse_done()
+            await self.session_service.create_chatbot_message(
+                session_id=session_id,
+                message=fallback,
+                graphics=graphics_payload,
+            )
+            await self.db.commit()
+            return
+
         try:
             async for token in llm.analyze_result_stream(analysis_prompt):
                 full_narrative += token
