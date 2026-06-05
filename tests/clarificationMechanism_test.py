@@ -22,7 +22,7 @@ from schema.clarificationSchema import (
 import pytest
 from uuid import UUID, uuid4
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.future import select
@@ -37,6 +37,7 @@ from model.User import User, RoleEnum
 from service.ambiguityDetectorService import AmbiguityDetectorService
 from service.clarificationService import ClarificationService
 from repository.clarificationRepository import ClarificationRepository
+from repository.chatMessageRepository import ChatMessageRepository
 from service.chatService import ChatService
 
 SESSION_TEST_1 = UUID("00000000-0000-0000-0000-000000000201")
@@ -384,34 +385,33 @@ class TestClarificationService:
                 )
                 service.session_service.create_chatbot_message = AsyncMock()
 
-                from service.chatService import llm, wireguard
                 from schema.wireguardSchema import ValidationResult
 
-                with patch.object(llm, "generate_sql", new_callable=AsyncMock) as mock_sql, \
-                     patch.object(llm, "decide_visualization_request", new_callable=AsyncMock) as mock_vis, \
-                     patch.object(wireguard, "validate") as mock_validate:
-
-                    mock_sql.return_value = "SELECT 1"
-                    mock_vis.return_value = SimpleNamespace(is_visualize=False, chart_type=None)
-                    mock_validate.return_value = ValidationResult(
+                service.llm_service.generate_sql = AsyncMock(return_value="SELECT 1")
+                service.llm_service.decide_visualization_request = AsyncMock(
+                    return_value=SimpleNamespace(is_visualize=False, chart_type=None)
+                )
+                service.wireguard_service.validate = Mock(
+                    return_value=ValidationResult(
                         is_valid=True, reason=None, sanitized_sql="SELECT 1",
                     )
-                    service._run_sql_execution_stage = AsyncMock(return_value=([{"value": 1}], 1))
+                )
+                service._run_sql_execution_stage = AsyncMock(return_value=([{"value": 1}], 1))
 
-                    async def fake_analyze(prompt):
-                        yield "Hasil KPI"
+                async def fake_analyze(prompt):
+                    yield "Hasil KPI"
 
-                    with patch.object(llm, "analyze_result_stream", new=fake_analyze):
-                        messages = []
-                        stream = service.process_query_stream(
-                            user_message="Tampilkan KPI terbaik dengan Achievement %",
-                            user_id=user.id,
-                            user_role="karyawan",
-                            session_id=session_id,
-                            context_from_clarification=SimpleNamespace(disambiguated_query="Tampilkan KPI terbaik dengan Achievement %"),
-                        )
-                        async for event in stream:
-                            messages.append(event)
+                service.llm_service.analyze_result_stream = fake_analyze
+                messages = []
+                stream = service.process_query_stream(
+                    user_message="Tampilkan KPI terbaik dengan Achievement %",
+                    user_id=user.id,
+                    user_role="karyawan",
+                    session_id=session_id,
+                    context_from_clarification=SimpleNamespace(disambiguated_query="Tampilkan KPI terbaik dengan Achievement %"),
+                )
+                async for event in stream:
+                    messages.append(event)
 
                 # Verify message was streamed
                 combined = "".join(messages)
@@ -503,6 +503,31 @@ class TestClarificationService:
         ]
 
     @pytest.mark.asyncio
+    async def test_generate_clarifying_question_accepts_fenced_json_from_cq_generation_llm(self):
+        service = ClarificationService(db=None)
+        service.llm._call_llm = AsyncMock(return_value='''```json
+{"choices": ["Achievement — gunakan persentase pencapaian KPI", "Nilai Aktual — gunakan nilai aktual KPI"]}
+```''')
+
+        result = await service._generate_clarifying_question(
+            ambiguity_type="AmbiSchema",
+            suggested_question="Metrik mana yang dimaksud?",
+            suggested_options=[
+                "kpi_tracker::achievement, persentase pencapaian KPI",
+                "kpi_tracker::actual_value, nilai aktual KPI",
+            ],
+            metadata={},
+        )
+
+        assert service.llm._call_llm.await_count == 1
+        assert result.options == [
+            "Achievement — gunakan persentase pencapaian KPI",
+            "Nilai Aktual — gunakan nilai aktual KPI",
+            "Lewati",
+            "Lainnya",
+        ]
+
+    @pytest.mark.asyncio
     async def test_generate_clarifying_question_falls_back_to_detector_options_when_cq_generation_fails(self):
         service = ClarificationService(db=None)
         service.llm._call_llm = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
@@ -527,7 +552,7 @@ class TestClarificationService:
 
     @pytest.mark.asyncio
     async def test_handle_clarification_response_rewrites_from_batched_answers(self):
-        service = ClarificationService(db=None)
+        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -539,6 +564,7 @@ class TestClarificationService:
             ),
         ])
         service.repo.update_with_answer = AsyncMock()
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[])
         service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
             is_ambiguous=False,
             ambiguity_type="none",
@@ -565,7 +591,7 @@ class TestClarificationService:
 
     @pytest.mark.asyncio
     async def test_handle_clarification_response_uses_preference_tree_additional_information(self):
-        service = ClarificationService(db=None)
+        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -579,6 +605,7 @@ class TestClarificationService:
             ),
         ])
         service.repo.update_with_answer = AsyncMock()
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[])
         service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
             is_ambiguous=False,
             ambiguity_type="none",
@@ -622,8 +649,72 @@ class TestClarificationService:
             assert all(qa.get("answer") != "Lewati" for qa in qa_list)
 
     @pytest.mark.asyncio
-    async def test_handle_clarification_response_does_not_repeat_answered_questions(self):
+    async def test_build_recent_conversation_information_prepends_history_and_skips_current_query(self):
         service = ClarificationService(db=None)
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[
+            SimpleNamespace(is_sender_chatbot=False, message="Tampilkan KPI Sales"),
+            SimpleNamespace(is_sender_chatbot=True, message="KPI Sales mencapai 90%"),
+            SimpleNamespace(is_sender_chatbot=False, message="Perjelas periode"),
+        ])
+
+        result = await service._build_recent_conversation_information(
+            session_id=SESSION_TEST_2,
+            source_query="Perjelas periode",
+            additional_information="- Metrik mana yang dimaksud?: Achievement %",
+        )
+
+        assert result == (
+            "[RIWAYAT PERCAKAPAN TERBARU]\n"
+            "- User: Tampilkan KPI Sales\n"
+            "- Chatbot: KPI Sales mencapai 90%\n"
+            "\n"
+            "- Metrik mana yang dimaksud?: Achievement %"
+        )
+        service.chat_message_repo.get_recent_by_session_id.assert_awaited_once_with(
+            session_id=SESSION_TEST_2,
+            limit=6,
+        )
+
+    @pytest.mark.asyncio
+    async def test_build_recent_conversation_information_marks_summary_followup_as_resolved_context(self):
+        service = ClarificationService(db=None)
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[
+            SimpleNamespace(
+                is_sender_chatbot=False,
+                message="Bandingkan pencapaian KPI Andi dan Adiansyah untuk semua bulan di tahun 2025",
+            ),
+            SimpleNamespace(
+                is_sender_chatbot=True,
+                message="Berikut adalah persentase pencapaian KPI antara Andi dan Adiansyah untuk semua bulan di tahun 2025: Bulan 1 ... Bulan 12 ...",
+            ),
+        ])
+
+        result = await service._build_recent_conversation_information(
+            session_id=SESSION_TEST_2,
+            source_query="Coba simpulkan siapa yang lebih baik",
+        )
+
+        assert "[RIWAYAT PERCAKAPAN TERBARU]" in result
+        assert "Bandingkan pencapaian KPI Andi dan Adiansyah" in result
+        assert "tahun 2025" in result.lower()
+        assert "semua bulan" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_build_recent_conversation_information_returns_existing_info_when_history_empty(self):
+        service = ClarificationService(db=None)
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[])
+
+        result = await service._build_recent_conversation_information(
+            session_id=SESSION_TEST_2,
+            source_query="Tampilkan KPI",
+            additional_information="- Periode mana yang dimaksud?: Q1 2025",
+        )
+
+        assert result == "- Periode mana yang dimaksud?: Q1 2025"
+
+    @pytest.mark.asyncio
+    async def test_handle_clarification_response_does_not_repeat_answered_questions(self):
+        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
         service.repo.get_by_session = AsyncMock(return_value=[
             SimpleNamespace(
                 clarification_question_id="q1",
@@ -638,6 +729,7 @@ class TestClarificationService:
         ])
         service.repo.update_with_answer = AsyncMock()
         service.repo.create = AsyncMock()
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[])
         service.llm._call_llm = AsyncMock(
             return_value="Progress KPI Akmal berdasarkan persentase pencapaian terhadap target untuk karyawan bernama Akmal"
         )
@@ -679,6 +771,99 @@ class TestClarificationService:
         service.repo.create.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_handle_clarification_response_does_not_repeat_same_ambiguity_type_with_different_wording(self):
+        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
+        service.repo.get_by_session = AsyncMock(return_value=[
+            SimpleNamespace(
+                clarification_question_id="q1",
+                ambiguity_type="AmbiView",
+                clarification_question="Aspek apa yang ingin Anda bandingkan dalam pencapaian KPI antara Andi dan Adiansyah?",
+                selected_answer=None,
+            ),
+        ])
+        service.repo.update_with_answer = AsyncMock()
+        service.repo.create = AsyncMock()
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[])
+        service.llm._call_llm = AsyncMock(
+            return_value="Bandingkan Andi dan Adiansyah berdasarkan pencapaian KPI per bulan terhadap target"
+        )
+        service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
+            is_ambiguous=True,
+            ambiguity_type="AmbiView",
+            detection_source="llm",
+            detected_ambiguities=[
+                DetectedAmbiguity(
+                    ambiguity_type="AmbiView",
+                    suggested_clarifying_question="Aspek apa yang ingin Anda bandingkan antara Andi dan Adiansyah?",
+                    answer_options=["Pencapaian KPI per bulan", "Tren performa"],
+                ),
+            ],
+        ))
+
+        result = await service.handle_clarification_response(
+            session_id=SESSION_TEST_2,
+            clarification_answers=[
+                ClarificationAnswerItem(
+                    question_id="q1",
+                    selected_option="Pencapaian KPI per bulan — membandingkan target vs nilai aktual setiap bulan untuk melihat seberapa baik Andi dan Adiansyah memenuhi tujuan bulanan mereka",
+                ),
+            ],
+            original_query="Bandingkan pencapaian KPI Andi dan Adiansyah",
+        )
+
+        assert result.needs_more_clarification is False
+        assert result.clarification_message is None
+        service.repo.create.assert_not_awaited()
+        service.ambiguity_detector.detect_ambiguity.assert_awaited_once()
+        recheck_kwargs = service.ambiguity_detector.detect_ambiguity.await_args.kwargs
+        assert "Pencapaian KPI per bulan" in recheck_kwargs["session_context"]
+
+    @pytest.mark.asyncio
+    async def test_handle_clarification_response_uses_recent_history_from_chat_message_repository(self):
+        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
+        service.repo.get_by_session = AsyncMock(return_value=[
+            SimpleNamespace(
+                clarification_question_id="q1",
+                ambiguity_type="AmbiSchema",
+                clarification_question="Metrik mana yang dimaksud?",
+            ),
+        ])
+        service.repo.update_with_answer = AsyncMock()
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[
+            SimpleNamespace(is_sender_chatbot=False, message="Tampilkan KPI Sales"),
+            SimpleNamespace(is_sender_chatbot=True, message="KPI Sales mencapai 90%"),
+        ])
+        service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
+            is_ambiguous=False,
+            ambiguity_type="none",
+            detected_ambiguities=[],
+        ))
+        captured_prompt = {}
+
+        async def fake_call_llm(**kwargs):
+            captured_prompt["prompt"] = kwargs["prompt"]
+            return "Tampilkan achievement KPI Sales"
+
+        service.llm._call_llm = fake_call_llm
+
+        result = await service.handle_clarification_response(
+            session_id=SESSION_TEST_2,
+            clarification_answers=[
+                ClarificationAnswerItem(question_id="q1", selected_option="Achievement %"),
+            ],
+            original_query="Achievement KPI Sales?",
+        )
+
+        assert result.disambiguated_query == "Tampilkan achievement KPI Sales"
+        assert "[RIWAYAT PERCAKAPAN TERBARU]" in captured_prompt["prompt"]
+        assert "- User: Tampilkan KPI Sales" in captured_prompt["prompt"]
+        assert "- Chatbot: KPI Sales mencapai 90%" in captured_prompt["prompt"]
+        service.chat_message_repo.get_recent_by_session_id.assert_awaited_once_with(
+            session_id=SESSION_TEST_2,
+            limit=6,
+        )
+
+    @pytest.mark.asyncio
     async def test_handle_clarification_response_returns_next_questions_when_recheck_is_ambiguous(self):
         service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
         service.repo.get_by_session = AsyncMock(return_value=[
@@ -692,6 +877,7 @@ class TestClarificationService:
         service.repo.update_with_answer = AsyncMock()
         service.repo.create = AsyncMock(
             return_value=SimpleNamespace(clarification_question_id="q-next"))
+        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[])
         service.llm._call_llm = AsyncMock(
             return_value="Tampilkan ranking performa KPI berdasarkan achievement")
         service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
@@ -1235,6 +1421,27 @@ def test_clarification_repository_preserves_text_answer():
 
 
 @pytest.mark.asyncio
+async def test_chat_message_repository_get_recent_by_session_id_returns_chronological_limited_messages():
+    engine, session_factory = await _make_sqlite_session()
+    session_id = uuid4()
+    try:
+        async with session_factory() as db:
+            await _create_user_and_session(db, session_id)
+            repo = ChatMessageRepository(db)
+            await repo.create(session_id=session_id, message="Pesan 1", is_sender_chatbot=False)
+            await repo.create(session_id=session_id, message="Pesan 2", is_sender_chatbot=True)
+            await repo.create(session_id=session_id, message="Pesan 3", is_sender_chatbot=False)
+            await repo.create(session_id=session_id, message="Pesan 4", is_sender_chatbot=True)
+            await db.commit()
+
+            messages = await repo.get_recent_by_session_id(session_id=session_id, limit=3)
+
+            assert [message.message for message in messages] == ["Pesan 2", "Pesan 3", "Pesan 4"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_fallback_rewrite_skips_lewati_and_uses_lainnya():
     from utils.helper.clarificationHelpers import build_fallback_disambiguated_query
 
@@ -1375,8 +1582,9 @@ async def test_ambiguity_detector_passes_addon_prompt_to_prompt_builder(monkeypa
     detector = AmbiguityDetectorService()
     captured = {}
 
-    def fake_builder(user_query, user_role, kpi_context="", addon_prompt=None):
+    def fake_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
         captured["addon_prompt"] = addon_prompt
+        captured["session_context"] = session_context
         return "prompt"
 
     monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_builder)
@@ -1419,6 +1627,7 @@ async def test_clarification_service_passes_addon_prompt_to_detector(monkeypatch
         "Karyawan",
         "KPI context",
         addon_prompt="Gunakan constraint bot.",
+        session_context=None,
     )
 
 
@@ -1457,9 +1666,9 @@ class TestKPIPrompts:
             kpi_context="schema context",
         )
 
-        assert '"andi" → cannot be matched to a single unique employee → AmbiValue' in prompt
-        assert '"perkembangan" → unclear metric/operation → AmbiView' in prompt
-        assert '"level_2_label": "AmbiValue"' in prompt
+        assert '"andi"         → employee name → self-resolved via full name OR email, NOT an ambiguity' in prompt
+        assert '"perkembangan" → unclear metric → AmbiView' in prompt
+        assert '"level_2_label": "AmbiValue"' not in prompt
         assert '"level_2_label": "AmbiView"' in prompt
 
     def test_ambiguity_prompt_uses_ambisql_question_set_format(self):
@@ -1575,7 +1784,8 @@ class TestPreferenceTreeService:
     async def test_preference_tree_builds_leaf_map_and_records_lewati(self):
         from service.preferenceTreeService import PreferenceTree, QAPair
 
-        tree = PreferenceTree(llm=None)
+        tree = PreferenceTree()
+        tree.llm = None
         await tree.update_tree([
             QAPair(
                 level1="AmbiSchema",
@@ -1610,7 +1820,8 @@ class TestPreferenceTreeService:
     async def test_additional_information_excludes_lewati_and_appends_constraints(self):
         from service.preferenceTreeService import PreferenceTree, QAPair
 
-        tree = PreferenceTree(llm=None)
+        tree = PreferenceTree()
+        tree.llm = None
         qa_set = [
             QAPair(
                 level1="AmbiSchema",
@@ -1641,7 +1852,8 @@ class TestPreferenceTreeService:
             async def _call_llm(self, **kwargs):
                 return '[{"question": "Metrik terbaik mana?", "answer": "Achievement %"}]'
 
-        tree = PreferenceTree(llm=FakeLLM())
+        tree = PreferenceTree()
+        tree.llm = FakeLLM()
         await tree.update_tree([
             QAPair(
                 level1="AmbiSchema",
@@ -1670,7 +1882,8 @@ class TestPreferenceTreeService:
             async def _call_llm(self, **kwargs):
                 return 'not json'
 
-        tree = PreferenceTree(llm=BadLLM())
+        tree = PreferenceTree()
+        tree.llm = BadLLM()
         await tree.update_tree([
             QAPair(
                 level1="AmbiSchema",

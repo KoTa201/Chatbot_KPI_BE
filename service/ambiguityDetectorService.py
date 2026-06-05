@@ -36,7 +36,11 @@ class AmbiguityDetectorService:
         self.llm = LLMService()
 
     async def detect_ambiguity(
-        self, user_query: str, user_role: str, kpi_context: str = "", addon_prompt: str | None = None
+        self, user_query: str,
+        user_role: str,
+        kpi_context: str = "",
+        addon_prompt: str | None = None,
+        session_context: str | None = None
     ) -> AmbiguityAssessmentResult:
         """
         Deteksi ambiguitas query pengguna menggunakan LLM.
@@ -54,7 +58,63 @@ class AmbiguityDetectorService:
 
         try:
             # Single-stage: langsung call LLM untuk assessment
-            result = await self._assess_ambiguity_with_llm(user_query, user_role, kpi_context, addon_prompt)
+            result = await self._assess_ambiguity_with_llm(user_query, user_role, kpi_context, addon_prompt, session_context)
+
+            # Check if query contains a 4-digit year (e.g. 2024, 2025, 2026)
+            import re
+            has_year = bool(re.search(r'\b20\d{2}\b', user_query))
+
+            if not result.is_out_of_scope:
+                # 1. Inject Year Clarification if missing
+                if not has_year:
+                    already_has_year = any(
+                        "tahun" in (a.suggested_clarifying_question or "").lower()
+                        for a in result.detected_ambiguities
+                    )
+                    if not already_has_year:
+                        result.is_ambiguous = True
+                        if result.ambiguity_type == "none" or not result.ambiguity_type:
+                            result.ambiguity_type = "AmbiRef"
+                        
+                        from schema.clarificationSchema import DetectedAmbiguity
+                        result.detected_ambiguities.append(
+                            DetectedAmbiguity(
+                                ambiguity_type="AmbiRef",
+                                suggested_clarifying_question="Tahun data mana yang ingin Anda lihat?",
+                                answer_options=[
+                                    "Tahun 2025 — melihat data tahun lalu",
+                                    "Tahun 2026 — melihat data tahun berjalan"
+                                ]
+                            )
+                        )
+
+                # 2. Inject Month Clarification if missing
+                months_pattern = r'\b(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember|jan|feb|mar|apr|mei|jun|jul|ags|sep|okt|nov|des|q[1-4]|kuartal|bulan|periode|tren|history|riwayat)\b'
+                has_month_or_period = bool(re.search(months_pattern, user_query.lower()))
+                if not has_month_or_period:
+                    already_has_month = any(
+                        any(w in (a.suggested_clarifying_question or "").lower() for w in ["bulan", "periode", "kuartal"])
+                        for a in result.detected_ambiguities
+                    )
+                    if not already_has_month:
+                        result.is_ambiguous = True
+                        if result.ambiguity_type == "none" or not result.ambiguity_type:
+                            result.ambiguity_type = "AmbiRef"
+                        
+                        from schema.clarificationSchema import DetectedAmbiguity
+                        result.detected_ambiguities.append(
+                            DetectedAmbiguity(
+                                ambiguity_type="AmbiRef",
+                                suggested_clarifying_question="Periode bulan mana yang ingin Anda lihat?",
+                                answer_options=[
+                                    "Semua Bulan (Tren Tahunan)",
+                                    "Kuartal 1 (Jan - Mar)",
+                                    "Kuartal 2 (Apr - Jun)",
+                                    "Kuartal 3 (Jul - Sep)",
+                                    "Kuartal 4 (Okt - Des)"
+                                ]
+                            )
+                        )
 
             logger.info(
                 f"[AmbiguityDetector] Ambiguity assessment: "
@@ -86,7 +146,7 @@ class AmbiguityDetectorService:
         return extract_description_options(description)
 
     async def _assess_ambiguity_with_llm(
-        self, user_query: str, user_role: str, kpi_context: str = "", addon_prompt: str | None = None
+        self, user_query: str, user_role: str, kpi_context: str = "", addon_prompt: str | None = None, session_context: str | None = None
     ) -> AmbiguityAssessmentResult:
         """
         Call LLM untuk menilai ambiguitas query.
@@ -102,7 +162,8 @@ class AmbiguityDetectorService:
         try:
             # Build prompt untuk LLM
             prompt = build_ambiguity_assessment_prompt(
-                user_query, user_role, kpi_context, addon_prompt=addon_prompt)
+                user_query, user_role, kpi_context, addon_prompt=addon_prompt, session_context=session_context)
+
 
             # Call LLM dengan temperature rendah untuk konsistensi
             response = await self.llm.call_model(

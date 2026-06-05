@@ -64,6 +64,9 @@ def _patch_clarification_service(monkeypatch, clarification_response):
 
         process_user_query = AsyncMock(return_value=clarification_response)
 
+        async def _build_recent_conversation_information(self, session_id, source_query, additional_information=None):
+            return additional_information
+
     import service.clarificationService as clarification_module
 
     monkeypatch.setattr(
@@ -117,9 +120,9 @@ def _stage_by_name(response, stage_name: str):
 async def test_nl_to_sql_stage_only_generates_sql(monkeypatch):
     service = _create_chat_service(monkeypatch)
     sanitized_sql = "SELECT bulan, total_realisasi FROM report_kpi LIMIT 100;"
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value=sanitized_sql))
+    monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value=sanitized_sql))
     visualization_mock = AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="pie"))
-    monkeypatch.setattr(chat_service_module.llm, "decide_visualization_request", visualization_mock)
+    monkeypatch.setattr(service.llm_service, "decide_visualization_request", visualization_mock)
 
     stages = []
     generated_sql = await service._run_nl_to_sql_stage(
@@ -146,9 +149,9 @@ async def test_nl_to_sql_stage_only_generates_sql(monkeypatch):
 async def test_visualization_decision_stage_only_decides_visualization(monkeypatch):
     service = _create_chat_service(monkeypatch)
     sql_mock = AsyncMock(return_value="SELECT 1;")
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", sql_mock)
+    monkeypatch.setattr(service.llm_service, "generate_sql", sql_mock)
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="bar")),
     )
@@ -184,15 +187,14 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
     )
     _patch_clarification_service(monkeypatch, clarification_response)
 
+    service = _create_chat_service(monkeypatch)
     generate_sql_mock = AsyncMock(return_value="SELECT 1")
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", generate_sql_mock)
+    monkeypatch.setattr(service.llm_service, "generate_sql", generate_sql_mock)
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
-
-    service = _create_chat_service(monkeypatch)
     stream = service.process_query_stream(
         user_message="Siapa yang paling perform?",
         user_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -226,14 +228,15 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
 async def test_process_query_returns_security_message_when_sql_validation_fails(monkeypatch):
     _patch_clarification_service(monkeypatch, clarification_response=None)
 
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value="SELECT * FROM users"))
+    service = _create_chat_service(monkeypatch)
+    monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value="SELECT * FROM users"))
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
     monkeypatch.setattr(
-        chat_service_module.wireguard,
+        service.wireguard_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=False,
@@ -241,8 +244,6 @@ async def test_process_query_returns_security_message_when_sql_validation_fails(
             sanitized_sql=None,
         ),
     )
-
-    service = _create_chat_service(monkeypatch)
     execute_sql_mock = AsyncMock(return_value=([], 0))
     monkeypatch.setattr(service, "_run_sql_execution_stage", execute_sql_mock)
 
@@ -268,19 +269,20 @@ async def test_process_query_success_without_visualization(monkeypatch):
     sanitized_sql = "SELECT bulan, total_realisasi FROM report_kpi LIMIT 100;"
     query_rows = [{"bulan": 1, "total_realisasi": 120}]
 
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value=sanitized_sql))
+    service = _create_chat_service(monkeypatch)
+    monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value=sanitized_sql))
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "analyze_result_stream",
         lambda prompt: _fake_analyze_stream(prompt),
     )
     monkeypatch.setattr(
-        chat_service_module.wireguard,
+        service.wireguard_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -288,8 +290,6 @@ async def test_process_query_success_without_visualization(monkeypatch):
             sanitized_sql=sanitized_sql,
         ),
     )
-
-    service = _create_chat_service(monkeypatch)
     monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 1)))
 
     stream = service.process_query_stream(
@@ -319,19 +319,20 @@ async def test_process_query_success_with_visualization(monkeypatch):
         {"bulan": 2, "total_realisasi": 90},
     ]
 
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value=sanitized_sql))
+    service = _create_chat_service(monkeypatch)
+    monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value=sanitized_sql))
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="pie")),
     )
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "analyze_result_stream",
         lambda prompt: _fake_analyze_stream(prompt),
     )
     monkeypatch.setattr(
-        chat_service_module.wireguard,
+        service.wireguard_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -340,7 +341,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        chat_service_module.graphic_service,
+        service.graphic_service,
         "generateGraphicPerKpi",
         lambda query_result, chart_type, session_id=None: [
             GraphicResult(
@@ -349,8 +350,6 @@ async def test_process_query_success_with_visualization(monkeypatch):
             )
         ],
     )
-
-    service = _create_chat_service(monkeypatch)
     monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 2)))
 
     stream = service.process_query_stream(
@@ -376,9 +375,10 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
     sanitized_sql = "SELECT bulan, total_realisasi FROM report_kpi LIMIT 100;"
     query_rows = [{"bulan": 1, "total_realisasi": 120}]
 
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value=sanitized_sql))
+    service = _create_chat_service(monkeypatch)
+    monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value=sanitized_sql))
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
@@ -390,9 +390,9 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
         )
         yield  # unreachable, makes this an async generator
 
-    monkeypatch.setattr(chat_service_module.llm, "analyze_result_stream", _ratelimited_stream)
+    monkeypatch.setattr(service.llm_service, "analyze_result_stream", _ratelimited_stream)
     monkeypatch.setattr(
-        chat_service_module.wireguard,
+        service.wireguard_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -400,8 +400,6 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
             sanitized_sql=sanitized_sql,
         ),
     )
-
-    service = _create_chat_service(monkeypatch)
     monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 1)))
 
     stream = service.process_query_stream(
@@ -421,14 +419,15 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
     _patch_clarification_service(monkeypatch, clarification_response=None)
 
     sanitized_sql = "SELECT bulan, total_realisasi FROM report_kpi LIMIT 100;"
-    monkeypatch.setattr(chat_service_module.llm, "generate_sql", AsyncMock(return_value=sanitized_sql))
+    service = _create_chat_service(monkeypatch)
+    monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value=sanitized_sql))
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "decide_visualization_request",
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
     monkeypatch.setattr(
-        chat_service_module.wireguard,
+        service.wireguard_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -436,8 +435,6 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
             sanitized_sql=sanitized_sql,
         ),
     )
-
-    service = _create_chat_service(monkeypatch)
     monkeypatch.setattr(
         service,
         "_run_sql_execution_stage",
@@ -466,8 +463,9 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
 async def test_process_query_returns_fallback_message_when_llm_unavailable(monkeypatch):
     _patch_clarification_service(monkeypatch, clarification_response=None)
 
+    service = _create_chat_service(monkeypatch)
     monkeypatch.setattr(
-        chat_service_module.llm,
+        service.llm_service,
         "generate_sql",
         AsyncMock(
             side_effect=HTTPException(
@@ -477,17 +475,15 @@ async def test_process_query_returns_fallback_message_when_llm_unavailable(monke
         ),
     )
 
-    service = _create_chat_service(monkeypatch)
+    with pytest.raises(HTTPException) as error_info:
+        stream = service.process_query_stream(
+            user_message="Tampilkan KPI bulan ini",
+            user_id=UUID("00000000-0000-0000-0000-000000000007"),
+            user_role="Owner",
+            session_id=SESSION_LLM_DOWN,
+        )
+        async for _ in stream:
+            pass
 
-    stream = service.process_query_stream(
-        user_message="Tampilkan KPI bulan ini",
-        user_id=UUID("00000000-0000-0000-0000-000000000007"),
-        user_role="Owner",
-        session_id=SESSION_LLM_DOWN,
-    )
-    response = await _collect_sse_stream(stream)
-
-    assert "sementara tidak tersedia" in response["message"].lower()
-    nl_to_sql_stage = _stage_by_name(response, "nl_to_sql")
-    assert nl_to_sql_stage is not None
-    assert nl_to_sql_stage["status"] == "degraded"
+    assert error_info.value.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+    assert "sementara tidak tersedia" in error_info.value.detail.lower()

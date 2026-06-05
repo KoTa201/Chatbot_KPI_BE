@@ -9,7 +9,7 @@ from typing import Any, cast, NoReturn
 import httpx
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, APIStatusError
-from openai.types.chat import ChatCompletion
+from openai.types.chat import ChatCompletion,ChatCompletionUserMessageParam
 from configCredidential import get_settings
 
 settings = get_settings()
@@ -107,7 +107,7 @@ class LLMService:
         try:
             stream = await self.client.chat.completions.create(
                 model=settings.LLM_MODEL_ANALYSIS,
-                messages=[{"role": "user", "content": prompt}],
+                messages=[ChatCompletionUserMessageParam(role="user", content=prompt)],
                 temperature=0.4,
                 max_tokens=3000,
                 stream=True,

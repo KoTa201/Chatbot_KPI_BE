@@ -94,6 +94,7 @@ def build_nl_to_sql_prompt(
         user_role: str,
         addon_prompt: str | None = None,
         column_statistics: str | None = None,
+        session_context: str | None = None,
 ) -> str:
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
     column_statistics_block = (
@@ -104,65 +105,67 @@ def build_nl_to_sql_prompt(
         )
     )
 
+    session_context_block = (session_context or "").strip() or "Tidak ada konteks percakapan sebelumnya."
+
     prompt = f"""[SYSTEM]
-Kamu adalah SQL expert. Konversi pertanyaan bahasa Indonesia ke PostgreSQL SELECT query.
-{addon_prompt_block}
+    Kamu adalah SQL expert. Konversi pertanyaan bahasa Indonesia ke PostgreSQL SELECT query.
+    {addon_prompt_block}
 
-[PERTANYAAN ASLI PENGGUNA (q)]
-{user_query}
+    [SESSION CONTEXT]
+    {session_context_block}
 
-[SKEMA DATABASE (S)]
-{DB_SCHEMA}
-
-[STATISTIK SETIAP KOLOM]
-{column_statistics_block}
-
-[ATURAN]
-OUTPUT: Hanya SQL mentah — tanpa markdown, tanpa komentar, tanpa penjelasan.
-        Jika tidak bisa dijawab: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
-
-KEAMANAN:
-- Hanya generate query SELECT. Dilarang: INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC.
-- user_id di [CONTEXT] adalah user login, BUKAN filter default. Pakai filter hanya jika user menyebut "saya/milik saya/KPI saya".
-  Abaikan untuk pertanyaan tim atau orang lain.
-
-QUERY:
-- Gunakan tabel/kolom dari schema. Inferensi via (pertanyaan + schema + statistik kolom). Untuk numerik manfaatkan mean, maksimum, minimum, non-zero, non-null; untuk string/boolean manfaatkan nilai unik, non-zero, non-null.
-- Nama: UPPER(u.full_name) LIKE UPPER('%nama%'). JOIN users u ON u.id = kt.user_id.
-- Periode & Tahun: gunakan bulan_num (1=Jan..12=Des) untuk bulan. Untuk filter tahun, ALWAYS gunakan `kg.tahun` (JOIN kpi_groups kg ON kt.group_id = kg.id atau km.group_id = kg.id). JANGAN gunakan EXTRACT(YEAR FROM kt.created_at) karena created_at adalah tanggal input data ke DB. "Bulan terakhir" = MAX(bulan_num).
-- Tambahkan LIMIT 1000 jika tidak ada limit spesifik.
-- Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
-- Rata-rata & Performa: JANGAN langsung menggunakan fungsi agregasi SQL (seperti AVG) jika pertanyaan menanyakan rata-rata/performa campuran dari berbagai KPI (yang mungkin berisi nilai TRL). Lebih baik SELECT data detail per baris (km.kpi_name, kt.realisasi, km.target, kt.bulan_num) agar LLM pada tahap analisis dapat menghitung rata-rata untuk KPI numerik dan melaporkan status TRL secara terpisah.
-
-PILIHAN TABEL:
-- GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
-    JOIN kpi_master_records km ON kt.kpi_master_id = km.id
-    JOIN users u ON u.id = kt.user_id  ← jika perlu nama
-    JOIN kpi_groups kg ON kt.group_id = kg.id  ← jika perlu filter tahun/group
-- GUNAKAN kpi_master_users kmu untuk assignment/daftar KPI per orang
-    JOIN users u ON u.id = kmu.user_id
-    JOIN kpi_master_records km ON km.id = kmu.kpi_master_id
-    JOIN kpi_groups kg ON km.group_id = kg.id  ← jika perlu filter tahun/group
-
-KOLOM KPI:
-- km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
-  Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
-- Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
-  kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu (misal Adiansyah, Andi, dll.), wajib sertakan juga nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
-  pertanyaan eksplisit minta threshold/status/kategori.
-
-CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
-- DILARANG KERAS melakukan cast langsung ::NUMERIC. Untuk kalkulasi numerik wajib pakai:
-    CASE WHEN kt.realisasi ~ '^[0-9]+(\\.[0-9]+)?$'
-          AND km.target    ~ '^[0-9]+(\\.[0-9]+)?$'
-         THEN kt.realisasi::NUMERIC / NULLIF(km.target::NUMERIC, 0) * 100
-         ELSE NULL END AS persen_pencapaian
-- Jika hanya menampilkan nilai, SELECT as TEXT — tidak perlu cast.
-
-[CONTEXT]
-Role: {user_role} | user_id: {user_id} | Tahun: {datetime.now().year}
-
-SQL:"""
+    [PERTANYAAN ASLI PENGGUNA (q)]
+    {user_query}
+    
+    [SKEMA DATABASE (S)]
+    {DB_SCHEMA}
+    
+    [STATISTIK SETIAP KOLOM]
+    {column_statistics_block}
+    
+    [ATURAN]
+    OUTPUT: Hanya SQL mentah — tanpa markdown, tanpa komentar, tanpa penjelasan.
+            Jika tidak bisa dijawab: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
+    
+    KEAMANAN:
+    - Hanya generate query SELECT. Dilarang: INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC.
+    - user_id di [CONTEXT] adalah user login, BUKAN filter default. Pakai filter hanya jika user menyebut "saya/milik saya/KPI saya".
+      Abaikan untuk pertanyaan tim atau orang lain.
+    
+    QUERY:
+    - Gunakan tabel/kolom dari schema. Inferensi via (pertanyaan + schema + statistik kolom). Untuk numerik manfaatkan mean, maksimum, minimum, non-zero, non-null; untuk string/boolean manfaatkan nilai unik, non-zero, non-null.
+    - Nama: UPPER(u.full_name) LIKE UPPER('%nama%'). JOIN users u ON u.id = kt.user_id.
+    - Periode & Tahun: gunakan bulan_num (1=Jan..12=Des) untuk bulan. Untuk filter tahun, gunakan `kg.tahun` (JOIN kpi_groups kg ON kt.group_id = kg.id atau km.group_id = kg.id) — WAJIB ditambahkan ke query HANYA jika prompt menyebutkan tahun spesifik (contoh: "2024", "tahun lalu", "tahun ini"). Jika prompt tidak menyebut tahun, JANGAN tambahkan filter kg.tahun. JANGAN gunakan EXTRACT(YEAR FROM kt.created_at) karena created_at adalah tanggal input data ke DB. "Bulan terakhir" = MAX(bulan_num).
+    - Tambahkan LIMIT 1000 jika tidak ada limit spesifik.
+    - Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
+    - Rata-rata & Performa: JANGAN langsung menggunakan fungsi agregasi SQL (seperti AVG) jika pertanyaan menanyakan rata-rata/performa campuran dari berbagai KPI (yang mungkin berisi nilai TRL). Lebih baik SELECT data detail per baris (km.kpi_name, kt.realisasi, km.target, kt.bulan_num) agar LLM pada tahap analisis dapat menghitung rata-rata untuk KPI numerik dan melaporkan status TRL secara terpisah.
+    
+    PILIHAN TABEL:
+    - GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
+        JOIN kpi_master_records km ON kt.kpi_master_id = km.id
+        JOIN users u ON u.id = kt.user_id  ← jika perlu nama
+        JOIN kpi_groups kg ON kt.group_id = kg.id  ← jika perlu filter tahun/group
+    - GUNAKAN kpi_master_users kmu untuk assignment/daftar KPI per orang
+        JOIN users u ON u.id = kmu.user_id
+        JOIN kpi_master_records km ON km.id = kmu.kpi_master_id
+        JOIN kpi_groups kg ON km.group_id = kg.id  ← jika perlu filter tahun/group
+    
+    KOLOM KPI:
+    - km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
+      Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
+    - Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
+      kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu (misal Adiansyah, Andi, dll.), wajib sertakan juga nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
+      pertanyaan eksplisit minta threshold/status/kategori.
+    
+    CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
+    - DILARANG KERAS melakukan cast langsung ::NUMERIC atau CAST(... AS NUMERIC) pada kt.realisasi/km.target.
+    - JANGAN cast ke NUMERIC dalam bentuk apapun (::NUMERIC, CAST(... AS NUMERIC), dsb.)
+    - JANGAN lakukan kalkulasi persentase (/ target * 100) di query ini
+    
+    [CONTEXT]
+    Role: {user_role} | user_id: {user_id} | Tahun: {datetime.now().year}
+    
+    SQL:"""
 
     return prompt
 
@@ -215,11 +218,10 @@ def build_analysis_prompt(
        - Pertanyaan per-individu → tampilkan per orang.
        Jangan tampilkan field yang tidak relevan dengan pertanyaan.
     5. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
-    6. Jangan tambahkan insight umum kecuali pengguna memintanya.
-    7. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
-    8. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
-    9. Jangan menambahkan kalimat penutup, ringkasan akhir, atau kesimpulan 
-        generatif di luar data. Jawaban berhenti setelah data terakhir disajikan.
+    6. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
+    7. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
+    8. Jawaban data disajikan lebih dahulu, baru insight/kesimpulan di bagian akhir 
+       (lihat ATURAN INSIGHT di bawah).
 
     ATURAN KHUSUS KPI TARGET / PROGRESS:
     - Tampilkan nilai realisasi dan target dari data apa adanya.
@@ -238,13 +240,45 @@ def build_analysis_prompt(
     - Jika pertanyaan menanyakan capaian/performa individu tanpa batas waktu 
          eksplisit, tampilkan minimal bulan terakhir. Jika data historis tersedia 
          dan relevan untuk menggambarkan tren, tampilkan maksimal 3 bulan terakhir.
-    - Jika pertanyaan mengandung kata "persen", "%" atau "persentase capaian", 
-      dan data mengandung realisasi serta target numerik yang bisa dibandingkan, 
-      hitung dan tampilkan persentase: (realisasi / target) × 100%.
+    - Jika pertanyaan mengandung kata "persen", "%" atau "persentase capaian",
+      ekstrak angka pertama dari nilai realisasi dan target (abaikan teks/satuan
+      seperti "TRL", "/Hari", ">", "%"), lalu hitung: (angka_realisasi / angka_target) × 100%.
+      Untuk KPI berbasis level/skala (TRL, Level, dsb.) yang diminta persennya:
+      tetap hitung dari angka yang diekstrak (misal TRL 7 dari TRL 9 = 77.78%),
+      dan tambahkan keterangan status "(tercapai)" atau "(belum tercapai)".
     - Untuk KPI non-numerik seperti TRL, nyatakan sebagai "tercapai" atau 
       "belum tercapai" tanpa persentase, karena tidak bisa dihitung secara linier.
     - Jangan menghitung persentase jika target atau realisasi tidak ada di data.
-    
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ATURAN INSIGHT & KESIMPULAN:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    Setelah menyajikan data, tambahkan satu blok insight singkat HANYA jika 
+    pertanyaan pengguna secara eksplisit atau implisit membutuhkan pemahaman lebih 
+    (misalnya: "bagaimana kinerja?", "apa yang perlu diperhatikan?", "analisis", 
+    "evaluasi", "tren", "perbandingan", atau pertanyaan yang bersifat open-ended).
+
+    FORMAT BLOK INSIGHT:
+    ---
+    💡 Insight: [insight ringkas berdasarkan data]
+
+    ATURAN ISI INSIGHT:
+    - Insight harus relevan langsung dengan konteks pertanyaan pengguna ([PERTANYAAN PENGGUNA]).
+    - Hanya gunakan fakta yang ada di [DATA MENTAH] — jangan mengarang atau mengasumsikan 
+      data di luar yang tersedia.
+    - Boleh menyebut pola, kesenjangan, atau hal yang menonjol dari data 
+      (misal: KPI yang paling jauh dari target, tren naik/turun antar bulan, 
+      individu dengan capaian tertinggi/terendah).
+    - Jangan ulangi angka yang sudah disajikan di atas — cukup simpulkan polanya.
+    - Jangan tambahkan saran tindakan, rekomendasi, atau opini subjektif.
+    - Gunakan bahasa yang faktual dan netral.
+
+    KAPAN TIDAK MENAMPILKAN INSIGHT:
+    - Pertanyaan faktual sederhana (misal: "berapa nilai KPI X?", "siapa yang mencapai target?")
+      → tidak perlu insight, cukup jawab langsung.
+    - Data kosong atau hanya 1 baris → tidak perlu insight.
+    - Pertanyaan sudah terjawab tuntas hanya dengan data → tidak perlu insight.
 
     [PERTANYAAN PENGGUNA]
     {user_query}
@@ -259,7 +293,6 @@ def build_analysis_prompt(
 
     return prompt
 
-
 # ================================================================ #
 #  CLARIFICATION PROMPTS                                           #
 # ================================================================ #
@@ -268,180 +301,154 @@ def build_ambiguity_assessment_prompt(
         user_role: str,
         kpi_context: str = "",
         addon_prompt: str | None = None,
+        session_context: str | None = None,
 ) -> str:
-    """
-    Membangun prompt untuk LLM-based ambiguity detection dengan format AmbiSQL.
-    Menggunakan question_set format dengan level-1 dan level-2 ambiguity taxonomy.
-    Output JSON mengikuti spec ketat: has_ambiguity + is_out_of_scope + question_set.
-
-    Fixes applied:
-    - Scope check hanya gagal jika topik tidak relevan, bukan jika nilai spesifik tidak dikenal
-    - LLM dilarang self-resolve ambiguity (nama tidak unik → AmbiValue, metric ambigu → AmbiView)
-    - Few-shot examples konkret untuk kasus seperti "bagaimana perkembangan andi"
-    - Instruksi analisis diperkuat agar tidak bias ke false negative
-    - Out-of-scope kini mengembalikan JSON (bukan plain string) agar parsing konsisten
-    """
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
 
     prompt = f"""You are a strict question classifier and ambiguity detector for a data analytics system.
-    {addon_prompt_block}
 
-    ════════════════════════════════════════════════════════════════
-    INPUT ELEMENTS:
-    ════════════════════════════════════════════════════════════════
+    Session context: {session_context}
+    Addon constraints: {addon_prompt_block}
 
-    Question : "{user_query}"
-    Role     : {user_role}
-    Schema   : {DB_SCHEMA}
-    Evidence : {kpi_context}
+    INPUT:
+      Question : "{user_query}"
+      Role     : {user_role}
+      Schema   : {DB_SCHEMA}
+      Evidence : {kpi_context}
 
-    ════════════════════════════════════════════════════════════════
-    STEP 1 — SCOPE CHECK (EXECUTE THIS FIRST, NO EXCEPTIONS):
-    ════════════════════════════════════════════════════════════════
+    ════════════════════════════════════════════
+    STEP 0 — SESSION CONTEXT PRE-RESOLUTION (runs before everything)
+    ════════════════════════════════════════════
 
-    Evaluate whether the DOMAIN/TOPIC of the question is answerable
-    using the schema, evidence, or KPI definitions.
+    Before any scope check or ambiguity analysis, scan the session context above for
+    information that can resolve potential ambiguities in the current question.
 
-    CRITICAL DISTINCTION — these are NOT the same:
-      ┌─────────────────────────────────────────────────────────────┐
-      │ Unknown/unclear specific values (names, dates, terms)       │
-      │ → NOT a scope failure → they are AMBIGUITIES → go to STEP 2 │
-      │                                                             │
-      │ Topic entirely unrelated to any table/column/KPI            │
-      │ → IS a scope failure → return out-of-scope JSON             │
-      └─────────────────────────────────────────────────────────────┘
+    A dimension/metric/filter is considered ALREADY RESOLVED if:
+      ✓ It was explicitly stated or answered in a prior turn
+      ✓ It was used as a parameter in a prior query (e.g. a chart or table was already shown for it)
+      ✓ The current question is a follow-up that clearly continues the prior context
+        (e.g. "mana yang lebih baik", "simpulkan", "bandingkan lagi" after a prior analysis)
 
-    A question is IN SCOPE if:
-      ✓ The topic could plausibly map to at least one table, column, or KPI
-      ✓ Even if specific values (names, dates, entities) are unrecognized or ambiguous
+    Pre-resolution rules:
+      - If prior turn already established the time period  → do NOT raise AmbiView for period
+      - If prior turn already established the KPI/metric  → do NOT raise AmbiView for metric/aspect
+      - If prior turn already established the employee(s) → do NOT raise AmbiValue for names
+      - If the current question is a follow-up/summary of prior results → inherit all prior context silently
 
-    A question is OUT OF SCOPE only if:
-      ✗ The topic is completely unrelated to the database domain
-      ✗ No table, column, KPI, or evidence could even partially answer it
+    Example:
+      Prior turn : user asked "bandingkan performa KPI karyawan A vs B bulan ini"
+                   → system returned a comparison table (period=bulan ini, metric=KPI achievement)
+      Current Q  : "mana yang lebih baik?"
+      Resolution : period and metric are already established → NO ambiguity questions needed
+                   → directly answer or return {{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}}
 
-    Scope check examples:
-      ✓ IN SCOPE  → "bagaimana perkembangan andi"
-                    Topic = employee progress → matches schema domain
-                    "andi" being unrecognized = AmbiValue, NOT a scope failure
+    Only proceed to STEP 1 after exhausting all resolvable context from the session.
 
-      ✓ IN SCOPE  → "siapa karyawan terbaik bulan ini"
-                    Topic = employee performance → matches schema
+    ════════════════════════════════════════════
+    STEP 1 — SCOPE CHECK (runs first, no exceptions)
+    ════════════════════════════════════════════
 
-      ✓ IN SCOPE  → "tunjukkan data divisi X"
-                    Topic matches schema even if "divisi X" is unclear
+    A question is IN SCOPE if its topic could plausibly map to any table, column, or KPI —
+    even if specific values (names, dates, entities) are unrecognized or ambiguous.
+    Unknown/unclear specific values are NOT a scope failure; they are ambiguities (→ STEP 2).
 
-      ✗ OUT OF SCOPE → "apa resep nasi goreng yang enak"
-                       Topic = cooking → zero relation to schema
+    A question is OUT OF SCOPE only if its topic is completely unrelated to the database domain.
 
-      ✗ OUT OF SCOPE → "berapa harga saham Apple hari ini"
-                       Topic = stock market → no table/KPI covers this
+    Examples:
+      IN SCOPE  → "bagaimana perkembangan andi"   ("andi" unrecognized = AmbiValue, not scope fail)
+      IN SCOPE  → "siapa karyawan terbaik bulan ini"
+      IN SCOPE  → "tunjukkan data divisi X"
+      OUT SCOPE → "apa resep nasi goreng yang enak"
+      OUT SCOPE → "berapa harga saham Apple hari ini"
 
-    If OUT OF SCOPE:
-      ✗ Do NOT analyze ambiguity
-      ✗ Do NOT generate clarifying questions
-      ✓ Output EXACTLY this JSON and nothing else:
-        {{
-          "has_ambiguity": false,
-          "is_out_of_scope": true,
-          "question_set": []
-        }}
+    If OUT OF SCOPE → output EXACTLY this JSON and stop:
+      {{"has_ambiguity": false, "is_out_of_scope": true, "question_set": []}}
 
     If IN SCOPE → proceed to STEP 2.
 
-    ════════════════════════════════════════════════════════════════
-    STEP 2 — AMBIGUITY ANALYSIS (only if in scope):
-    ════════════════════════════════════════════════════════════════
+    ════════════════════════════════════════════
+    STEP 2 — AMBIGUITY ANALYSIS
+    ════════════════════════════════════════════
 
-    ## Ambiguity Taxonomy:
+    ## Taxonomy
 
-    level_1 types:
-      - "Database-sourced ambiguity": Causes incorrect/incomplete DB retrieval
-      - "LLM-sourced ambiguity": Causes misuse of LLM external knowledge
+    level_1:
+      - "Database-sourced ambiguity"  — causes incorrect/incomplete DB retrieval
+      - "LLM-sourced ambiguity"       — causes misuse of LLM external knowledge
 
-    level_2 types under Database-sourced:
-      - "AmbiSchema": Unclear which table or column to use for the operation
-        (e.g., "oldest user" → 'users::age' column vs 'users::registration_date' column)
-      - "AmbiValue": A name, term, or value in the question cannot be uniquely matched
-        to a specific record or value stored in the database
-        (e.g., "andi" → multiple employees named Andi exist, unclear which one)
-        (e.g., "New York City" → stored as 'NYC', 'New York', or 'New York City'?)
-        (e.g., "coronavirus" → stored as 'COVID-19', 'coronavirus', 'SARS-CoV-2'?)
-      - "AmbiView": The intended SQL operation, metric, or aggregation is unclear
-        (e.g., "perkembangan" → KPI achievement? trend over time? comparison vs target?)
-        (e.g., "terbaik" → highest total? highest average? most consistent?)
+    level_2 (Database-sourced):
+      - AmbiSchema : unclear which table/column to use
+                     e.g. "oldest user" → age column vs registration_date column
+      - AmbiValue  : name/term cannot be uniquely matched to a DB record
+                     e.g. "coronavirus" → multiple stored forms ('COVID-19', 'coronavirus', 'SARS-CoV-2')
+                     NOTE: employee names are NEVER AmbiValue — always resolved via full name OR email match
+      - AmbiView   : intended SQL operation, metric, or aggregation is unclear
+                     e.g. "perkembangan" → KPI achievement? trend? vs-target comparison?
+                     NOTE: if the metric/operation was already used in a prior turn → NOT AmbiView
 
-    level_2 types under LLM-sourced:
-      - "AmbiContext": Insufficient context for LLM reasoning
-        (e.g., "nilai tukar saat ini" without specifying currencies or reference date)
-      - "AmbiFallacy": Question references something that contradicts real-world facts
-        (e.g., "Olimpiade 2001" — no such event exists)
-      - "AmbiRef": Spatial or temporal reference is underspecified
-        (e.g., "setelah Piala Dunia 2018" → after the final match vs after the whole year)
-        (e.g., "wilayah Asia Tenggara" → exact country list varies by source)
+    level_2 (LLM-sourced):
+      - AmbiContext : insufficient context for LLM reasoning
+      - AmbiFallacy : question contradicts real-world facts (treat as typo, offer corrections)
+      - AmbiRef     : temporal/spatial reference is underspecified
+                      NOTE: if time period was already established in a prior turn → NOT AmbiRef
 
-    ## Analysis Instructions:
+    ## Non-negotiable Rules
 
-    1. Carefully read the question and identify every phrase that could be interpreted
-       in more than one way relative to the schema, evidence, and KPI definitions.
+    RULE A: Employee/person name in query → NEVER raise AmbiValue. Always resolve by searching
+            both full name AND email columns simultaneously. Do not ask the user about this.
+    RULE B: Action/metric word mappable to more than one SQL op or KPI → always AmbiView. Ask the user.
+            EXCEPTION: if session context already shows which metric/op was used → inherit it, do NOT ask.
+    RULE C: Never self-resolve non-name ambiguities. Never assume the most likely interpretation.
+            Never use general knowledge to skip asking.
+    RULE D: Session context has higher priority than ambiguity detection. If an ambiguity can be
+            resolved from prior turns, it MUST be resolved silently — never ask the user again.
 
-    2. CRITICAL — Do NOT self-resolve ambiguities. Apply these rules strictly:
-       ┌──────────────────────────────────────────────────────────────────────┐
-       │ RULE A: If a person/entity name appears but cannot be matched to     │
-       │ exactly ONE record in the DB → it is ALWAYS AmbiValue. Ask the user. │
-       │                                                                      │
-       │ RULE B: If an action/metric word ("perkembangan", "progress",        │
-       │ "performa", "terbaik", "terbanyak") can map to more than one SQL     │
-       │ operation or KPI → it is ALWAYS AmbiView. Ask the user.             │
-       │                                                                      │
-       │ RULE C: Never assume the most likely interpretation and skip asking. │
-       │ Never use general knowledge to resolve what should be asked.         │
-       └──────────────────────────────────────────────────────────────────────┘
+    ## Per-ambiguity output
 
-    3. For each unresolved ambiguity:
-       - Assign exactly one level_1 and one level_2 label
-       - Write a concise clarification question in Bahasa Indonesia
-       - Put 2–5 complete, mutually exclusive candidate option contexts/evidence in description.options
-       - These description.options are NOT final user-facing choices; a separate clarification-choice generator will rewrite them
+    For each ambiguity identified:
+      - Assign exactly one level_1 and one level_2 label
+      - Write a clarification question in Bahasa Indonesia
+      - Provide 2–5 complete, mutually exclusive candidate options in description.options
+        (these are raw context/evidence strings, not final user-facing choices)
 
-    4. Option format per ambiguity type:
-       - AmbiSchema  → list all plausible columns as 'table_name::column_name'
-                       with relevant descriptive info from the schema
-       - AmbiValue   → 2–3 possible WHERE clause interpretations with explanation
-       - AmbiView    → 2–3 possible SQL operations or KPI metrics with explanation
-       - AmbiContext → 2–3 possible values, ranges, or constraints with explanation
-       - AmbiFallacy → 2–3 best-guess corrections treating the reference as a typo
-       - AmbiRef     → 2–3 interpretations of the temporal/spatial reference
+    Option format by type:
+      AmbiSchema  → "table_name::column_name" with schema description
+      AmbiValue   → 2–3 possible WHERE clause interpretations
+      AmbiView    → 2–3 possible SQL operations or KPI metrics
+      AmbiContext → 2–3 possible values, ranges, or constraints
+      AmbiFallacy → 2–3 best-guess corrections
+      AmbiRef     → 2–3 interpretations of the temporal/spatial reference
 
-    5. Completeness rules:
-       - List ALL plausible options — never use "dll." or "etc." to omit options
-       - If only one column is plausible for a term → NOT an AmbiSchema
-       - Evidence marked "Abstain" → skip that specific ambiguity permanently
-       - If genuinely zero ambiguities remain → return empty question_set
+    Completeness rules:
+      - List ALL plausible options — never use "dll." / "etc."
+      - Only one plausible column for a term → NOT AmbiSchema
+      - Employee/person names are self-resolved (full name OR email) — never listed as an ambiguity
+      - Ambiguities already resolved by session context → skip permanently, do not re-raise
+      - Evidence marked "Abstain" → skip that ambiguity permanently
+      - Zero ambiguities remaining → return empty question_set
 
-    ════════════════════════════════════════════════════════════════
-    FEW-SHOT EXAMPLES:
-    ════════════════════════════════════════════════════════════════
+    ════════════════════════════════════════════
+    FEW-SHOT EXAMPLES
+    ════════════════════════════════════════════
 
-    --- EXAMPLE 1: Multiple ambiguities (typical case) ---
+    --- EXAMPLE 1: Multiple ambiguities (employee name present) ---
+    Question: "bagaimana perkembangan andi"
+      "andi"         → employee name → self-resolved via full name OR email, NOT an ambiguity
+      "perkembangan" → unclear metric → AmbiView (period) + AmbiView (aspect)
 
-    Question : "bagaimana perkembangan andi"
-    Analysis :
-      - "andi" → cannot be matched to a single unique employee → AmbiValue
-      - "perkembangan" → unclear metric/operation → AmbiView
-
-    Expected output:
+    Output:
     {{
       "has_ambiguity": true,
       "is_out_of_scope": false,
       "question_set": [
         {{
-          "question": "Andi yang dimaksud merujuk ke karyawan yang mana?",
+          "question": "Progress KPI Andi ingin dilihat pada periode atau waktu apa?",
           "level_1_label": "Database-sourced ambiguity",
-          "level_2_label": "AmbiValue",
+          "level_2_label": "AmbiView",
           "description": {{
             "options": [
-              "Berdasarkan nama lengkap — nama karyawan yang mengandung kata Andi",
-              "Berdasarkan nama kpi — nama kpi mengandung kata Andi"
+              "Tahun ini — menampilkan data tahun ini",
+              "Tahun lalu — menampilkan data tahun lalu"
             ]
           }}
         }},
@@ -452,51 +459,38 @@ def build_ambiguity_assessment_prompt(
           "description": {{
             "options": [
               "Pencapaian KPI per periode — membandingkan target vs nilai aktual setiap periode",
-              "Tren performa dari waktu ke waktu — melihat naik/turunnya nilai KPI antar periode",
-              "Perbandingan performa terhadap rata-rata tim — posisi Andi relatif terhadap rekan satu divisi"
+              "Tren performa dari waktu ke waktu — melihat naik/turunnya nilai KPI antar periode"
             ]
           }}
         }}
       ]
     }}
 
-    --- EXAMPLE 2: Unambiguous question ---
-
-    Question : "tampilkan total penjualan bulan Januari 2024"
-    Analysis :
-      - "total penjualan" → maps clearly to one aggregation
-      - "Januari 2024" → specific and unambiguous time range
-
-    Expected output:
-    {{
-      "has_ambiguity": false,
-      "is_out_of_scope": false,
-      "question_set": []
-    }}
+    --- EXAMPLE 2: Unambiguous ---
+    Question: "tampilkan total penjualan bulan Januari 2024"
+    Output:
+    {{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}}
 
     --- EXAMPLE 3: Out of scope ---
+    Question: "apa rekomendasi saham yang bagus minggu ini"
+    Output:
+    {{"has_ambiguity": false, "is_out_of_scope": true, "question_set": []}}
 
-    Question : "apa rekomendasi saham yang bagus minggu ini"
-    Analysis :
-      - Topic = stock investment recommendation → no table/column/KPI covers this
+    --- EXAMPLE 4: Follow-up resolved by session context ---
+    Session: user previously asked "bandingkan KPI karyawan A vs B bulan ini" → comparison table shown
+    Question: "coba simpulkan siapa yang lebih baik dalam progress pengerjaan KPI"
+      "siapa yang lebih baik" → follow-up of prior comparison → period & metric already established
+      → NO ambiguity questions needed
 
-    Expected output:
-    {{
-      "has_ambiguity": false,
-      "is_out_of_scope": true,
-      "question_set": []
-    }}
+    Output:
+    {{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}}
 
-    ════════════════════════════════════════════════════════════════
-    OUTPUT FORMAT — THREE POSSIBLE OUTPUTS, ALL STRICT JSON:
-    ════════════════════════════════════════════════════════════════
+    ════════════════════════════════════════════
+    OUTPUT FORMAT — STRICT JSON, NO MARKDOWN
+    ════════════════════════════════════════════
 
     OUT OF SCOPE:
-      {{
-        "has_ambiguity": false,
-        "is_out_of_scope": true,
-        "question_set": []
-      }}
+      {{"has_ambiguity": false, "is_out_of_scope": true, "question_set": []}}
 
     IN SCOPE + AMBIGUOUS:
       {{
@@ -507,41 +501,29 @@ def build_ambiguity_assessment_prompt(
             "question": "<pertanyaan klarifikasi dalam Bahasa Indonesia>",
             "level_1_label": "<Database-sourced ambiguity | LLM-sourced ambiguity>",
             "level_2_label": "<AmbiSchema | AmbiValue | AmbiView | AmbiContext | AmbiFallacy | AmbiRef>",
-            "description": {{
-              "options": [
-                "<opsi 1 dengan deskripsi singkat>",
-                "<opsi 2 dengan deskripsi singkat>",
-                "<opsi 3 dengan deskripsi singkat>"
-              ]
-            }}
+            "description": {{"options": ["<opsi 1>", "<opsi 2>", "<opsi 3>"]}}
           }}
         ]
       }}
 
     IN SCOPE + UNAMBIGUOUS:
-      {{
-        "has_ambiguity": false,
-        "is_out_of_scope": false,
-        "question_set": []
-      }}
+      {{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}}
 
-    ════════════════════════════════════════════════════════════════
-    CRITICAL RULES (must be followed in every response):
-    ════════════════════════════════════════════════════════════════
-      - STEP 1 always runs first — unknown specific values → AmbiValue, NOT out of scope
-      - NEVER self-resolve ambiguities; always ask the user (see RULE A, B, C above)
-      - ALL three output cases must return valid JSON — there is NO plain-string output
-      - "is_out_of_scope" must always be present: true only when topic is entirely unrelated
-      - "description" must be an object with ONLY an "options" key (array of candidate context/evidence strings)
-      - description.options are raw candidate context/evidence, not final user-facing choices
-      - NO "metadata" field, NO extra fields anywhere in the JSON
-      - question_set items must have exactly: question, level_1_label, level_2_label, description
-      - Return ONLY valid JSON — no markdown formatting, no code fences, no explanation text, no comments
-      - Data source is ALWAYS the database — never create source-selection ambiguity
-      - "Abstain" in evidence = skip that specific ambiguity permanently and do not re-identify it"""
+    ABSOLUTE RULES:
+      - STEP 0 always runs first — resolve from session context before raising any ambiguity
+      - STEP 1 runs second — unknown specific values → AmbiValue, never out-of-scope
+      - Employee/person names are NEVER AmbiValue — always resolved via full name OR email
+      - Never self-resolve non-name ambiguities; always ask the user (RULE B, C)
+      - Session context resolves silently — NEVER re-ask something already answered in prior turns
+      - All three output cases return valid JSON — no plain-string output, no code fences
+      - "is_out_of_scope" always present; true only when topic is entirely unrelated
+      - "description" has only one key: "options" (array of strings)
+      - question_set items have exactly: question, level_1_label, level_2_label, description
+      - No "metadata" field; no extra fields anywhere
+      - Data source is always the database — never create source-selection ambiguity
+      - "Abstain" in evidence = skip that ambiguity permanently"""
 
     return prompt
-
 
 def build_clarification_choice_generation_prompt(
     question: str,
@@ -684,22 +666,33 @@ def build_graphic_generation_prompt(
     """
     prompt = f"""[SYSTEM PROMPT]
     Kamu adalah intent-classifier untuk chatbot KPI.
-    Tentukan apakah pertanyaan user meminta hasil dalam bentuk grafik.
-    
-    ATURAN:
-    1. Jika user meminta grafik/diagram/chart/visualisasi, set is_visualize=true.
-    2. Chart type wajib salah satu: "bar", "pie", "donut".
-    3. Jika user tidak meminta visualisasi, set is_visualize=false dan chart_type=null.
-    4. Jika user meminta visualisasi tapi tipe tidak spesifik, default chart_type="bar".
-    5. DILARANG output selain JSON.
-    
+    Tugasmu HANYA mendeteksi apakah user secara EKSPLISIT meminta visualisasi grafik.
+
+    ATURAN KETAT:
+    1. Set is_visualize=true HANYA jika user secara eksplisit menyebut kata seperti:
+       "grafik", "chart", "diagram", "pie", "bar", "donut", "visualisasi", "tampilkan grafik", dll.
+    2. Jika user hanya bertanya data/angka/informasi TANPA meminta visualisasi → is_visualize=false.
+    3. Jangan berasumsi user ingin grafik hanya karena pertanyaan bersifat statistik atau komparatif.
+    4. chart_type wajib salah satu dari: "bar", "pie", "donut", atau null.
+    5. Jika is_visualize=true tapi tipe tidak disebutkan → default chart_type="bar".
+    6. Jika is_visualize=false → chart_type wajib null.
+    7. Output HANYA JSON. Tidak boleh ada teks, penjelasan, atau markdown lain.
+
+    CONTOH:
+    - "Tampilkan grafik penjualan bulan ini" → {{"is_visualize": true, "chart_type": "bar"}}
+    - "Buatkan pie chart dari data region" → {{"is_visualize": true, "chart_type": "pie"}}
+    - "Berapa total penjualan bulan ini?" → {{"is_visualize": false, "chart_type": null}}
+    - "Bandingkan KPI Q1 dan Q2" → {{"is_visualize": false, "chart_type": null}}
+    - "Siapa top 5 sales terbaik?" → {{"is_visualize": false, "chart_type": null}}
+
     Pertanyaan user:
     {user_query}
-    
+
     Output JSON wajib:
     {{"is_visualize": true|false, "chart_type": "bar"|"pie"|"donut"|null}}"""
 
     return prompt
+
 
 
 def build_context() -> str:
@@ -710,11 +703,8 @@ def build_context() -> str:
         Domain KPI chatbot:
         - KPI Master: definisi KPI, aktivitas, kategori, target, satuan, dan operational definition.
         - KPI Tracker: realisasi KPI per bulan/tahun, status pencapaian, nilai aktual, dan persentase achievement.
-        - Dimensi organisasi: karyawan, kepala divisi, divisi/departemen, dan cakupan seluruh organisasi.
+        - Dimensi organisasi: karyawan, kepala divisi, dan cakupan seluruh organisasi.
         - Dimensi waktu: bulan, tahun, kuartal, tahun berjalan, tahun lalu, bulan ini, dan bulan terakhir data.
         - Metrik umum: target, realisasi, achievement percentage, performance score, jumlah KPI, total, rata-rata.
         - Status umum: achieved, partial, failed, tercapai, belum tercapai.
-        AmbiSchema candidates: kata seperti terbaik/performa/nilai dapat merujuk ke achievement percentage, realisasi, target, atau score.
-        AmbiValue candidates: nama divisi, nama KPI, kategori KPI, nama karyawan, periode, dan status harus cocok dengan nilai data aktual bila tersedia.
-        AmbiIntent candidates: tampilkan dapat berarti list, ranking, filter, grouping, comparison, atau aggregation.
         """.strip()

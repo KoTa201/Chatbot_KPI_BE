@@ -7,24 +7,14 @@ import json
 import logging
 from dataclasses import dataclass, field
 from json import JSONDecodeError
-from typing import Any, Protocol
+from typing import Any
 
 from configCredidential import get_settings
+from service import llmService
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-
-class NodeMergeLLM(Protocol):
-    async def _call_llm(
-        self,
-        model: str,
-        prompt: str,
-        temperature: float,
-        max_output_tokens: int,
-        stop_sequences: list[str] | None = None,
-    ) -> str:
-        ...
 
 
 @dataclass(frozen=True)
@@ -56,8 +46,8 @@ class TreeNode:
 
 
 class PreferenceTree:
-    def __init__(self, llm: NodeMergeLLM | None = None):
-        self.llm = llm
+    def __init__(self):
+        self.llm = llmService.LLMService()
         self.root = TreeNode(node_type="root")
         self.leaf_map: dict[tuple[str, str], TreeNode] = {}
 
