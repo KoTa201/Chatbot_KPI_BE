@@ -228,7 +228,7 @@ class KPIMasterIngestionService:
                 group_id,
                 effective_sheet_url,
             )
-            df, spreadsheet_id, sheet_name = self._fetch_sheet(effective_sheet_url)
+            df, spreadsheet_id, sheet_name = self._fetch_sheet(effective_sheet_url or "")
 
             await self.group_repo.update(
                 group_id=group_id,

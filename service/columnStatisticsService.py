@@ -7,7 +7,7 @@ from model.KPIGroup import KPIGroup
 from model.KPIMaster import KPIMaster
 from model.KPITracker import KPITracker
 from model.User import User
-
+from typing import cast as type_cast
 
 class ColumnStatisticsService:
     def __init__(self, db: AsyncSession):
@@ -83,8 +83,9 @@ class ColumnStatisticsService:
             )
             unique_values = [self._format_value(row[0]) for row in values_result.all()]
             non_null_result = await self.db.execute(select(func.count(column)))
+            model_class = type_cast(type, column.class_)
             non_zero_result = await self.db.execute(
-                select(func.count()).select_from(column.class_).where(column.is_(True))
+                select(func.count()).select_from(model_class).where(column.is_(True))
             )
             non_null = non_null_result.scalar_one()
             non_zero = non_zero_result.scalar_one()

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
 from configCredidential import get_settings
+from repository.chatMessageRepository import ChatMessageRepository
 from service.chatbotService import ChatbotService
 from service.llmService import LLMService
 from service.graphicService import GraphicSeervice, GraphicResult
@@ -24,7 +25,6 @@ from schema.chatSchema import ChatResponse, PipelineStageInfo, GraphicItemRespon
 from service.clarificationService import ClarificationService
 from utils.dataClass.chatPipelineTypes import ChatPipelineContext
 from utils.responses.chatResponseBuilder import (
-    build_ai_unavailable_response,
     build_clarification_prompt_message,
     build_graphics_payload,
     build_security_blocked_response,
@@ -34,9 +34,7 @@ from utils.responses.sseHelpers import emit_sse_response, format_sse_metadata, f
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-llm = LLMService()
-wireguard = SQLWireguardService()
-graphic_service = GraphicSeervice()
+
 
 
 class ChatService:
@@ -46,9 +44,13 @@ class ChatService:
         self.db = db
         self.session_service = ChatSessionService(db)
         self.query_repo = ChatQueryRepository(db)
+        self.message_repo = ChatMessageRepository(db)
         self.chatbot_service = ChatbotService(db)
         self.clarification_service = ClarificationService(db)
         self.column_statistics_service = ColumnStatisticsService(db)
+        self.llm_service = LLMService()
+        self.wireguard_service = SQLWireguardService()
+        self.graphic_service = GraphicSeervice()
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -82,6 +84,8 @@ class ChatService:
                 message=user_message,
             )
 
+        session_context = await self.clarification_service._build_recent_conversation_information(session_id, user_message)
+
         pipeline = self._build_pipeline_context(session_id, user_id, user_role, user_message)
         stages: list[PipelineStageInfo] = []
         total_start = time.monotonic()
@@ -97,6 +101,7 @@ class ChatService:
                     session_id=session_id,
                     addon_prompt=addon_prompt,
                     user_chat_message_id=message_id,
+                    session_context=session_context
                 )
                 if clarification_result is not None:
                     async for event in clarification_result:
@@ -107,19 +112,11 @@ class ChatService:
                 self._complete_stage(stage, "completed", "Using disambiguated query")
 
             # Stage 2-3: NL-to-SQL + Visualization Decision (parallel)
-            try:
-                generated_sql, visualization_decision = await asyncio.gather(
-                    self._run_nl_to_sql_stage(stages, user_message, user_id, user_role, pipeline, addon_prompt),
-                    self._run_visualization_decision_stage(stages, user_message),
-                )
-            except HTTPException as error:
-                if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
-                    pipeline.execution_status = "degraded"
-                    resp = build_ai_unavailable_response(session_id, stages)
-                    async for event in emit_sse_response(session_id, stages, resp.message):
-                        yield event
-                    return
-                raise
+
+            generated_sql, visualization_decision = await asyncio.gather(
+                self._run_nl_to_sql_stage(stages, user_message, user_id, user_role, pipeline, addon_prompt, session_context),
+                self._run_visualization_decision_stage(stages, user_message),
+            )
 
             # Stage 4: SQL Validation
             validation = self._run_sql_validation_stage(stages, generated_sql, user_id, user_role, pipeline)
@@ -130,7 +127,7 @@ class ChatService:
                 return
 
             sanitized_sql = validation.sanitized_sql or ""
-            logger.debug("Sanitized SQL: %s", sanitized_sql)
+            logger.error("Sanitized SQL: %s", sanitized_sql)
 
             # Stage 5: SQL Execution
             query_result, rows_count = await self._run_sql_execution_stage(stages, sanitized_sql, pipeline)
@@ -173,6 +170,7 @@ class ChatService:
         session_id: UUID,
         addon_prompt: str | None,
         user_chat_message_id: UUID | str | None,
+        session_context: str | None
     ) -> AsyncIterator[str] | None:
         """Handle ambiguity detection stage.
 
@@ -189,26 +187,18 @@ class ChatService:
             session_id=session_id,
             addon_prompt=addon_prompt,
             message_id=self._coerce_message_id(user_chat_message_id) if user_chat_message_id else None,
+            session_context=session_context
         )
 
         if clarification_response is None:
             self._complete_stage(stage, "completed", "No clarification needed")
             return None
 
-        if clarification_response.is_out_of_scope:
-            await self.session_service.create_chatbot_message(
-                session_id=session_id,
-                message="Pertanyaan anda diluar konteks domain yang diperbolehkan.",
-            )
-            await self.db.commit()
-            self._complete_stage(stage, "completed", "Query out of scope")
-            return None
-
         if clarification_response.clarifying_question:
             self._complete_stage(stage, "completed", "Clarification question generated")
             query_message = build_clarification_prompt_message(
                 user_message=user_message,
-                questions=[q.question for q in clarification_response.questions],
+                questions=[q.question for q in (clarification_response.questions or [])],
             )
             await self.session_service.create_chatbot_message(
                 session_id=session_id,
@@ -286,7 +276,7 @@ class ChatService:
             return
 
         try:
-            async for token in llm.analyze_result_stream(analysis_prompt):
+            async for token in self.llm_service.analyze_result_stream(analysis_prompt):
                 full_narrative += token
                 yield format_sse_chunk(token)
                 await asyncio.sleep(0)
@@ -390,6 +380,7 @@ class ChatService:
         user_role: str,
         pipeline: ChatPipelineContext,
         addon_prompt: str | None = None,
+        session_context: str | None = None,
     ) -> str:
         stage = self._start_stage(stages, "nl_to_sql")
         try:
@@ -400,8 +391,9 @@ class ChatService:
                 user_role=user_role,
                 addon_prompt=addon_prompt,
                 column_statistics=column_statistics,
+                session_context=session_context
             )
-            generated_sql = await llm.generate_sql(nl_prompt)
+            generated_sql = await self.llm_service.generate_sql(nl_prompt)
             pipeline.generated_sql = generated_sql
             self._complete_stage(stage, "success", "SQL berhasil digenerate.")
             return generated_sql
@@ -423,7 +415,7 @@ class ChatService:
     ):
         stage = self._start_stage(stages, "visualization_decision")
         prompt = build_graphic_generation_prompt(user_query=user_message)
-        decision = await llm.decide_visualization_request(prompt=prompt)
+        decision = await self.llm_service.decide_visualization_request(prompt=prompt)
         if decision.is_visualize:
             detail = f"Permintaan visualisasi terdeteksi (chart: {decision.chart_type or 'bar'})."
         else:
@@ -440,7 +432,7 @@ class ChatService:
         pipeline: ChatPipelineContext,
     ):
         stage = self._start_stage(stages, "sql_validation")
-        validation = wireguard.validate(
+        validation = self.wireguard_service.validate(
             sql=generated_sql,
             user_id=user_id,
             user_role=user_role,
@@ -502,7 +494,7 @@ class ChatService:
     ) -> list[GraphicResult]:
         stage = self._start_stage(stages, "graphic_generation")
         try:
-            results = graphic_service.generateGraphicPerKpi(
+            results = self.graphic_service.generateGraphicPerKpi(
                 query_result=query_result,
                 chart_type=chart_type,
                 session_id=session_id,
@@ -517,3 +509,5 @@ class ChatService:
         except ValueError as error:
             self._complete_stage(stage, "degraded", str(error))
             return []
+
+

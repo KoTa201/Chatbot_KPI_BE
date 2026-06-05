@@ -286,17 +286,11 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_sukses_rotation(self, client: AsyncClient):
-        """Refresh token valid harus merotasi token dan menghasilkan token baru."""
+        """Refresh endpoint maps AuthService rotation result into token response."""
         access, refresh = _make_tokens()
-        mock_user = _make_user()
+        rotate_mock = AsyncMock(return_value=("new-access", 900, "new-refresh", 604800))
 
-        with (
-            patch(f"{_REPO}.is_token_revoked",
-                  new_callable=AsyncMock, return_value=False),
-            patch(f"{_REPO}.revoke_token",   new_callable=AsyncMock),
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=mock_user),
-        ):
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
             resp = await client.post(
                 "/api/v1/users/refresh",
                 headers={"Authorization": f"Bearer {access}"},
@@ -305,19 +299,23 @@ class TestRefresh:
 
         assert resp.status_code == 200
         body = resp.json()
-        assert body["access_token"] != ""
-        assert body["refresh_token"] != refresh
-        assert body["refresh_expires_in"] > 0
+        assert body["access_token"] == "new-access"
+        assert body["refresh_token"] == "new-refresh"
+        assert body["expires_in"] == 900
+        assert body["refresh_expires_in"] == 604800
         assert body.get("user") is None
+        rotate_mock.assert_awaited_once_with(refresh_token=refresh)
 
     @pytest.mark.asyncio
     async def test_refresh_token_sudah_direvoke(self, client: AsyncClient):
-        """Refresh token yang sudah direvoke harus ditolak 401."""
-        access, _ = _make_tokens()
-        _, refresh = _make_tokens()
+        """Refresh endpoint propagates revoked-token rejection from service."""
+        access, refresh = _make_tokens()
+        rotate_mock = AsyncMock(side_effect=HTTPException(
+            status_code=401,
+            detail="Refresh token sudah digunakan atau dicabut. Silakan login ulang.",
+        ))
 
-        with patch(f"{_REPO}.is_token_revoked",
-                   new_callable=AsyncMock, return_value=True):
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
             resp = await client.post(
                 "/api/v1/users/refresh",
                 headers={"Authorization": f"Bearer {access}"},
@@ -327,55 +325,59 @@ class TestRefresh:
         assert resp.status_code == 401
         detail = resp.json()["detail"].lower()
         assert "digunakan" in detail or "dicabut" in detail
+        rotate_mock.assert_awaited_once_with(refresh_token=refresh)
 
     @pytest.mark.asyncio
     async def test_refresh_token_kadaluarsa(self, client: AsyncClient):
-        """Refresh token kedaluwarsa harus ditolak 401."""
-        expired = _expired_refresh_token()
-        access, _ = _make_tokens()
-        resp = await client.post(
-            "/api/v1/users/refresh",
-            headers={"Authorization": f"Bearer {access}"},
-            json={"refresh_token": expired},
-        )
+        """Refresh endpoint propagates expired-token rejection from service."""
+        access, refresh = _make_tokens()
+        rotate_mock = AsyncMock(side_effect=HTTPException(status_code=401, detail="Refresh token tidak valid atau sudah kadaluarsa."))
+
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": refresh},
+            )
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_refresh_token_palsu(self, client: AsyncClient):
-        """Refresh token palsu dengan format JWT tidak valid harus ditolak 401."""
+        """Refresh endpoint propagates invalid-token rejection from service."""
         access, _ = _make_tokens()
-        resp = await client.post(
-            "/api/v1/users/refresh",
-            headers={"Authorization": f"Bearer {access}"},
-            json={"refresh_token": "ini.bukan.token"},
-        )
+        rotate_mock = AsyncMock(side_effect=HTTPException(status_code=401, detail="Refresh token tidak valid atau sudah kadaluarsa."))
+
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": "ini.bukan.token"},
+            )
         assert resp.status_code == 401
+        rotate_mock.assert_awaited_once_with(refresh_token="ini.bukan.token")
 
     @pytest.mark.asyncio
     async def test_refresh_kirim_access_token(self, client: AsyncClient):
-        """Access token dikirim ke /refresh → ditolak karena type mismatch."""
+        """Refresh endpoint propagates wrong-token-type rejection from service."""
         access, _ = _make_tokens()
-        resp = await client.post(
-            "/api/v1/users/refresh",
-            headers={"Authorization": f"Bearer {access}"},
-            json={"refresh_token": access},
-        )
+        rotate_mock = AsyncMock(side_effect=HTTPException(status_code=401, detail="Token bukan refresh token."))
+
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
+            resp = await client.post(
+                "/api/v1/users/refresh",
+                headers={"Authorization": f"Bearer {access}"},
+                json={"refresh_token": access},
+            )
         assert resp.status_code == 401
         assert "refresh" in resp.json()["detail"].lower()
 
     @pytest.mark.asyncio
     async def test_refresh_user_nonaktif(self, client: AsyncClient):
-        """Refresh token milik user nonaktif harus ditolak 403."""
+        """Refresh endpoint propagates inactive-user rejection from service."""
         access, refresh = _make_tokens()
-        mock_user = _make_user(is_active=False)
+        rotate_mock = AsyncMock(side_effect=HTTPException(status_code=403, detail="Akun tidak aktif."))
 
-        with (
-            patch(f"{_REPO}.is_token_revoked",
-                  new_callable=AsyncMock, return_value=False),
-            patch(f"{_REPO}.revoke_token",   new_callable=AsyncMock),
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=mock_user),
-        ):
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
             resp = await client.post(
                 "/api/v1/users/refresh",
                 headers={"Authorization": f"Bearer {access}"},
@@ -386,16 +388,11 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_user_dihapus(self, client: AsyncClient):
-        """Refresh token untuk user yang sudah tidak ada harus ditolak 401."""
+        """Refresh endpoint propagates missing-user rejection from service."""
         access, refresh = _make_tokens()
+        rotate_mock = AsyncMock(side_effect=HTTPException(status_code=401, detail="User tidak ditemukan."))
 
-        with (
-            patch(f"{_REPO}.is_token_revoked",
-                  new_callable=AsyncMock, return_value=False),
-            patch(f"{_REPO}.revoke_token",   new_callable=AsyncMock),
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=None),
-        ):
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
             resp = await client.post(
                 "/api/v1/users/refresh",
                 headers={"Authorization": f"Bearer {access}"},
@@ -406,25 +403,18 @@ class TestRefresh:
 
     @pytest.mark.asyncio
     async def test_refresh_revoke_dipanggil_sekali(self, client: AsyncClient):
-        """Pada refresh sukses, revoke_token harus dipanggil tepat satu kali."""
+        """Refresh endpoint delegates token rotation exactly once."""
         access, refresh = _make_tokens()
-        mock_user = _make_user()
-        mock_revoke = AsyncMock()
+        rotate_mock = AsyncMock(return_value=("new-access", 900, "new-refresh", 604800))
 
-        with (
-            patch(f"{_REPO}.is_token_revoked",
-                  new_callable=AsyncMock, return_value=False),
-            patch(f"{_REPO}.revoke_token", mock_revoke),
-            patch(f"{_REPO}.get_by_id",
-                  new_callable=AsyncMock, return_value=mock_user),
-        ):
+        with patch(f"{_SVC}.rotate_tokens", rotate_mock):
             await client.post(
                 "/api/v1/users/refresh",
                 headers={"Authorization": f"Bearer {access}"},
                 json={"refresh_token": refresh},
             )
 
-        mock_revoke.assert_awaited_once_with(refresh, mock_user.id)
+        rotate_mock.assert_awaited_once_with(refresh_token=refresh)
 
 class TestLogout:
 

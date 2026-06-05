@@ -116,6 +116,21 @@ class ChatMessageRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_recent_by_session_id(
+        self,
+        session_id: uuid.UUID,
+        limit: int = 6,
+    ) -> list[ChatMessage]:
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessage.send_at.desc())
+            .limit(limit)
+        )
+        messages = list(result.scalars().all())
+        messages.reverse()
+        return messages
+
     async def _get_session_by_id(self, session_id: uuid.UUID) -> Optional[ChatSession]:
         result = await self.db.execute(
             select(ChatSession).where(ChatSession.session_id == session_id)

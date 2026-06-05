@@ -207,7 +207,7 @@ class AuthService:
     async def rotate_tokens(
         self,
         refresh_token: str,
-        repo: UserRepository | None = None,
+        repo: UserRepository,
     ) -> tuple[str, int, str, int]:
         """
         Implementasi Refresh Token Rotation:

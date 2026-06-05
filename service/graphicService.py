@@ -897,8 +897,9 @@ class GraphicSeervice:
 
                 annotation = f"{actual_label}  ({pct:.0f}%)" if pct < 100 else f"{actual_label}  (✓ {pct:.0f}%)"
 
+                x_pos: float = float(max(t, a)) * 1.02 + 0.01
                 ax.text(
-                    max(t, a) * 1.02 + 0.01,
+                    x_pos,
                     i,
                     annotation,
                     va="center",

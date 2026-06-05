@@ -8,10 +8,9 @@ import json
 import logging
 from typing import Optional, Any
 from uuid import UUID
-
 from sqlalchemy.ext.asyncio import AsyncSession
-
 from configCredidential import get_settings
+from repository.chatMessageRepository import ChatMessageRepository
 from repository.clarificationRepository import ClarificationRepository
 from schema.clarificationSchema import (
     ClarificationAnswerItem,
@@ -50,6 +49,7 @@ class ClarificationService:
         self.ambiguity_detector = AmbiguityDetectorService()
         self.llm = LLMService()
         self.repo = ClarificationRepository(db)
+        self.chat_message_repo = ChatMessageRepository(db)
 
     async def process_user_query(
         self,
@@ -58,6 +58,7 @@ class ClarificationService:
         session_id: UUID,
         addon_prompt: str | None = None,
         message_id: UUID | None = None,
+        session_context: str | None = None,
     ) -> None | dict[str, bool | str | list[Any]] | ClarificationMessageResponse:
         """
         Process query dan tentukan: clarify atau direct?
@@ -70,7 +71,7 @@ class ClarificationService:
         # STEP 1: Detect ambiguity
         kpi_context = build_context()
         ambiguity_result = await self.ambiguity_detector.detect_ambiguity(
-            user_query, user_role, kpi_context, addon_prompt=addon_prompt
+            user_query, user_role, kpi_context, addon_prompt=addon_prompt, session_context=session_context
         )
         logger.info(
             f"[ClarificationService] Ambiguity detected: "
@@ -124,39 +125,23 @@ class ClarificationService:
         current_qa_set = build_qa_set(clarification_answers, log_by_id)
         session_qa_set = build_session_qa_set(logs, current_qa_set)
 
-        preference_tree = PreferenceTree(llm=self.llm)
+        preference_tree = PreferenceTree()
         await preference_tree.update_tree(session_qa_set)
         additional_information = preference_tree.build_additional_information()
-        from model.ChatMessage import ChatMessage
-        from sqlalchemy import select
-        # Ambil maksimal 6 pesan terakhir untuk mempertahankan konteks riwayat percakapan (sekitar 3 turn)
-        history_res = await self.db.execute(
-            select(ChatMessage)
-            .where(ChatMessage.session_id == session_id)
-            .order_by(ChatMessage.send_at.desc())
-            .limit(6)
+        additional_information = await self._build_recent_conversation_information(
+            session_id=session_id,
+            source_query=source_query,
+            additional_information=additional_information,
         )
-        history_msgs = list(history_res.scalars().all())
-        history_msgs.reverse()  # Urutkan secara kronologis
-        
-        history_str = ""
-        for msg in history_msgs:
-            # Lewati pesan terakhir jika pesan tersebut adalah query saat ini (untuk menghindari duplikasi)
-            if not msg.is_sender_chatbot and msg.message.strip().casefold() == source_query.strip().casefold():
-                continue
-            role = "User" if not msg.is_sender_chatbot else "Chatbot"
-            history_str += f"- {role}: {msg.message}\n"
 
-        chat_history = history_str if history_str else None
-
-        logger.info("[ClarificationService] Disambiguating query...")
         disambiguated_query = await self._disambiguate_query(
             original_query=source_query,
             clarification_answers=clarification_answers,
             additional_constraints=additional_constraints,
             additional_information=additional_information,
-            chat_history=chat_history,
         )
+
+        logging.error(f"[ClarificationService] Disambiguated query: {disambiguated_query}")
 
         for answer in clarification_answers:
             await self.repo.update_with_answer(
@@ -171,13 +156,19 @@ class ClarificationService:
         recheck_result = await self._recheck_ambiguity_after_refinement(
             rewritten_query=disambiguated_query,
             user_role=user_role,
-            preference_tree=preference_tree,
+            additional_constraints=additional_constraints,
+            session_context=additional_information,
         )
         if recheck_result and recheck_result.is_ambiguous:
-            recheck_result.detected_ambiguities = filter_unanswered_ambiguities(
-                recheck_result.detected_ambiguities,
-                answered_question_keys(session_qa_set),
-            )
+            answered_types = {pair.level1 for pair in session_qa_set}
+            recheck_result.detected_ambiguities = [
+                ambiguity
+                for ambiguity in filter_unanswered_ambiguities(
+                    recheck_result.detected_ambiguities,
+                    answered_question_keys(session_qa_set),
+                )
+                if ambiguity.ambiguity_type not in answered_types
+            ]
             if recheck_result.detected_ambiguities:
                 next_clarification = await self._build_clarification_response_from_detection(
                     session_id=session_id,
@@ -202,7 +193,6 @@ class ClarificationService:
         clarification_answers: list[ClarificationAnswerItem],
         additional_constraints: str | None = None,
         additional_information: str | None = None,
-        chat_history: str | None = None,
     ) -> str:
         """
         Gunakan LLM untuk mengkombinasikan query asal + jawaban klarifikasi
@@ -216,7 +206,6 @@ class ClarificationService:
                 clarification_answers=clarification_answers,
                 additional_constraints=additional_constraints,
                 additional_information=additional_information,
-                chat_history=chat_history,
             )
 
             response = await self.llm._call_llm(
@@ -242,20 +231,49 @@ class ClarificationService:
                 original_query, clarification_answers, additional_constraints
             )
 
+    async def _build_recent_conversation_information(
+        self,
+        session_id: UUID,
+        source_query: str,
+        additional_information: str | None = None,
+    ) -> str | None:
+        history_msgs = await self.chat_message_repo.get_recent_by_session_id(
+            session_id=session_id,
+            limit=6,
+        )
+        history_lines = []
+        normalized_source = (source_query or "").strip().casefold()
+        for msg in history_msgs:
+            message = (getattr(msg, "message", "") or "").strip()
+            if not message:
+                continue
+            if not getattr(msg, "is_sender_chatbot", False) and message.casefold() == normalized_source:
+                continue
+            role = "Chatbot" if getattr(msg, "is_sender_chatbot", False) else "User"
+            history_lines.append(f"- {role}: {message}")
+
+        cleaned_info = (additional_information or "").strip()
+        if not history_lines:
+            return cleaned_info or None
+
+        history_block = "[RIWAYAT PERCAKAPAN TERBARU]\n" + "\n".join(history_lines)
+        context_parts = [part for part in [history_block, cleaned_info] if part]
+        return "\n\n".join(context_parts)
+
+
     async def _recheck_ambiguity_after_refinement(
         self,
         rewritten_query: str,
         user_role: str,
-        preference_tree: PreferenceTree,
+        additional_constraints: str | None = None,
+        session_context: str | None = None,
     ):
-        evidence_context = (
-            f"Serialized preference tree: {json.dumps(preference_tree.serialize(), ensure_ascii=False)}"
-        )
         try:
             return await self.ambiguity_detector.detect_ambiguity(
                 rewritten_query,
                 user_role,
-                evidence_context,
+                additional_constraints if additional_constraints else "",
+                session_context=session_context,
             )
         except Exception as exc:
             logger.warning(
@@ -277,7 +295,7 @@ class ClarificationService:
             return ClarificationMessageResponse(
                 session_id=session_id,
                 message_type="out_of_scope",
-                is_out_of_scope=True,  # 👈 consistent type, no more dict
+                is_out_of_scope=True,
             )
 
         if not detected:
@@ -374,7 +392,7 @@ class ClarificationService:
 
     @classmethod
     def _normalize_generated_choices(cls, response: str) -> list[str]:
-        payload = json.loads(response.strip())
+        payload = json.loads(cls._clean_json_response(response))
         raw_choices = payload.get("choices")
         if not isinstance(raw_choices, list):
             raise ValueError("CQ generation response must contain choices list")
@@ -388,6 +406,14 @@ class ClarificationService:
             raise ValueError("CQ generation returned no content choices")
 
         return cls._limit_content_choices(content_choices) + ["Lewati", "Lainnya"]
+
+    @staticmethod
+    def _clean_json_response(response: str) -> str:
+        cleaned = (response or "").strip()
+        if cleaned.startswith("```"):
+            lines = [line for line in cleaned.splitlines() if not line.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
+        return cleaned
 
     @classmethod
     def _fallback_choices(cls, candidate_options: list[str]) -> list[str]:
