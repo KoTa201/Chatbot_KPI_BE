@@ -1,5 +1,4 @@
 from uuid import UUID, uuid4
-import json
 import logging
 import time
 import asyncio
