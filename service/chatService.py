@@ -11,7 +11,7 @@ from configCredidential import get_settings
 from repository.chatMessageRepository import ChatMessageRepository
 from service.chatbotService import ChatbotService
 from service.llmService import LLMService
-from service.graphicService import GraphicSeervice, GraphicResult
+from service.graphicService import GraphicService, GraphicResult
 from service.sqlGuardRailsService import SQLWireguardService
 from service.chatSessionService import ChatSessionService
 from service.columnStatisticsService import ColumnStatisticsService
@@ -50,7 +50,7 @@ class ChatService:
         self.column_statistics_service = ColumnStatisticsService(db)
         self.llm_service = LLMService()
         self.wireguard_service = SQLWireguardService()
-        self.graphic_service = GraphicSeervice()
+        self.graphic_service = GraphicService()
 
     # ------------------------------------------------------------------
     # Main entry point
