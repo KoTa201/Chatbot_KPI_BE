@@ -890,11 +890,12 @@ class GraphicSeervice:
                 if actual_col in kpi_meta and i < len(kpi_meta[actual_col]):
                     actual_label = kpi_meta[actual_col][i].display
 
-                annotation = (
-                    f"{pct:.0f}%"
-                    if not actual_label
-                    else f"{actual_label}  ({pct:.0f}%)"
-                )
+                # Fallback: jika kolom realisasi adalah numerik murni (tidak ada di kpi_meta),
+                # gunakan nilai numerik asli agar anotasi tidak hanya menampilkan persentase.
+                if not actual_label:
+                    actual_label = str(int(a)) if a == int(a) else str(a)
+
+                annotation = f"{actual_label}  ({pct:.0f}%)" if pct < 100 else f"{actual_label}  (✓ {pct:.0f}%)"
 
                 x_pos: float = float(max(t, a)) * 1.02 + 0.01
                 ax.text(
@@ -1106,6 +1107,20 @@ class GraphicSeervice:
                                 va="bottom",
                                 fontsize=7,
                             )
+            else:
+                # Fallback: kolom numerik murni tidak masuk kpi_meta,
+                # tetap anotasi bar dengan nilai aslinya.
+                for rect in bars:
+                    val = rect.get_height()
+                    label = str(int(val)) if val == int(val) else f"{val:.4g}"
+                    ax.text(
+                        rect.get_x() + rect.get_width() / 2,
+                        val * 1.01,
+                        label,
+                        ha="center",
+                        va="bottom",
+                        fontsize=7,
+                    )
         else:
             wedges, *_ = ax.pie(
                 chart_df[value_col],
