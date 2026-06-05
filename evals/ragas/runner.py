@@ -16,6 +16,11 @@ import yaml
 from datasets import Dataset
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+
 METRIC_NAMES = [
     "answer_correctness",
     "answer_relevancy",
@@ -23,6 +28,7 @@ METRIC_NAMES = [
     "context_recall",
     "context_precision",
 ]
+DEFAULT_RAGAS_EMBEDDING_MODEL = "openai/text-embedding-3-small"
 
 
 @dataclass(frozen=True)
@@ -65,9 +71,11 @@ def load_cases(path: Path) -> list[EvalCase]:
     for index, raw_case in enumerate(raw_cases, start=1):
         if not isinstance(raw_case, dict):
             raise ValueError(f"Case #{index} must be an object.")
-        missing = [field for field in ("id", "question", "user_role", "expected_sql") if not raw_case.get(field)]
+        missing = [field for field in ("id", "question", "user_role") if not raw_case.get(field)]
         if missing:
             raise ValueError(f"Case #{index} missing required field(s): {', '.join(missing)}")
+        if not raw_case.get("expected_answer") and not raw_case.get("expected_sql"):
+            raise ValueError(f"Case #{index} must include expected_answer or expected_sql.")
         if not raw_case.get("user_id") and not raw_case.get("user_email"):
             raise ValueError(f"Case #{index} must include user_id or user_email.")
 
@@ -83,8 +91,8 @@ def load_cases(path: Path) -> list[EvalCase]:
                 user_divisi=raw_case.get("user_divisi"),
                 user_id=UUID(str(raw_case["user_id"])) if raw_case.get("user_id") else None,
                 user_email=str(raw_case["user_email"]) if raw_case.get("user_email") else None,
-                expected_sql=str(raw_case["expected_sql"]).strip(),
-                expected_answer=str(raw_case.get("expected_answer") or raw_case["expected_sql"]).strip(),
+                expected_sql=str(raw_case.get("expected_sql") or "").strip(),
+                expected_answer=str(raw_case.get("expected_answer") or raw_case.get("expected_sql") or "").strip(),
                 expected_context={
                     "tables": [str(value) for value in expected_context.get("tables", [])],
                     "columns": [str(value) for value in expected_context.get("columns", [])],
@@ -98,17 +106,14 @@ def load_cases(path: Path) -> list[EvalCase]:
     return cases
 
 
+def build_final_answer_context(eval_case: EvalCase) -> list[str]:
+    context = eval_case.expected_answer or eval_case.expected_sql
+    return [context] if context else []
+
+
 def build_reference_contexts(eval_case: EvalCase) -> list[str]:
-    parts: list[str] = []
-    if eval_case.expected_answer:
-        parts.append("Expected answer evidence: " + eval_case.expected_answer)
-    tables = eval_case.expected_context.get("tables") or []
-    columns = eval_case.expected_context.get("columns") or []
-    if tables:
-        parts.append("Expected tables: " + ", ".join(tables))
-    if columns:
-        parts.append("Expected columns: " + ", ".join(columns))
-    return ["\n".join(parts)] if parts else []
+    context = eval_case.expected_answer or eval_case.expected_sql
+    return ["Expected answer evidence: " + context] if context else []
 
 
 def serialize_stages(stages: list[Any]) -> list[dict[str, Any]]:
@@ -123,11 +128,47 @@ def serialize_stages(stages: list[Any]) -> list[dict[str, Any]]:
     return serialized
 
 
+def parse_sse_event(event: str) -> tuple[str | None, str | None]:
+    event_type = None
+    data = None
+    for line in event.strip().splitlines():
+        if line.startswith("event: "):
+            event_type = line[7:]
+        elif line.startswith("data: "):
+            data = line[6:]
+    return event_type, data
+
+
+async def collect_stream_response(stream: Any) -> Any:
+    from schema.chatSchema import ChatResponse
+
+    metadata: dict[str, Any] = {}
+    message_parts: list[str] = []
+    async for event in stream:
+        event_type, data = parse_sse_event(event)
+        if event_type == "metadata" and data:
+            metadata = json.loads(data)
+        elif event_type == "message" and data:
+            message_parts.append(json.loads(data).get("chunk", ""))
+
+    return ChatResponse(**metadata, message="".join(message_parts))
+
+
+def build_pipeline_context(base_context: str, generated_sql: str, rows_returned: int | None) -> str:
+    return (
+        f"{base_context}"
+        f"\n\nGENERATED SQL:\n{generated_sql or ''}"
+        f"\n\nPIPELINE EVIDENCE:\nrows_returned={rows_returned if rows_returned is not None else 0}"
+    )
+
+
 def build_success_row(eval_case: EvalCase, response: Any, context: str) -> dict[str, Any]:
     generated_sql = (response.generated_sql or "").strip()
-    query_result_text = ""
-    if response.rows_returned and response.rows_returned > 0:
-        query_result_text = f"\n\nQUERY RESULTS ({response.rows_returned} rows):\n{response.message}"
+    pipeline_context = build_pipeline_context(
+        base_context=context,
+        generated_sql=generated_sql,
+        rows_returned=response.rows_returned,
+    )
 
     return {
         "id": eval_case.id,
@@ -140,8 +181,9 @@ def build_success_row(eval_case: EvalCase, response: Any, context: str) -> dict[
         "reference": eval_case.expected_answer,
         "ragas_reference": eval_case.expected_answer,
         "expected_answer": eval_case.expected_answer,
-        "contexts": [context + query_result_text],
+        "contexts": build_final_answer_context(eval_case),
         "reference_contexts": build_reference_contexts(eval_case),
+        "pipeline_context": pipeline_context,
         "expected_context": eval_case.expected_context,
         "final_narrative": response.message,
         "rows_returned": response.rows_returned,
@@ -186,15 +228,15 @@ async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = F
 
         try:
             user_id = await resolve_user_id(db, eval_case)
-            response = await ChatService(db).process_query(
+            stream = ChatService(db).process_query_stream(
                 user_message=eval_case.question,
                 user_id=user_id,
                 user_role=eval_case.user_role,
-                user_divisi=eval_case.user_divisi,
                 session_id=session_id,
                 show_sql=True,
                 context_from_clarification=None if include_clarification else {},
             )
+            response = await collect_stream_response(stream)
         except Exception as error:
             await db.rollback()
             return {
@@ -204,8 +246,9 @@ async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = F
                 "generated_sql": "",
                 "ground_truth": eval_case.expected_sql,
                 "reference": eval_case.expected_answer,
-                "contexts": [context],
+                "contexts": build_final_answer_context(eval_case),
                 "reference_contexts": build_reference_contexts(eval_case),
+                "pipeline_context": context,
                 "expected_context": eval_case.expected_context,
                 "status": "pipeline_error",
                 "error": str(error),
@@ -220,8 +263,9 @@ async def run_pipeline_case(eval_case: EvalCase, include_clarification: bool = F
                 "generated_sql": "",
                 "ground_truth": eval_case.expected_sql,
                 "reference": eval_case.expected_answer,
-                "contexts": [context],
+                "contexts": build_final_answer_context(eval_case),
                 "reference_contexts": build_reference_contexts(eval_case),
+                "pipeline_context": context,
                 "expected_context": eval_case.expected_context,
                 "status": "clarification_required",
                 "error": response.message,
@@ -314,7 +358,7 @@ def build_ragas_embeddings() -> Any:
 
     settings = get_settings()
     embeddings = LiteLLMEmbeddings(
-        model=os.getenv("RAGAS_EMBEDDING_MODEL", "openai/text-embedding-3-small"),
+        model=os.getenv("RAGAS_EMBEDDING_MODEL", DEFAULT_RAGAS_EMBEDDING_MODEL),
         api_key=os.getenv("OPENAI_API_KEY") or settings.LLM_API_KEY,
         api_base=os.getenv("OPENAI_BASE_URL") or settings.LLM_BASE_URL,
         timeout=int(os.getenv("RAGAS_EMBEDDING_TIMEOUT", "300")),

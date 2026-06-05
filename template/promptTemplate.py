@@ -89,61 +89,77 @@ user_id UUID FK -> users.id,
 
 
 def build_nl_to_sql_prompt(
-    user_query: str,
-    user_id: UUID,
-    user_role: str,
-    addon_prompt: str | None = None,
-    column_statistics: str | None = None,
+        user_query: str,
+        user_id: UUID,
+        user_role: str,
+        addon_prompt: str | None = None,
+        column_statistics: str | None = None,
 ) -> str:
-    """
-    Membangun prompt NL-to-SQL untuk Stage 1.
-    Menyertakan: pertanyaan asli, schema, statistik kolom, contoh data, few-shot, konteks user.
-    """
-
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
-    column_statistics_block = (column_statistics or "").strip() or "Statistik kolom belum tersedia. Jika statistik tidak tersedia, tetap gunakan schema database dan pertanyaan asli pengguna; jangan mengarang nilai unik, mean, min, max, non-zero, atau non-null."
+    column_statistics_block = (
+        (column_statistics or "").strip()
+        or (
+            "Statistik kolom belum tersedia. Tetap gunakan schema dan pertanyaan pengguna; "
+            "jangan mengarang nilai unik, mean, maksimum, minimum, non-zero, atau non-null."
+        )
+    )
 
-    prompt = f"""[SYSTEM PROMPT]
-    Kamu adalah asisten SQL expert yang mengkonversi pertanyaan bahasa Indonesia menjadi query SQL PostgreSQL.
-    {addon_prompt_block}
-    
-    [PERTANYAAN ASLI PENGGUNA (q)]
-    {user_query}
-    
-    [SKEMA DATABASE (S)]
-    {DB_SCHEMA}
-    
-    [STATISTIK SETIAP KOLOM]
-    {column_statistics_block}
-    
-    ATURAN WAJIB:
-    1. Hanya generate query SELECT — DILARANG KERAS menggunakan INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC, atau perintah apapun selain SELECT.
-    2. Selalu gunakan tiga input utama untuk inference S-RAG: Pertanyaan Asli Pengguna (q), Skema Database (S), dan Statistik Setiap Kolom.
-    3. Selalu gunakan tabel, view, dan kolom yang ada di schema yang diberikan di bawah.
-    4. Gunakan statistik kolom untuk memetakan maksud pengguna ke filter leksikal atau nilai penulisan yang persis sama dengan data database.
-    5. Untuk atribut numerik, manfaatkan mean, maksimum, minimum, non-zero, dan non-null bila tersedia.
-    6. Untuk atribut string dan boolean, manfaatkan nilai unik, non-zero, dan non-null bila tersedia.
-    7. Tambahkan LIMIT 1000 jika tidak ada limit spesifik dalam pertanyaan.
-    8. Gunakan alias yang deskriptif dan mudah dipahami pada kolom hasil.
-    9. Utamakan JOIN antara kpi_tracker_records dan kpi_master_records melalui kpi_master_id.
-    10. Format output: HANYA SQL mentah, tanpa penjelasan, tanpa markdown backtick, tanpa komentar.
-    11. Jika pertanyaan tidak dapat dijawab dengan data yang tersedia, keluarkan: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
-    12. Nama karyawan ada di users.full_name; join users u ON u.id = kt.user_id untuk filter atau menampilkan nama.
-    13. Data di kpi_tracker_records bisa berupa lanjutan progress KPI tracker sebelumnya; gunakan DISTINCT atau GROUP BY jika menghitung jumlah orang atau pekerjaan.
-    14. Gunakan UPPER(u.full_name) LIKE untuk pencarian nama orang agar fleksibel, karena user bisa menyebut nama sebagian.
-    15. Selalu gunakan kolom bulan_num sebagai acuan utama untuk menentukan konteks periode data pada KPI Tracker. Nilai bulan_num harus diinterpretasikan sebagai nomor bulan (contoh: Januari = 1, Februari = 2, Maret = 3, dan seterusnya) agar analisis atau jawaban dapat mengidentifikasi data KPI berasal dari bulan yang tepat.
-    16. Kolom km.target, km.achieve, km.partial, dan km.fail adalah definisi threshold KPI, bukan nilai realisasi. DILARANG membandingkan kt.realisasi langsung dengan km.achieve, km.partial, atau km.fail menggunakan =, IN, atau perbandingan string lain.
-    17. Untuk pertanyaan tentang mencapai target, mendekati target, achieve, partial, fail, progress, atau kinerja, ambil data mentah untuk dianalisis: kt.user_id, kt.bulan_num, km.kpi_name, kt.realisasi, km.target, km.achieve, km.partial, km.fail, kt.keterangan.
-    18. Untuk konteks "sampai bulan terakhir", "terbaru", atau "latest", ambil realisasi terbaru berdasarkan bulan_num untuk KPI/karyawan yang relevan, biasanya dengan MAX(bulan_num); jangan menyaring hasil dengan kt.realisasi = km.achieve atau kt.realisasi = km.partial.
-    
-    [CONTEXT PENGGUNA]
-    Role: {user_role}
-    user_id: {user_id}
-    
-    [TAHUN SEKARANG]
-    {datetime.now().year}
-    
-    SQL:"""
+    prompt = f"""[SYSTEM]
+Kamu adalah SQL expert. Konversi pertanyaan bahasa Indonesia ke PostgreSQL SELECT query.
+{addon_prompt_block}
+
+[PERTANYAAN ASLI PENGGUNA (q)]
+{user_query}
+
+[SKEMA DATABASE (S)]
+{DB_SCHEMA}
+
+[STATISTIK SETIAP KOLOM]
+{column_statistics_block}
+
+[ATURAN]
+OUTPUT: Hanya SQL mentah — tanpa markdown, tanpa komentar, tanpa penjelasan.
+        Jika tidak bisa dijawab: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
+
+KEAMANAN:
+- Hanya generate query SELECT. Dilarang: INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC.
+- user_id di [CONTEXT] adalah user login, BUKAN filter default. Pakai filter hanya jika user menyebut "saya/milik saya/KPI saya".
+  Abaikan untuk pertanyaan tim atau orang lain.
+
+QUERY:
+- Gunakan tabel/kolom dari schema. Inferensi via (pertanyaan + schema + statistik kolom). Untuk numerik manfaatkan mean, maksimum, minimum, non-zero, non-null; untuk string/boolean manfaatkan nilai unik, non-zero, non-null.
+- Nama: UPPER(u.full_name) LIKE UPPER('%nama%'). JOIN users u ON u.id = kt.user_id.
+- Periode: gunakan bulan_num (1=Jan..12=Des). "Bulan terakhir" = MAX(bulan_num).
+- Tambahkan LIMIT 1000 jika tidak ada limit spesifik.
+- Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
+
+PILIHAN TABEL:
+- GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
+    JOIN kpi_master_records km ON kt.kpi_master_id = km.id
+    JOIN users u ON u.id = kt.user_id  ← jika perlu nama
+- GUNAKAN kpi_master_users kmu untuk assignment/daftar KPI per orang
+    JOIN users u ON u.id = kmu.user_id
+    JOIN kpi_master_records km ON km.id = kmu.kpi_master_id
+
+KOLOM KPI:
+- km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
+  Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
+- Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
+  kt.keterangan, kt.bulan_num. Tambah km.achieve/partial/fail hanya jika
+  pertanyaan eksplisit minta threshold/status/kategori.
+
+CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
+- DILARANG KERAS melakukan cast langsung ::NUMERIC. Untuk kalkulasi numerik wajib pakai:
+    CASE WHEN kt.realisasi ~ '^[0-9]+(\\.[0-9]+)?$'
+          AND km.target    ~ '^[0-9]+(\\.[0-9]+)?$'
+         THEN kt.realisasi::NUMERIC / NULLIF(km.target::NUMERIC, 0) * 100
+         ELSE NULL END AS persen_pencapaian
+- Jika hanya menampilkan nilai, SELECT as TEXT — tidak perlu cast.
+
+[CONTEXT]
+Role: {user_role} | user_id: {user_id} | Tahun: {datetime.now().year}
+
+SQL:"""
 
     return prompt
 
@@ -186,36 +202,58 @@ def build_analysis_prompt(
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     1. Jawab pertanyaan pengguna secara langsung terlebih dahulu.
-    2. Gunakan hanya data dalam [DATA MENTAH]. Jangan menambah nama, angka, status, atau periode yang tidak ada di data.
+    2. Gunakan hanya data dalam [DATA MENTAH]. Jangan menambah nama, angka, atau periode 
+       yang tidak ada di data.
     3. Jangan tampilkan tabel lengkap kecuali pengguna memintanya secara eksplisit.
-    4. Jika perlu daftar, gunakan maksimal 3–6 bullet dan sertakan nilai relevan seperti nama KPI, realisasi/progress, target, dan keterangan.
-    5. Jika data kosong: tulis "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini" dan berhenti.
-    6. Jangan tambahkan seksi rekomendasi, saran tindakan, atau opini.
-    7. Jangan tambahkan seksi insight umum kecuali pengguna memintanya.
+    4. Sesuaikan detail dengan scope pertanyaan:
+       - Pertanyaan "apa saja" / daftar → nama KPI + realisasi + target saja.
+       - Pertanyaan progress/kinerja → boleh tambahkan keterangan dari data.
+       - Pertanyaan level tim/agregat → rangkum per KPI, bukan per orang.
+       - Pertanyaan per-individu → tampilkan per orang.
+       Jangan tampilkan field yang tidak relevan dengan pertanyaan.
+    5. Jika data kosong: tulis "Mohon maaf, tidak ada data valid untuk pertanyaan anda 
+       atau pertanyaan anda diluar konteks domain sistem ini" dan berhenti.
+    6. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
+    7. Jangan tambahkan insight umum kecuali pengguna memintanya.
     8. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
-    9. Jangan pernah menyebut keterbatasan sistem, grafik, visualisasi, atau fitur yang tidak tersedia — 
-       cukup jawab pertanyaan. Jika pertanyaan meminta grafik, abaikan bagian itu dan 
-       sajikan data dalam teks tanpa komentar apapun tentang grafik.
-    
+    9. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
+    10. Jangan menambahkan kalimat penutup, ringkasan akhir, atau kesimpulan 
+        generatif di luar data. Jawaban berhenti setelah data terakhir disajikan.
+
     ATURAN KHUSUS KPI TARGET / PROGRESS:
-    - Jika pertanyaan menanyakan pencapaian target, mendekati target, achieve, partial, fail, progress, atau kinerja, bandingkan kolom realisasi dengan target jika keduanya tersedia dan bisa dibandingkan.
-    - Untuk nilai numerik, realisasi == target atau realisasi > target berarti target tercapai.
-    - Untuk format TRL N, bandingkan angka N; TRL yang sama atau lebih tinggi dari target berarti target tercapai.
-    - Kolom achieve, partial, dan fail adalah deskripsi threshold. Gunakan sebagai konteks penjelasan, bukan sebagai label wajib yang harus muncul di keterangan.
-    - Jangan menyatakan status tidak diketahui hanya karena keterangan tidak memuat kata ACHIEVE jika realisasi dan target membuktikan target tercapai.
-    - Jika realisasi dan target tidak bisa dibandingkan secara pasti, sebutkan keterbatasan singkat dan tampilkan data mentah yang relevan.
-    - Abaikan permintaan pengguna yang berkaitan dengan pembuatan grafik, diagram, atau visualisasi.
-    - JANGAN PERNAH menggunakan kata "grafik", "diagram", "visualisasi", atau "gambar" dalam jawabanmu, serta jangan meminta maaf karena tidak bisa menampilkannya. Langsung saja berikan analisis performa berbasis teks dari data yang ada.
+    - Tampilkan nilai realisasi dan target dari data apa adanya.
+    - Jika realisasi dan target tersedia dan bisa dibandingkan secara langsung, 
+      kamu BOLEH menambahkan frasa singkat seperti "(tercapai)" atau "(belum tercapai)" 
+      — hanya berdasarkan perbandingan nilai realisasi vs target di data.
+    - Untuk nilai numerik: realisasi >= target → tercapai.
+    - Untuk format TRL N: angka N >= angka target → tercapai.
+    - Jangan tulis label status jika salah satu dari realisasi atau target tidak ada di data.
+    - Kolom achieve, partial, fail hanya boleh disebut jika kolom tersebut ada di [DATA MENTAH] 
+      dan nilainya eksplisit ada di baris data.
+    - Jika kolom bulan_num tersedia di [DATA MENTAH], kamu boleh menyebut periode 
+      sebagai "bulan [angka]" atau nama bulannya (1=Januari, 2=Februari, dst.).
+    - Jika kolom bulan_num TIDAK ada di [DATA MENTAH], jangan sebutkan periode 
+      apapun — cukup tulis "bulan terakhir" saja tanpa angka.
+    - Jika pertanyaan menanyakan capaian/performa individu tanpa batas waktu 
+         eksplisit, tampilkan minimal bulan terakhir. Jika data historis tersedia 
+         dan relevan untuk menggambarkan tren, tampilkan maksimal 3 bulan terakhir.
+    - Jika pertanyaan mengandung kata "persen", "%" atau "persentase capaian", 
+      dan data mengandung realisasi serta target numerik yang bisa dibandingkan, 
+      hitung dan tampilkan persentase: (realisasi / target) × 100%.
+    - Untuk KPI non-numerik seperti TRL, nyatakan sebagai "tercapai" atau 
+      "belum tercapai" tanpa persentase, karena tidak bisa dihitung secara linier.
+    - Jangan menghitung persentase jika target atau realisasi tidak ada di data.
+    
 
     [PERTANYAAN PENGGUNA]
     {user_query}
-    
+
     [SQL YANG DIEKSEKUSI]
     {executed_sql}
-    
+
     [DATA MENTAH — {row_count_hint} — {truncation_note}]
     {result_str}
-    
+
     [MULAI RESPONS]"""
 
     return prompt
@@ -266,7 +304,7 @@ def build_ambiguity_assessment_prompt(
     CRITICAL DISTINCTION — these are NOT the same:
       ┌─────────────────────────────────────────────────────────────┐
       │ Unknown/unclear specific values (names, dates, terms)       │
-      │ → NOT a scope failure → they are AMBIGUITIES → go to STEP 2│
+      │ → NOT a scope failure → they are AMBIGUITIES → go to STEP 2 │
       │                                                             │
       │ Topic entirely unrelated to any table/column/KPI            │
       │ → IS a scope failure → return out-of-scope JSON             │

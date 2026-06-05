@@ -143,8 +143,7 @@ class ClarificationService:
                 free_text_answer=answer.free_text,
             )
 
-        if self.db is not None:
-            await self.db.commit()
+        await self.db.commit()
 
         next_clarification = None
         recheck_result = await self._recheck_ambiguity_after_refinement(
@@ -162,8 +161,8 @@ class ClarificationService:
                     session_id=session_id,
                     ambiguity_result=recheck_result,
                 )
-                if self.db is not None:
-                    await self.db.commit()
+
+                await self.db.commit()
 
         return QueryDisambiguationResult(
             original_query=source_query,

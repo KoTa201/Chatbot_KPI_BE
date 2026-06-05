@@ -1304,7 +1304,7 @@ def test_nl_to_sql_prompt_includes_addon_prompt_constraint():
     assert "Jawab hanya untuk KPI aktif." in prompt
 
 
-def test_nl_to_sql_prompt_includes_srag_inference_inputs():
+def test_nl_to_sql_prompt_is_compact_but_preserves_core_rules():
     from template.promptTemplate import build_nl_to_sql_prompt
 
     prompt = build_nl_to_sql_prompt(
@@ -1314,13 +1314,15 @@ def test_nl_to_sql_prompt_includes_srag_inference_inputs():
         column_statistics="kpi_master_records.category: unique=['KPI Sales'], non_null=1, non_zero=1",
     )
 
-    assert "[PERTANYAAN ASLI PENGGUNA (q)]" in prompt
-    assert "Tampilkan KPI Sales bulan Maret" in prompt
-    assert "[SKEMA DATABASE (S)]" in prompt
-    assert "[STATISTIK SETIAP KOLOM]" in prompt
-    assert "kpi_master_records.category: unique=['KPI Sales'], non_null=1, non_zero=1" in prompt
-    assert "mean, maksimum, minimum" in prompt
-    assert "nilai unik" in prompt
+    assert len(prompt) < 6000
+    assert "┌" not in prompt
+    assert "└" not in prompt
+    assert "Hanya generate query SELECT" in prompt
+    assert "GUNAKAN kpi_tracker_records" in prompt
+    assert "GUNAKAN kpi_master_users" in prompt
+    assert "user_id" in prompt and "BUKAN filter default" in prompt
+    assert "DILARANG KERAS melakukan cast langsung ::NUMERIC" in prompt
+    assert "Response" not in prompt
 
 
 def test_analysis_prompt_includes_all_query_result_rows():
