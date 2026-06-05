@@ -129,23 +129,26 @@ KEAMANAN:
 QUERY:
 - Gunakan tabel/kolom dari schema. Inferensi via (pertanyaan + schema + statistik kolom). Untuk numerik manfaatkan mean, maksimum, minimum, non-zero, non-null; untuk string/boolean manfaatkan nilai unik, non-zero, non-null.
 - Nama: UPPER(u.full_name) LIKE UPPER('%nama%'). JOIN users u ON u.id = kt.user_id.
-- Periode: gunakan bulan_num (1=Jan..12=Des). "Bulan terakhir" = MAX(bulan_num).
+- Periode & Tahun: gunakan bulan_num (1=Jan..12=Des) untuk bulan. Untuk filter tahun, ALWAYS gunakan `kg.tahun` (JOIN kpi_groups kg ON kt.group_id = kg.id atau km.group_id = kg.id). JANGAN gunakan EXTRACT(YEAR FROM kt.created_at) karena created_at adalah tanggal input data ke DB. "Bulan terakhir" = MAX(bulan_num).
 - Tambahkan LIMIT 1000 jika tidak ada limit spesifik.
 - Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
+- Rata-rata & Performa: JANGAN langsung menggunakan fungsi agregasi SQL (seperti AVG) jika pertanyaan menanyakan rata-rata/performa campuran dari berbagai KPI (yang mungkin berisi nilai TRL). Lebih baik SELECT data detail per baris (km.kpi_name, kt.realisasi, km.target, kt.bulan_num) agar LLM pada tahap analisis dapat menghitung rata-rata untuk KPI numerik dan melaporkan status TRL secara terpisah.
 
 PILIHAN TABEL:
 - GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
     JOIN kpi_master_records km ON kt.kpi_master_id = km.id
     JOIN users u ON u.id = kt.user_id  ← jika perlu nama
+    JOIN kpi_groups kg ON kt.group_id = kg.id  ← jika perlu filter tahun/group
 - GUNAKAN kpi_master_users kmu untuk assignment/daftar KPI per orang
     JOIN users u ON u.id = kmu.user_id
     JOIN kpi_master_records km ON km.id = kmu.kpi_master_id
+    JOIN kpi_groups kg ON km.group_id = kg.id  ← jika perlu filter tahun/group
 
 KOLOM KPI:
 - km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
   Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
 - Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
-  kt.keterangan, kt.bulan_num. Tambah km.achieve/partial/fail hanya jika
+  kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu (misal Adiansyah, Andi, dll.), wajib sertakan juga nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
   pertanyaan eksplisit minta threshold/status/kategori.
 
 CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
@@ -211,13 +214,11 @@ def build_analysis_prompt(
        - Pertanyaan level tim/agregat → rangkum per KPI, bukan per orang.
        - Pertanyaan per-individu → tampilkan per orang.
        Jangan tampilkan field yang tidak relevan dengan pertanyaan.
-    5. Jika data kosong: tulis "Mohon maaf, tidak ada data valid untuk pertanyaan anda 
-       atau pertanyaan anda diluar konteks domain sistem ini" dan berhenti.
-    6. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
-    7. Jangan tambahkan insight umum kecuali pengguna memintanya.
-    8. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
-    9. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
-    10. Jangan menambahkan kalimat penutup, ringkasan akhir, atau kesimpulan 
+    5. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
+    6. Jangan tambahkan insight umum kecuali pengguna memintanya.
+    7. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
+    8. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
+    9. Jangan menambahkan kalimat penutup, ringkasan akhir, atau kesimpulan 
         generatif di luar data. Jawaban berhenti setelah data terakhir disajikan.
 
     ATURAN KHUSUS KPI TARGET / PROGRESS:
