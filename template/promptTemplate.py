@@ -261,7 +261,7 @@ def build_analysis_prompt(
 
     FORMAT BLOK INSIGHT:
     ---
-    💡 Insight: [insight ringkas berdasarkan data]
+    💡 Insight: [insight kritis dan memberikan value bagi HRD berdasarkan data]
 
     ATURAN ISI INSIGHT:
     - Insight harus relevan langsung dengan konteks pertanyaan pengguna ([PERTANYAAN PENGGUNA]).
@@ -273,12 +273,6 @@ def build_analysis_prompt(
     - Jangan ulangi angka yang sudah disajikan di atas — cukup simpulkan polanya.
     - Jangan tambahkan saran tindakan, rekomendasi, atau opini subjektif.
     - Gunakan bahasa yang faktual dan netral.
-
-    KAPAN TIDAK MENAMPILKAN INSIGHT:
-    - Pertanyaan faktual sederhana (misal: "berapa nilai KPI X?", "siapa yang mencapai target?")
-      → tidak perlu insight, cukup jawab langsung.
-    - Data kosong atau hanya 1 baris → tidak perlu insight.
-    - Pertanyaan sudah terjawab tuntas hanya dengan data → tidak perlu insight.
 
     [PERTANYAAN PENGGUNA]
     {user_query}
