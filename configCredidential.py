@@ -50,6 +50,8 @@ class Settings:
         "LLM_MODEL_GRAPHIC_CLASSIFIER")
     LLM_MODEL_DISAMBIGUATION: str = get_required_env(
         "LLM_MODEL_DISAMBIGUATION")
+    LLM_MODEL_OUT_SCOPE_CLASSIFIER: str = get_required_env(
+        "LLM_MODEL_OUT_SCOPE_CLASSIFIER")
     RATE_LIMIT_PER_MINUTE: int = get_required_int_env("RATE_LIMIT_PER_MINUTE")
     SQL_MAX_LIMIT: int = get_required_int_env("SQL_MAX_LIMIT")
     SQL_MAX_SUBQUERY_DEPTH: int = get_required_int_env("SQL_MAX_SUBQUERY_DEPTH")

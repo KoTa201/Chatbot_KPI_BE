@@ -229,6 +229,36 @@ async def test_process_query_returns_clarification_when_query_is_ambiguous(monke
 
 
 @pytest.mark.asyncio
+async def test_process_query_returns_out_of_scope_message_without_nl_to_sql(monkeypatch):
+    clarification_response = ClarificationMessageResponse(
+        session_id=SESSION_BLOCKED,
+        message_type="out_of_scope",
+        message="Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan",
+        is_out_of_scope=True,
+    )
+    _patch_clarification_service(monkeypatch, clarification_response)
+
+    service = _create_chat_service(monkeypatch)
+    generate_sql_mock = AsyncMock(return_value="SELECT 1")
+    monkeypatch.setattr(service.llm_service, "generate_sql", generate_sql_mock)
+
+    stream = service.process_query_stream(
+        user_message="Tampilkan KPI finance",
+        user_id=UUID("00000000-0000-0000-0000-000000000001"),
+        user_role="Owner",
+        session_id=SESSION_BLOCKED,
+    )
+    response = await _collect_sse_stream(stream)
+
+    assert response["message"] == "Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan"
+    assert response.get("clarification_questions") is None
+    assert generate_sql_mock.await_count == 0
+    assert len(response["pipeline_stages"]) == 1
+    assert response["pipeline_stages"][0]["stage"] == "Ambiguity Detection"
+    assert response["pipeline_stages"][0]["status"] == "completed"
+
+
+@pytest.mark.asyncio
 async def test_process_query_returns_security_message_when_sql_validation_fails(monkeypatch):
     _patch_clarification_service(monkeypatch, clarification_response=None)
 

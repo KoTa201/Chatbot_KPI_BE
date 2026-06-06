@@ -219,6 +219,20 @@ class ChatService:
             self._complete_stage(stage, "completed", "No clarification needed")
             return None
 
+        if clarification_response.is_out_of_scope:
+            self._complete_stage(stage, "completed", "Query blocked by scope or policy")
+            query_message = clarification_response.message or "Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan"
+            await self.session_service.create_chatbot_message(
+                session_id=session_id,
+                message=query_message,
+            )
+            await self.db.commit()
+            return emit_sse_response(
+                session_id=session_id,
+                stages=stages,
+                message=query_message,
+            )
+
         if clarification_response.clarifying_question:
             self._complete_stage(stage, "completed", "Clarification question generated")
             query_message = build_clarification_prompt_message(
@@ -293,7 +307,9 @@ class ChatService:
             yield format_sse_chunk(unsupported_message)
 
         if rows_count == 0 or not query_result:
+
             fallback = (unsupported_message or "") + "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
+
             self._complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
             yield format_sse_chunk(fallback)
             yield format_sse_done()
