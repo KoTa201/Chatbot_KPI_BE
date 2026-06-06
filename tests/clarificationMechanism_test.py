@@ -1611,7 +1611,7 @@ def test_analysis_prompt_preserves_explicit_employee_progress_and_description_re
     assert "nama karyawan" in prompt
     assert "1. [Nama KPI]" in prompt
     assert "- Progress: realisasi [nilai] dari target [nilai]" in prompt
-    assert "- Keterangan: [keterangan dari data]" in prompt
+    assert "- Keterangan: [keterangan dari data mentah (dari kolom keterangan)]" in prompt
 
 
 
