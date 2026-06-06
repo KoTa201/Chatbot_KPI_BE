@@ -48,6 +48,46 @@ class ChatController:
                 detail="Token tidak memuat informasi user yang valid.",
             )
 
+        if request.session_id is not None and hasattr(self.service, "verify_session"):
+            await self.service.verify_session(request.session_id, UUID(user_id))
+
+        # Check for unsupported chart types at the beginning of the request
+        if hasattr(self.service, "llm_service"):
+            from template.promptTemplate import build_graphic_generation_prompt
+            visualization_decision = await self.service.llm_service.decide_visualization_request(
+                build_graphic_generation_prompt(request.message)
+            )
+            if visualization_decision.is_visualize and visualization_decision.chart_type:
+                req_type = visualization_decision.chart_type.strip().lower()
+                supported_types = {"bar", "batang", "donut", "donat", "line", "garis"}
+                if req_type not in supported_types:
+                    from uuid import uuid4
+                    session_id = request.session_id or uuid4()
+                    
+                    active_chatbot = await self.service.chatbot_service.get_active_chatbot_for_role(user_role)
+                    await self.service.session_service.create_session_if_missing(
+                        session_id=session_id,
+                        user_id=UUID(user_id),
+                        first_message=request.message,
+                        chatbot_id=active_chatbot.id,
+                    )
+                    await self.service.session_service.create_user_message(
+                        session_id=session_id,
+                        message=request.message,
+                    )
+                    warn_msg = f"⚠️ **Maaf, tipe grafik '{visualization_decision.chart_type}' tidak didukung oleh sistem.** Sistem saat ini hanya mendukung grafik **Batang**, **Donat**, dan **Garis**."
+                    await self.service.session_service.create_chatbot_message(
+                        session_id=session_id,
+                        message=warn_msg,
+                    )
+                    await self.service.db.commit()
+
+                    response = ChatResponse(
+                        session_id=session_id,
+                        message=warn_msg,
+                    )
+                    return self._build_streaming_response(response)
+
         event_stream = self.service.process_query_stream(
             user_message=request.message,
             user_id=UUID(user_id),
@@ -92,6 +132,9 @@ class ChatController:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token tidak memuat informasi user yang valid.",
             )
+
+        if hasattr(self.service, "verify_session"):
+            await self.service.verify_session(request.session_id, UUID(user_id))
 
         # Proses clarification response
         try:

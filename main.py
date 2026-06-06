@@ -53,6 +53,7 @@ app.mount("/public", StaticFiles(directory=PUBLIC_DIR), name="public")
 
 app.add_middleware(JWTMiddleware)
 
+
 cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
 
 app.add_middleware(

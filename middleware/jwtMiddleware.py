@@ -145,7 +145,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         if not token:
             return json_response(
                 status.HTTP_401_UNAUTHORIZED,
-                "Token tidak ditemukan. Sertakan header: Authorization: Bearer <token>",
+                "Token otentikasi tidak ditemukan.",
             )
 
         # 3. Decode token
@@ -153,7 +153,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         if payload is None:
             return json_response(
                 status.HTTP_401_UNAUTHORIZED,
-                "Token tidak valid atau sudah kadaluarsa.",
+                "Token tidak valid atau telah kadaluarsa.",
             )
 
         # 4. Klaim wajib
@@ -161,7 +161,7 @@ class JWTMiddleware(BaseHTTPMiddleware):
         if not user_id:
             return json_response(
                 status.HTTP_401_UNAUTHORIZED,
-                "Token tidak mengandung identitas user.",
+                "Token tidak valid: identitas user tidak ditemukan.",
             )
 
         role: str = payload.get("role", "")
