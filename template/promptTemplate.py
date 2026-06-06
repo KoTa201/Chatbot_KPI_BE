@@ -213,8 +213,13 @@ def build_analysis_prompt(
     3. Jangan tampilkan tabel lengkap kecuali pengguna memintanya secara eksplisit.
     4. Sesuaikan detail dengan scope pertanyaan:
        - Pertanyaan "apa saja" / daftar → nama KPI + realisasi + target saja.
+       - Jika pertanyaan menyebut "progress" atau "keterangan", gunakan format daftar berikut:
+         1. [Nama KPI]
+            - Progress: realisasi [nilai] dari target [nilai]
+            - Keterangan: [keterangan dari data]
+       - Jika pertanyaan menyebut "karyawan", sertakan nama karyawan jika kolom nama karyawan tersedia di [DATA MENTAH].
        - Pertanyaan progress/kinerja → boleh tambahkan keterangan dari data.
-       - Pertanyaan level tim/agregat → rangkum per KPI, bukan per orang.
+       - Pertanyaan level tim/agregat → rangkum per KPI, bukan per orang, kecuali pertanyaan eksplisit menyebut karyawan/per orang.
        - Pertanyaan per-individu → tampilkan per orang.
        Jangan tampilkan field yang tidak relevan dengan pertanyaan.
     5. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
@@ -241,13 +246,18 @@ def build_analysis_prompt(
          eksplisit, tampilkan minimal bulan terakhir. Jika data historis tersedia 
          dan relevan untuk menggambarkan tren, tampilkan maksimal 3 bulan terakhir.
     - Jika pertanyaan mengandung kata "persen", "%" atau "persentase capaian",
-      ekstrak angka pertama dari nilai realisasi dan target (abaikan teks/satuan
-      seperti "TRL", "/Hari", ">", "%"), lalu hitung: (angka_realisasi / angka_target) × 100%.
-      Untuk KPI berbasis level/skala (TRL, Level, dsb.) yang diminta persennya:
-      tetap hitung dari angka yang diekstrak (misal TRL 7 dari TRL 9 = 77.78%),
+      hitung persentase untuk SEMUA jenis KPI dengan cara:
+      ekstrak angka dari realisasi dan target (abaikan teks/satuan seperti 
+      "TRL", "/Hari", ">", "%"), lalu hitung: (angka_realisasi / angka_target) × 100%.
+      Contoh: TRL 7 dari target TRL 7 = (7/7) × 100% = 100% (tercapai)
+              TRL 5 dari target TRL 7 = (5/7) × 100% = 71.43% (belum tercapai)
+              Realisasi 3 dari target 3 = (3/3) × 100% = 100% (tercapai)
+      Selalu tampilkan angka persentase eksplisit, diikuti status "(tercapai)" 
+      atau "(belum tercapai)".
+      Jangan skip perhitungan untuk KPI apapun selama angka bisa diekstrak.
       dan tambahkan keterangan status "(tercapai)" atau "(belum tercapai)".
-    - Untuk KPI non-numerik seperti TRL, nyatakan sebagai "tercapai" atau 
-      "belum tercapai" tanpa persentase, karena tidak bisa dihitung secara linier.
+    - Tampilkan hasil persentase akhir saja (misal: 100%), 
+      jangan sertakan formula kalkulasi seperti "(3/3) × 100%".
     - Jangan menghitung persentase jika target atau realisasi tidak ada di data.
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

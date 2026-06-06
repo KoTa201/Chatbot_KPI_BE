@@ -1549,6 +1549,32 @@ def test_analysis_prompt_includes_all_query_result_rows():
     assert "Data dipotong" not in prompt
 
 
+def test_analysis_prompt_preserves_explicit_employee_progress_and_description_request():
+    from template.promptTemplate import build_analysis_prompt
+
+    prompt = build_analysis_prompt(
+        user_query="KPI karyawan yang realisasinya sudah mencapai target atau mendekati target sampai bulan terakhir apa saja? Tolong sertakan progress dan keterangannya.",
+        executed_sql="SELECT full_name, kpi_name, realisasi, target, keterangan FROM kpi_tracker_records;",
+        query_result=[
+            {
+                "full_name": "Andi",
+                "kpi_name": "Product Launch",
+                "realisasi": "3",
+                "target": "3",
+                "keterangan": "Maintenance berjalan baik.",
+            }
+        ],
+        rows_count=1,
+    )
+
+    assert "Jika pertanyaan menyebut \"karyawan\"" in prompt
+    assert "nama karyawan" in prompt
+    assert "1. [Nama KPI]" in prompt
+    assert "- Progress: realisasi [nilai] dari target [nilai]" in prompt
+    assert "- Keterangan: [keterangan dari data]" in prompt
+
+
+
 def test_analysis_prompt_includes_addon_prompt_constraint():
     from template.promptTemplate import build_analysis_prompt
 

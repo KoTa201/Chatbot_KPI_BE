@@ -305,6 +305,7 @@ async def test_process_query_success_without_visualization(monkeypatch):
     assert response["generated_sql"] == sanitized_sql
     assert response["graphics"] == []
     assert response["rows_returned"] == 1
+    assert response["query_result"] == query_rows
     assert _stage_by_name(response, "graphic_generation") is None
     assert _stage_by_name(response, "result_analysis")["status"] == "running"
 

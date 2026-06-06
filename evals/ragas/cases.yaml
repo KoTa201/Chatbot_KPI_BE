@@ -5,35 +5,38 @@
 #  expected_answer: "Pada bulan terakhir, KPI tim yang sudah mencapai atau mendekati target mencakup Internal Enablement dengan realisasi 3 dari target 3, Product Readiness dengan realisasi TRL 7 sama dengan target TRL 7, Product Launch dengan realisasi 3 dari target 3, dan Product Sales dengan realisasi 3 dari target 3. Keterangan progress mencakup status ACHIEVE untuk Internal Enablement, Product Readiness, dan Product Sales, serta keterangan maintenance/dokumentasi teknis untuk Product Launch."
 #  notes: "Kepala divisi performance review for KPI progress against target thresholds."
 #
-- id: employee_andi_achievement_percentage
-  question: "berapa persen capaian pegawai andi"
-  user_role: "kepala_divisi"
-  user_email: "rina.kadiv@kpiapp.id"
-  expected_answer: "Capaian pegawai Andi perlu menampilkan KPI, bulan, realisasi, target, dan interpretasi capaian. Pada bulan terakhir, Internal Enablement mencapai 100% karena realisasi 3 dari target 3, Product Readiness tercapai karena realisasi TRL 7 sama dengan target TRL 7, dan Product Launch mencapai 100% karena realisasi 3 dari target 3."
-  notes: "Employee-specific KPI achievement percentage query using flexible name matching for Andi."
-
-#- id: employee_kpis_by_employee
-#  question: "apa saja kpi dari tiap pegawai"
+#- id: employee_andi_achievement_percentage
+#  question: "berapa persen capaian pegawai andi"
 #  user_role: "kepala_divisi"
 #  user_email: "rina.kadiv@kpiapp.id"
-#  expected_answer: >
-#      Daftar KPI per pegawai berdasarkan assignment adalah sebagai berikut:
-#      Abdul R (Partner/Subcon Readiness, Schedule Adherence);
-#      Adiansyah (Internal Enablement, Product Readiness, Product Sales);
-#      Akmal (Cashflow Control);
-#      Andi (Internal Enablement, Product Launch, Product Readiness);
-#      Bandy (Cashflow Control, On-Time Delivery, Scope Control);
-#      Dani (Knowledge Sharing, KPI Compliance);
-#      Dini (Customer Presentation, Proposal Submitted);
-#      Djoko K (Business Governance, Cashflow Control, Margin Realisasi, On-Time Delivery, Revenue Achievement, Strategic Partnership, Team Growth);
-#      Erlan H (Product Launch);
-#      Farhan (Internal Enablement, Product Launch);
-#      Hasbi (Delivery Quality, Issue Resolution, Technical Documentation);
-#      Heri (KPI Compliance, Skill Development);
-#      Jessica (Conversion Rate, Customer Presentation);
-#      Mia (Conversion Rate, Customer Presentation, Proposal Submitted);
-#      Pirmadi S (Business Governance, Revenue Achievement, Strategic Partnership, Team Growth);
-#      Rafly (Margin Realisasi, Scope Control);
-#      Romli (Knowledge Sharing, KPI Compliance, Skill Development);
-#      Tresna (Delivery Quality, Issue Resolution, Schedule Adherence).
-#  notes: "Employee KPI assignment/listing query using the master KPI-user relation."
+#  expected_answer: "Capaian KPI pegawai Andi pada bulan terakhir:
+#  Product Launch realisasi 3 dari target 3 = 100% (tercapai),
+#  Product Readiness realisasi TRL 7 dari target TRL 7 = 100% (tercapai),
+#  Internal Enablement realisasi 3 dari target 3 = 100% (tercapai)."
+#  notes: "Employee-specific KPI achievement percentage query using flexible name matching for Andi."
+
+- id: employee_kpis_by_employee
+  question: "apa saja kpi dari tiap pegawai"
+  user_role: "kepala_divisi"
+  user_email: "rina.kadiv@kpiapp.id"
+  expected_answer: >
+      Daftar KPI per pegawai berdasarkan assignment adalah sebagai berikut:
+      Abdul R (Partner/Subcon Readiness, Schedule Adherence);
+      Adiansyah (Internal Enablement, Product Readiness, Product Sales);
+      Akmal (Cashflow Control);
+      Andi (Internal Enablement, Product Launch, Product Readiness);
+      Bandy (Cashflow Control, On-Time Delivery, Scope Control);
+      Dani (Knowledge Sharing, KPI Compliance);
+      Dini (Customer Presentation, Proposal Submitted);
+      Djoko K (Business Governance, Cashflow Control, Margin Realisasi, On-Time Delivery, Revenue Achievement, Strategic Partnership, Team Growth);
+      Erlan H (Product Launch);
+      Farhan (Internal Enablement, Product Launch);
+      Hasbi (Delivery Quality, Issue Resolution, Technical Documentation);
+      Heri (KPI Compliance, Skill Development);
+      Jessica (Conversion Rate, Customer Presentation);
+      Mia (Conversion Rate, Customer Presentation, Proposal Submitted);
+      Pirmadi S (Business Governance, Revenue Achievement, Strategic Partnership, Team Growth);
+      Rafly (Margin Realisasi, Scope Control);
+      Romli (Knowledge Sharing, KPI Compliance, Skill Development);
+      Tresna (Delivery Quality, Issue Resolution, Schedule Adherence).
+  notes: "Employee KPI assignment/listing query using the master KPI-user relation."
