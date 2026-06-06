@@ -277,6 +277,45 @@ class TestAmbiguityDetectorLLM:
             assert result.is_ambiguous is False
             assert result.detection_source == "llm_fallback"
 
+    @pytest.mark.asyncio
+    async def test_scope_policy_precheck_failure_with_addon_prompt_blocks_pipeline(self):
+        detector = AmbiguityDetectorService()
+
+        with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = Exception("503 Service Unavailable")
+
+            result = await detector.detect_ambiguity(
+                "Bandingkan kpi saya dengan kpi adiansyah",
+                "karyawan",
+                addon_prompt="Dilarang membandingkan kpi antar karyawan",
+            )
+
+        assert result.is_ambiguous is True
+        assert result.is_out_of_scope is True
+        assert result.detection_source == "llm_scope_policy"
+        mock_llm.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_ambiguity_failure_after_allowed_scope_policy_does_not_block_addon_prompt(self):
+        detector = AmbiguityDetectorService()
+
+        with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [
+                '{"is_out_of_scope": false, "reason": "allowed"}',
+                Exception("503 Service Unavailable"),
+            ]
+
+            result = await detector.detect_ambiguity(
+                "Bagaimana progress kpi saya",
+                "karyawan",
+                addon_prompt="Dilarang membandingkan kpi antar karyawan",
+            )
+
+        assert result.is_ambiguous is False
+        assert result.is_out_of_scope is False
+        assert result.detection_source == "llm_fallback"
+        assert mock_llm.await_count == 2
+
 
 class TestClarificationService:
     """Test suite untuk clarification service orchestration."""
@@ -1638,20 +1677,115 @@ def test_scope_policy_prompt_omits_empty_addon_prompt():
     assert '"is_out_of_scope"' in prompt
 
 
+def test_scope_policy_prompt_allows_self_kpi_progress_under_employee_comparison_ban():
+    prompt = build_scope_policy_assessment_prompt(
+        user_query="Bagaimana progress kpi saya",
+        user_role="karyawan",
+        kpi_context="KPI context evidence",
+        addon_prompt="Dilarang membandingkan kpi antar karyawan",
+    )
+
+    assert "Bagaimana progress kpi saya" in prompt
+    assert "Dilarang membandingkan kpi antar karyawan" in prompt
+    assert "Bagaimana progress KPI saya" in prompt
+    assert '{"is_out_of_scope": false, "reason": "allowed"}' in prompt
+    assert "Bandingkan KPI saya dengan KPI Adiansyah" in prompt
+    assert '{"is_out_of_scope": true, "reason": "addon_policy_violation"}' in prompt
+    assert "Only mark addon_policy_violation when the current question directly asks for the forbidden action" in prompt
+
+
+@pytest.mark.asyncio
+async def test_ambiguity_detector_scope_policy_precheck_short_circuits_ambiguity_prompt(monkeypatch):
+    detector = AmbiguityDetectorService()
+    built_prompts = []
+
+    def fake_scope_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append(("scope", user_query, addon_prompt, session_context))
+        return "scope prompt"
+
+    def fake_ambiguity_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append(("ambiguity", user_query, addon_prompt, session_context))
+        return "ambiguity prompt"
+
+    monkeypatch.setattr("service.ambiguityDetectorService.build_scope_policy_assessment_prompt", fake_scope_builder)
+    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_ambiguity_builder)
+
+    with patch.object(detector.llm, "call_model", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = '{"is_out_of_scope": true, "reason": "addon_policy_violation"}'
+        result = await detector.detect_ambiguity(
+            "Tampilkan KPI finance",
+            "Karyawan",
+            "KPI context",
+            addon_prompt="Hanya jawab KPI HR.",
+            session_context="Konteks KPI HR",
+        )
+
+    assert result.is_ambiguous is True
+    assert result.is_out_of_scope is True
+    assert result.ambiguity_type == "none"
+    assert result.detected_ambiguities == []
+    assert built_prompts == [("scope", "Tampilkan KPI finance", "Hanya jawab KPI HR.", "Konteks KPI HR")]
+    mock_llm.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ambiguity_detector_runs_ambiguity_prompt_when_scope_policy_precheck_allows(monkeypatch):
+    detector = AmbiguityDetectorService()
+    built_prompts = []
+
+    def fake_scope_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append("scope")
+        return "scope prompt"
+
+    def fake_ambiguity_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append("ambiguity")
+        return "ambiguity prompt"
+
+    monkeypatch.setattr("service.ambiguityDetectorService.build_scope_policy_assessment_prompt", fake_scope_builder)
+    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_ambiguity_builder)
+
+    with patch.object(detector.llm, "call_model", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = [
+            '{"is_out_of_scope": false, "reason": "allowed"}',
+            '{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}',
+        ]
+        result = await detector.detect_ambiguity(
+            "Tampilkan KPI HR bulan ini",
+            "Karyawan",
+            "KPI context",
+            addon_prompt="Hanya jawab KPI HR.",
+            session_context="Konteks KPI HR",
+        )
+
+    assert result.is_ambiguous is False
+    assert result.is_out_of_scope is False
+    assert result.detected_ambiguities == []
+    assert built_prompts == ["scope", "ambiguity"]
+    assert mock_llm.await_count == 2
+
+
 @pytest.mark.asyncio
 async def test_ambiguity_detector_passes_addon_prompt_to_prompt_builder(monkeypatch):
     detector = AmbiguityDetectorService()
     captured = {}
 
-    def fake_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+    def fake_scope_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
         captured["addon_prompt"] = addon_prompt
         captured["session_context"] = session_context
-        return "prompt"
+        return "scope prompt"
 
-    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_builder)
+    def fake_ambiguity_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        captured["addon_prompt_ambiguity"] = addon_prompt
+        return "ambiguity prompt"
+
+    monkeypatch.setattr("service.ambiguityDetectorService.build_scope_policy_assessment_prompt", fake_scope_builder)
+    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_ambiguity_builder)
 
     with patch.object(detector.llm, 'call_model', new_callable=AsyncMock) as mock_llm:
-        mock_llm.return_value = '{"has_ambiguity": false, "question_set": []}'
+        mock_llm.side_effect = [
+            '{"is_out_of_scope": false, "reason": "allowed"}',
+            '{"has_ambiguity": false, "question_set": []}',
+        ]
         await detector.detect_ambiguity(
             "KPI terbaik?",
             "Karyawan",
@@ -1660,6 +1794,76 @@ async def test_ambiguity_detector_passes_addon_prompt_to_prompt_builder(monkeypa
         )
 
     assert captured["addon_prompt"] == "Gunakan constraint bot."
+
+
+@pytest.mark.asyncio
+async def test_ambiguity_detector_scope_policy_precheck_short_circuits_ambiguity_prompt(monkeypatch):
+    detector = AmbiguityDetectorService()
+    built_prompts = []
+
+    def fake_scope_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append(("scope", user_query, addon_prompt, session_context))
+        return "scope prompt"
+
+    def fake_ambiguity_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append(("ambiguity", user_query, addon_prompt, session_context))
+        return "ambiguity prompt"
+
+    monkeypatch.setattr("service.ambiguityDetectorService.build_scope_policy_assessment_prompt", fake_scope_builder)
+    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_ambiguity_builder)
+
+    with patch.object(detector.llm, "call_model", new_callable=AsyncMock) as mock_llm:
+        mock_llm.return_value = '{"is_out_of_scope": true, "reason": "addon_policy_violation"}'
+        result = await detector.detect_ambiguity(
+            "Tampilkan KPI finance",
+            "Karyawan",
+            "KPI context",
+            addon_prompt="Hanya jawab KPI HR.",
+            session_context="Konteks KPI HR",
+        )
+
+    assert result.is_ambiguous is True
+    assert result.is_out_of_scope is True
+    assert result.ambiguity_type == "none"
+    assert result.detected_ambiguities == []
+    assert built_prompts == [("scope", "Tampilkan KPI finance", "Hanya jawab KPI HR.", "Konteks KPI HR")]
+    mock_llm.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ambiguity_detector_runs_ambiguity_prompt_when_scope_policy_precheck_allows(monkeypatch):
+    detector = AmbiguityDetectorService()
+    built_prompts = []
+
+    def fake_scope_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append("scope")
+        return "scope prompt"
+
+    def fake_ambiguity_builder(user_query, user_role, kpi_context="", addon_prompt=None, session_context=None):
+        built_prompts.append("ambiguity")
+        return "ambiguity prompt"
+
+    monkeypatch.setattr("service.ambiguityDetectorService.build_scope_policy_assessment_prompt", fake_scope_builder)
+    monkeypatch.setattr("service.ambiguityDetectorService.build_ambiguity_assessment_prompt", fake_ambiguity_builder)
+
+    with patch.object(detector.llm, "call_model", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = [
+            '{"is_out_of_scope": false, "reason": "allowed"}',
+            '{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}',
+        ]
+        result = await detector.detect_ambiguity(
+            "Tampilkan KPI HR bulan ini",
+            "Karyawan",
+            "KPI context",
+            addon_prompt="Hanya jawab KPI HR.",
+            session_context="Konteks KPI HR",
+        )
+
+    assert result.is_ambiguous is False
+    assert result.is_out_of_scope is False
+    assert result.detected_ambiguities == []
+    assert built_prompts == ["scope", "ambiguity"]
+    assert mock_llm.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -1731,6 +1935,21 @@ class TestKPIPrompts:
         assert '"perkembangan" → unclear metric → AmbiView' in prompt
         assert '"level_2_label": "AmbiValue"' not in prompt
         assert '"level_2_label": "AmbiView"' in prompt
+
+    def test_ambiguity_prompt_delegates_scope_and_policy_to_precheck_prompt(self):
+        prompt = build_ambiguity_assessment_prompt(
+            user_query="apa rekomendasi saham yang bagus minggu ini",
+            user_role="Karyawan",
+            kpi_context="KPI context",
+            addon_prompt="Hanya jawab KPI divisi HR.",
+        )
+
+        assert "STEP 1 — SCOPE CHECK" not in prompt
+        assert "OUT SCOPE" not in prompt
+        assert "apa rekomendasi saham" not in prompt.split("FEW-SHOT EXAMPLES", 1)[-1]
+        assert "Addon constraints:" not in prompt
+        assert "AMBIGUITY ANALYSIS" in prompt
+        assert '"is_out_of_scope": false' in prompt
 
     def test_ambiguity_prompt_uses_ambisql_question_set_format(self):
         prompt = build_ambiguity_assessment_prompt(
@@ -2035,3 +2254,23 @@ class TestPreferenceTreeService:
                 assert "Periode mana yang dimaksud?" in tree_text
         finally:
             await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_clarification_service_out_of_scope_response_uses_scope_policy_message():
+    service = ClarificationService(db=None)
+    result = await service._build_clarification_response_from_detection(
+        session_id=SESSION_TEST_1,
+        ambiguity_result=AmbiguityAssessmentResult(
+            is_ambiguous=True,
+            is_out_of_scope=True,
+            ambiguity_type="none",
+            detection_source="llm_scope_policy",
+            detected_ambiguities=[],
+        ),
+    )
+
+    assert result is not None
+    assert result.message_type == "out_of_scope"
+    assert result.is_out_of_scope is True
+    assert result.message == "Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan"

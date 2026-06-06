@@ -122,6 +122,7 @@ class ClarificationMessageResponse(BaseModel):
     session_id: UUID
     # "clarification" atau "direct_answer"
     message_type: str = Field(default="clarification")
+    message: Optional[str] = None
 
     # Untuk clarification
     clarifying_question: Optional[str] = None
