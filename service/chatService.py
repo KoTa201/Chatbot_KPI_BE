@@ -56,6 +56,19 @@ class ChatService:
     # Main entry point
     # ------------------------------------------------------------------
 
+    async def verify_session(self, session_id: UUID, user_id: UUID) -> None:
+        existing_session = await self.session_service.session_repo.get_by_id(session_id)
+        if existing_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna.",
+            )
+        if str(existing_session.user_id) != str(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anda tidak memiliki akses ke sesi ini.",
+            )
+
     async def process_query_stream(
         self,
         user_message: str,
@@ -68,6 +81,9 @@ class ChatService:
         """Streaming RAG pipeline orchestrator. Yields SSE events."""
         active_chatbot = await self.chatbot_service.get_active_chatbot_for_role(user_role)
         addon_prompt = getattr(active_chatbot, "addon_prompt", None)
+
+        if session_id is not None:
+            await self.verify_session(session_id, user_id)
 
         session_id = session_id or uuid4()
         await self.session_service.create_session_if_missing(
@@ -134,6 +150,14 @@ class ChatService:
 
             # Stage 6: Graphic Generation (conditional)
             graphic_results: list[GraphicResult] = []
+            unsupported_message = None
+            if visualization_decision.is_visualize:
+                req_type = (visualization_decision.chart_type or "").strip().lower()
+                supported_types = {"bar", "batang", "donut", "donat", "line", "garis"}
+                if req_type not in supported_types:
+                    unsupported_message = f"⚠️ **Maaf, tipe grafik '{visualization_decision.chart_type}' tidak didukung oleh sistem.** Sistem saat ini hanya mendukung grafik **Batang**, **Donat**, dan **Garis**.\n\nBerikut adalah data dalam bentuk teks:\n\n"
+                    visualization_decision.is_visualize = False
+
             if visualization_decision.is_visualize:
                 graphic_results = self._run_graphic_production_stage(
                     stages, query_result, visualization_decision.chart_type or "bar", session_id,
@@ -151,6 +175,7 @@ class ChatService:
                 addon_prompt=addon_prompt,
                 show_sql=show_sql,
                 total_start=total_start,
+                unsupported_message=unsupported_message,
             ):
                 yield event
 
@@ -227,6 +252,7 @@ class ChatService:
         addon_prompt: str | None,
         show_sql: bool,
         total_start: float,
+        unsupported_message: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream narrative analysis: metadata → LLM tokens → done, then persist."""
         analysis_stage = self._start_stage(stages, "result_analysis")
@@ -262,9 +288,12 @@ class ChatService:
         metadata = {k: v for k, v in payload.items() if k != "message"}
         yield format_sse_metadata(metadata)
 
-        full_narrative = ""
+        full_narrative = unsupported_message or ""
+        if unsupported_message:
+            yield format_sse_chunk(unsupported_message)
+
         if rows_count == 0 or not query_result:
-            fallback = "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
+            fallback = (unsupported_message or "") + "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
             self._complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
             yield format_sse_chunk(fallback)
             yield format_sse_done()

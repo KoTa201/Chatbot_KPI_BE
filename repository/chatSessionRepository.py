@@ -39,6 +39,10 @@ class ChatSessionRepository:
         return list(result.scalars().all())
 
     async def get_by_id(self, session_id: uuid.UUID) -> Optional[ChatSession]:
+        # Expire any cached identity-map entry so we always hit the DB
+        await self.db.execute(
+            select(ChatSession).where(ChatSession.session_id == session_id).execution_options(populate_existing=True)
+        )
         result = await self.db.execute(
             select(ChatSession).where(ChatSession.session_id == session_id)
         )

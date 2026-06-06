@@ -674,26 +674,32 @@ def build_graphic_generation_prompt(
 
     ATURAN KETAT:
     1. Set is_visualize=true HANYA jika user secara eksplisit menyebut kata seperti:
-       "grafik", "chart", "diagram", "pie", "bar", "donut", "visualisasi", "tampilkan grafik", dll.
+       "grafik", "chart", "diagram", "line", "garis", "bar", "donut", "visualisasi", "tampilkan grafik", dll.
     2. Jika user hanya bertanya data/angka/informasi TANPA meminta visualisasi → is_visualize=false.
     3. Jangan berasumsi user ingin grafik hanya karena pertanyaan bersifat statistik atau komparatif.
-    4. chart_type wajib salah satu dari: "bar", "pie", "donut", atau null.
-    5. Jika is_visualize=true tapi tipe tidak disebutkan → default chart_type="bar".
-    6. Jika is_visualize=false → chart_type wajib null.
-    7. Output HANYA JSON. Tidak boleh ada teks, penjelasan, atau markdown lain.
+    4. Jika user secara eksplisit meminta tipe grafik tertentu yang tidak didukung (seperti "radar", "3d", "surface", "bubble", dll.), tetap set is_visualize=true dan isi chart_type dengan tipe tersebut (misal: "radar", "3d_surface").
+    5. Jika tipe grafik yang diminta didukung, chart_type wajib salah satu dari: "bar", "donut", "line", atau null.
+    6. Jika is_visualize=true tapi tipe tidak disebutkan:
+       - Jika query mengandung kata yang menunjukkan perubahan/perkembangan/tren dari waktu ke waktu (seperti "tren", "perkembangan", "timeline", "historis", "kronologis", atau menyebutkan rentang periode seperti "Januari hingga Mei", "dari bulan ke bulan"), gunakan chart_type "line".
+       - Jika query mengandung kata yang menunjukkan pembagian/proporsi/komposisi dari keseluruhan (seperti "persentase sebaran", "sebaran status", "komposisi", "proporsi", "kontribusi", "persentase kategori"), gunakan chart_type "donut".
+       - Selain itu, gunakan default chart_type "bar".
+    7. Jika is_visualize=false → chart_type wajib null.
+    8. Output HANYA JSON. Tidak boleh ada teks, penjelasan, atau markdown lain.
 
     CONTOH:
     - "Tampilkan grafik penjualan bulan ini" → {{"is_visualize": true, "chart_type": "bar"}}
-    - "Buatkan pie chart dari data region" → {{"is_visualize": true, "chart_type": "pie"}}
+    - "Buatkan line chart dari tren performa Andi" → {{"is_visualize": true, "chart_type": "line"}}
     - "Berapa total penjualan bulan ini?" → {{"is_visualize": false, "chart_type": null}}
     - "Bandingkan KPI Q1 dan Q2" → {{"is_visualize": false, "chart_type": null}}
     - "Siapa top 5 sales terbaik?" → {{"is_visualize": false, "chart_type": null}}
+    - "Tampilkan visualisasi persentase sebaran status KPI karyawan" → {{"is_visualize": true, "chart_type": "donut"}}
+    - "Tampilkan visualisasi tren perkembangan realisasi Andi" → {{"is_visualize": true, "chart_type": "line"}}
 
     Pertanyaan user:
     {user_query}
 
     Output JSON wajib:
-    {{"is_visualize": true|false, "chart_type": "bar"|"pie"|"donut"|null}}"""
+    {{"is_visualize": true|false, "chart_type": "bar"|"donut"|"line"|null}}"""
 
     return prompt
 

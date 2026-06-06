@@ -44,11 +44,31 @@ class GraphicRenderer:
 
             # Label values on top of bars
             self._draw_bar_annotations(ax, bars, chart_df, category_col, value_col, kpi_meta, df)
+        elif chart_type == "garis":
+            ax.plot(chart_df[category_col], chart_df[value_col], color="#2563EB", marker="o", linewidth=2, label="Realisasi")
+            ax.set_xlabel(category_col)
+            unit_label = ""
+            if value_col in kpi_meta:
+                unit_label = self.parser.dominant_unit(
+                    pd.Series([p.original for p in kpi_meta[value_col]])
+                )
+            ax.set_ylabel(f"{value_col} ({unit_label})" if unit_label else value_col)
+            ax.tick_params(axis="x", rotation=30)
+
+            # Draw target lines/markers if present
+            self._draw_target_line(ax, df, chart_df, category_col, value_col)
+
+            # Label values above points
+            self._draw_line_annotations(ax, chart_df, category_col, value_col, kpi_meta, df)
         else:  # donat or lingkaran
-            wedges, *_ = ax.pie(
+            pie_labels = [
+                label if val > 0 else ""
+                for label, val in zip(chart_df[category_col].tolist(), chart_df[value_col].tolist())
+            ]
+            wedges, texts, autotexts = ax.pie(
                 chart_df[value_col],
-                labels=chart_df[category_col].tolist(),
-                autopct="%1.1f%%",
+                labels=pie_labels,
+                autopct=lambda pct: ('%1.1f%%' % pct) if pct > 0 else '',
                 startangle=90,
             )
             ax.axis("equal")
@@ -57,6 +77,7 @@ class GraphicRenderer:
             for wedge in wedges:
                 wedge.set_linewidth(1)
                 wedge.set_edgecolor("white")
+            ax.legend(wedges, chart_df[category_col].tolist(), loc="best", fontsize=8)
 
         ax.set_title(title_prefix if title_prefix else "Visualisasi KPI")
         fig.tight_layout()
@@ -133,6 +154,53 @@ class GraphicRenderer:
                     rect.get_x() + rect.get_width() / 2,
                     val * 1.01,
                     label,
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
+
+    def _draw_line_annotations(
+        self,
+        ax,
+        chart_df: pd.DataFrame,
+        category_col: str,
+        value_col: str,
+        kpi_meta: dict[str, list[ParsedValue]],
+        df: pd.DataFrame = None,
+    ) -> None:
+        pct_col = None
+        if df is not None:
+            for col in df.columns:
+                col_lower = col.lower()
+                if any(h in col_lower for h in ["persen", "percentage", "pencapaian"]):
+                    if col_lower != value_col.lower():
+                        pct_col = col
+                        break
+
+        for i, (cat, val) in enumerate(zip(chart_df[category_col], chart_df[value_col])):
+            if pd.isna(val):
+                continue
+            
+            display_val = ""
+            if value_col in kpi_meta and i < len(kpi_meta[value_col]):
+                display_val = kpi_meta[value_col][i].display
+            else:
+                display_val = str(int(val)) if val == int(val) else f"{val:.4g}"
+
+            if pct_col is not None and i < len(df):
+                pct_val = df.loc[i, pct_col]
+                if pd.notna(pct_val):
+                    try:
+                        pct_float = float(pct_val)
+                        display_val = f"{display_val}\n({pct_float:.2f}%)"
+                    except ValueError:
+                        display_val = f"{display_val}\n({pct_val})"
+
+            if display_val:
+                ax.text(
+                    cat,
+                    val + (ax.get_ylim()[1] * 0.02),
+                    display_val,
                     ha="center",
                     va="bottom",
                     fontsize=7,

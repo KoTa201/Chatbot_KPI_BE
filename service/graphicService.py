@@ -54,8 +54,8 @@ class GraphicService:
             "batang": "batang",
             "donut": "donat",
             "donat": "donat",
-            "pie": "lingkaran",
-            "lingkaran": "lingkaran",
+            "line": "garis",
+            "garis": "garis",
         }
 
     def _normalize_chart_type(
@@ -76,12 +76,15 @@ class GraphicService:
         kpi_meta: dict[str, list[ParsedValue]] | None = None,
     ) -> str:
         try:
+            category_col = self.preparer._pick_category_column(df, "", {})
+            if category_col and self.preparer._is_month_like_column(category_col):
+                return "garis"
+
             numeric_valid_counts = {}
             for col in df.columns:
                 n = int(pd.to_numeric(df[col], errors="coerce").notna().sum())
                 if n > 0:
                     numeric_valid_counts[col] = n
-
             value_col = self.preparer._pick_value_column(numeric_valid_counts)
             if value_col:
                 category_col = self.preparer._pick_category_column(

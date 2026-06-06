@@ -92,6 +92,10 @@ def _create_chat_service(monkeypatch) -> ChatService:
     monkeypatch.setattr(chat_service_module, "ColumnStatisticsService", FakeColumnStatisticsService)
     service = ChatService(db=Mock(commit=AsyncMock(), rollback=AsyncMock()))
     service.session_service = Mock()
+    service.session_service.session_repo = Mock()
+    service.session_service.session_repo.get_by_id = AsyncMock(
+        side_effect=lambda sid: Mock(user_id=sid)
+    )
     service.session_service.create_session_if_missing = AsyncMock(return_value=None)
     service.session_service.create_user_message = AsyncMock(
         return_value=Mock(message_id="00000000-0000-0000-0000-000000000301")
@@ -121,7 +125,7 @@ async def test_nl_to_sql_stage_only_generates_sql(monkeypatch):
     service = _create_chat_service(monkeypatch)
     sanitized_sql = "SELECT bulan, total_realisasi FROM report_kpi LIMIT 100;"
     monkeypatch.setattr(service.llm_service, "generate_sql", AsyncMock(return_value=sanitized_sql))
-    visualization_mock = AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="pie"))
+    visualization_mock = AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="line"))
     monkeypatch.setattr(service.llm_service, "decide_visualization_request", visualization_mock)
 
     stages = []
@@ -325,7 +329,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
     monkeypatch.setattr(
         service.llm_service,
         "decide_visualization_request",
-        AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="pie")),
+        AsyncMock(return_value=VisualizationDecision(is_visualize=True, chart_type="line")),
     )
     monkeypatch.setattr(
         service.llm_service,
@@ -346,7 +350,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
         "generateGraphicPerKpi",
         lambda query_result, chart_type, session_id=None: [
             GraphicResult(
-                chart_type=chart_type,
+                chart_type="garis" if chart_type == "line" else chart_type,
                 image_url=f"/public/charts/{session_id}/chart-1.png",
             )
         ],
@@ -354,7 +358,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
     monkeypatch.setattr(service, "_run_sql_execution_stage", AsyncMock(return_value=(query_rows, 2)))
 
     stream = service.process_query_stream(
-        user_message="Tampilkan dalam bentuk pie chart",
+        user_message="Tampilkan dalam bentuk line chart",
         user_id=UUID("00000000-0000-0000-0000-000000000004"),
         user_role="Owner",
         session_id=SESSION_VISUAL,
@@ -364,7 +368,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
     expected_url = f"/public/charts/{SESSION_VISUAL}/chart-1.png"
     assert response["message"] == "Ini adalah analisa KPI."
     assert len(response["graphics"]) == 1
-    assert response["graphics"][0]["chart_type"] == "pie"
+    assert response["graphics"][0]["chart_type"] == "garis"
     assert response["graphics"][0]["image_url"] == expected_url
     assert _stage_by_name(response, "graphic_generation")["status"] == "success"
 
