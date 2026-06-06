@@ -353,8 +353,8 @@ class LLMService:
 
         is_visualize = bool(payload.get("is_visualize", False))
         chart_type = payload.get("chart_type")
-        if chart_type not in {"bar", "pie", "donut"}:
-            chart_type = "bar" if is_visualize else None
+        if is_visualize and not chart_type:
+            chart_type = "bar"
 
         return VisualizationDecision(
             is_visualize=is_visualize,

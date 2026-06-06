@@ -280,3 +280,30 @@ async def test_handle_chat_passes_authority_role_to_service(monkeypatch):
     )
 
     assert captured["user_role"] == "karyawan"
+
+
+@pytest.mark.asyncio
+async def test_handle_chat_deleted_session_raises_404(monkeypatch):
+    from fastapi import HTTPException
+
+    class FakeChatService:
+        def __init__(self, db):
+            self.db = db
+
+        async def verify_session(self, session_id, user_id):
+            raise HTTPException(
+                status_code=404,
+                detail="Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna.",
+            )
+
+    monkeypatch.setattr(chat_controller_module, "ChatService", FakeChatService)
+
+    controller = ChatController(db=None)  # type: ignore[arg-type]
+    with pytest.raises(HTTPException) as exc_info:
+        await controller.handle_chat(
+            request=ChatRequest(message="Tes", session_id=SESSION_STREAM_CHAT),
+            current_user=_fake_user(),  # type: ignore[arg-type]
+        )
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna."
+
