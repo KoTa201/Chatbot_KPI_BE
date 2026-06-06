@@ -10,6 +10,7 @@ from template.promptTemplate import (
     build_ambiguity_assessment_prompt,
     build_clarification_choice_generation_prompt,
     build_query_disambiguation_prompt,
+    build_scope_policy_assessment_prompt,
 )
 from schema.clarificationSchema import (
     AmbiguityAssessmentResult,
@@ -1601,6 +1602,40 @@ def test_ambiguity_prompt_omits_empty_addon_prompt():
     )
 
     assert "[KONSTRAINT CHATBOT AKTIF]" not in prompt
+
+
+def test_scope_policy_prompt_includes_query_role_context_schema_and_addon_prompt():
+    prompt = build_scope_policy_assessment_prompt(
+        user_query="Tampilkan KPI saya",
+        user_role="Karyawan",
+        kpi_context="KPI context evidence",
+        addon_prompt="Hanya jawab KPI divisi HR.",
+        session_context="User sebelumnya bertanya tentang KPI HR bulan ini.",
+    )
+
+    assert "Tampilkan KPI saya" in prompt
+    assert "Karyawan" in prompt
+    assert "KPI context evidence" in prompt
+    assert "User sebelumnya bertanya tentang KPI HR bulan ini." in prompt
+    assert "[KONSTRAINT CHATBOT AKTIF]" in prompt
+    assert "Hanya jawab KPI divisi HR." in prompt
+    assert "users(" in prompt
+    assert '"is_out_of_scope"' in prompt
+    assert '"reason"' in prompt
+    assert "addon_policy_violation" in prompt
+
+
+def test_scope_policy_prompt_omits_empty_addon_prompt():
+    prompt = build_scope_policy_assessment_prompt(
+        user_query="Tampilkan KPI saya",
+        user_role="Karyawan",
+        kpi_context="KPI context evidence",
+        addon_prompt="",
+    )
+
+    assert "[KONSTRAINT CHATBOT AKTIF]" not in prompt
+    assert "Tampilkan KPI saya" in prompt
+    assert '"is_out_of_scope"' in prompt
 
 
 @pytest.mark.asyncio
