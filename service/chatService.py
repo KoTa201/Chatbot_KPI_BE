@@ -256,6 +256,7 @@ class ChatService:
             rows_returned=rows_count,
             execution_time_ms=total_ms,
             pipeline_stages=stages,
+            query_result=query_result,
         )
         payload = metadata_resp.model_dump(mode="json")
         metadata = {k: v for k, v in payload.items() if k != "message"}

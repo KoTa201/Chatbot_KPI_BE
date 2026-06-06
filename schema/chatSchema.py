@@ -45,7 +45,7 @@ class ChatResponse(BaseModel):
     rows_returned: int | None = None
     execution_time_ms: int | None = None
     pipeline_stages: list[PipelineStageInfo] = Field(default_factory=list)
-
+    query_result: list[dict] | None = None  # ← tambah ini
 
 class ChatErrorResponse(BaseModel):
     error: str
