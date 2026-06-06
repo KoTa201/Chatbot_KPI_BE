@@ -244,7 +244,7 @@ async def test_process_query_returns_out_of_scope_message_without_nl_to_sql(monk
 
     stream = service.process_query_stream(
         user_message="Tampilkan KPI finance",
-        user_id=UUID("00000000-0000-0000-0000-000000000001"),
+        user_id=SESSION_BLOCKED,
         user_role="Owner",
         session_id=SESSION_BLOCKED,
     )
