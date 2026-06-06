@@ -57,6 +57,7 @@ jobs:
           echo "LLM_MODEL_ANALYSIS=openai/gpt-4o" >> .env
           echo "LLM_MODEL_DISAMBIGUATION=openai/gpt-4o-mini" >> .env
           echo "LLM_MODEL_GRAPHIC_CLASSIFIER=openai/gpt-4o-mini" >> .env
+          echo "LLM_MODEL_OUT_SCOPE_CLASSIFIER=openai/gpt-4o-mini" >> .env
           echo "RATE_LIMIT_PER_MINUTE=30" >> .env
           echo "SQL_MAX_LIMIT=5000" >> .env
           echo "SQL_MAX_SUBQUERY_DEPTH=3" >> .env
