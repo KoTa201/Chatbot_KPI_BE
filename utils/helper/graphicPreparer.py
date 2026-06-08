@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import cast
 import pandas as pd
 
-from service.graphicParser import (
+from utils.helper.parser.graphicParser import (
     ParsedValue,
     KpiValueParser,
     is_trl_column,

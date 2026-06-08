@@ -10,7 +10,7 @@ konteks dan edge cases yang kompleks. LLM lebih akurat dan konsisten.
 import logging
 
 from schema.clarificationSchema import AmbiguityAssessmentResult
-from utils.parser.ambiguityParsing import (
+from utils.helper.parser.ambiguityParsing import (
     build_non_ambiguous_result,
     extract_description_options,
     is_llm_sourced_level_1,

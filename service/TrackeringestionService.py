@@ -22,7 +22,7 @@ from repository.kpiMasterRepository import KPIMasterRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import TrackerSourceItem   # input schema — boleh tetap
 from service.googleSheetService import GoogleSheetService
-from utils.parser.parser import parse_dataframe
+from utils.helper.parser.parser import parse_dataframe
 from utils.userLookUp import UserLookupUtil
 
 

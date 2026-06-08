@@ -17,7 +17,7 @@ from schema.chatSchema import ChatRequest, ChatResponse
 from service.authService import get_current_user
 from service.chatService import ChatService
 from service.clarificationService import ClarificationService
-from utils.responses.sseHelpers import message_chunks, format_sse_metadata, format_sse_chunk, format_sse_done
+from utils.helper.sseHelpers import message_chunks, format_sse_metadata, format_sse_chunk, format_sse_done
 
 
 class ChatController:

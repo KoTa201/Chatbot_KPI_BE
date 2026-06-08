@@ -4,7 +4,8 @@ from utils.constants.graphicConstants import MONTH_LABELS, SUPPORTED_CHART_TYPES
 from service.graphicService import GraphicService
 
 
-def test_generate_graphic_saves_png_in_session_folder(tmp_path):
+def test_generate_graphic_saves_png_in_session_folder(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHART_STORAGE_BACKEND", "local")
     service = GraphicService(public_dir=tmp_path)
     session_id = UUID("00000000-0000-0000-0000-000000000101")
 
@@ -62,3 +63,22 @@ def test_graphic_service_uses_exported_constants():
     assert service.SUPPORTED_CHART_TYPES == SUPPORTED_CHART_TYPES
     assert service.value_column_hints == VALUE_COLUMN_HINTS
     assert service.month_labels == MONTH_LABELS
+
+
+def test_graphic_service_uses_storage_factory_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("CHART_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("CHART_LOCAL_PUBLIC_DIR", str(tmp_path))
+    service = GraphicService(public_dir="ignored-public-dir")
+    session_id = UUID("00000000-0000-0000-0000-000000000303")
+
+    result = service.generateGraphic(
+        query_result=[
+            {"bulan": 1, "total_realisasi": 120},
+            {"bulan": 2, "total_realisasi": 90},
+        ],
+        chart_type="batang",
+        session_id=session_id,
+    )
+
+    saved_file = tmp_path / result.image_url.removeprefix("/public/")
+    assert saved_file.exists()

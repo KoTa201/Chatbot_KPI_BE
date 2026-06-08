@@ -15,13 +15,13 @@ from utils.constants.graphicConstants import (
     MONTH_LABELS,
     SUPPORTED_CHART_TYPES,
 )
-from service.graphicParser import (
+from utils.helper.parser.graphicParser import (
     ParsedValue,
     _KPI_PARSER,
 )
-from service.graphicPreparer import GraphicDataPreparer
-from service.graphicRenderer import GraphicRenderer
-from service.graphicStorage import GraphicStorage
+from utils.helper.graphicPreparer import GraphicDataPreparer
+from utils.helper.graphicRenderer import GraphicRenderer
+from utils.helper.graphicStorage import create_graphic_storage
 
 
 class GraphicResult:
@@ -40,7 +40,7 @@ class GraphicService:
         self.parser = _KPI_PARSER
         self.preparer = GraphicDataPreparer(parser=self.parser, month_labels=MONTH_LABELS)
         self.renderer = GraphicRenderer(parser=self.parser)
-        self.storage = GraphicStorage(public_dir=public_dir)
+        self.storage = create_graphic_storage(public_dir=public_dir)
 
         # Re-export variables for compatibility with external references / tests
         self.value_column_hints = self.preparer.value_column_hints
