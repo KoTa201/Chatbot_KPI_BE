@@ -40,8 +40,6 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-OUT_OF_SCOPE_MESSAGE = "Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan"
-
 
 class ClarificationService:
     """Orchestrator untuk clarification mechanism."""
@@ -297,7 +295,7 @@ class ClarificationService:
             return ClarificationMessageResponse(
                 session_id=session_id,
                 message_type="out_of_scope",
-                message=OUT_OF_SCOPE_MESSAGE,
+                message="Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan",
                 is_out_of_scope=True,
             )
 

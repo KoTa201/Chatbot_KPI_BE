@@ -5,6 +5,7 @@ Berdasarkan skenario di PRD Section 8.
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 from utils.sessionContextManager import SessionContextManager
 from template.promptTemplate import (
     build_ambiguity_assessment_prompt,
@@ -1468,10 +1469,15 @@ async def test_chat_message_repository_get_recent_by_session_id_returns_chronolo
         async with session_factory() as db:
             await _create_user_and_session(db, session_id)
             repo = ChatMessageRepository(db)
-            await repo.create(session_id=session_id, message="Pesan 1", is_sender_chatbot=False)
-            await repo.create(session_id=session_id, message="Pesan 2", is_sender_chatbot=True)
-            await repo.create(session_id=session_id, message="Pesan 3", is_sender_chatbot=False)
-            await repo.create(session_id=session_id, message="Pesan 4", is_sender_chatbot=True)
+            base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+            message_1 = await repo.create(session_id=session_id, message="Pesan 1", is_sender_chatbot=False)
+            message_2 = await repo.create(session_id=session_id, message="Pesan 2", is_sender_chatbot=True)
+            message_3 = await repo.create(session_id=session_id, message="Pesan 3", is_sender_chatbot=False)
+            message_4 = await repo.create(session_id=session_id, message="Pesan 4", is_sender_chatbot=True)
+            message_1.send_at = base_time
+            message_2.send_at = base_time + timedelta(minutes=1)
+            message_3.send_at = base_time + timedelta(minutes=2)
+            message_4.send_at = base_time + timedelta(minutes=3)
             await db.commit()
 
             messages = await repo.get_recent_by_session_id(session_id=session_id, limit=3)

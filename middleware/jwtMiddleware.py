@@ -47,6 +47,7 @@ PUBLIC_ROUTES: list[tuple[Optional[str], str]] = [
     (None,      r"^/redoc$"),
     (None,      r"^/openapi\.json$"),
     (None,      r"^/health$"),
+    (None,      r"^/$"),
 ]
 
 

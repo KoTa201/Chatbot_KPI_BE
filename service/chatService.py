@@ -29,7 +29,7 @@ from utils.responses.chatResponseBuilder import (
     build_graphics_payload,
     build_security_blocked_response,
 )
-from utils.responses.sseHelpers import emit_sse_response, format_sse_metadata, format_sse_chunk, format_sse_done
+from utils.helper.sseHelpers import emit_sse_response, format_sse_metadata, format_sse_chunk, format_sse_done
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -54,20 +54,7 @@ class ChatService:
 
     # ------------------------------------------------------------------
     # Main entry point
-    # ------------------------------------------------------------------
-
-    async def verify_session(self, session_id: UUID, user_id: UUID) -> None:
-        existing_session = await self.session_service.session_repo.get_by_id(session_id)
-        if existing_session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna.",
-            )
-        if str(existing_session.user_id) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke sesi ini.",
-            )
+    # -----------------------------------------------------------------
 
     async def process_query_stream(
         self,
@@ -555,5 +542,19 @@ class ChatService:
         except ValueError as error:
             self._complete_stage(stage, "degraded", str(error))
             return []
+
+
+    async def verify_session(self, session_id: UUID, user_id: UUID) -> None:
+        existing_session = await self.session_service.session_repo.get_by_id(session_id)
+        if existing_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna.",
+            )
+        if str(existing_session.user_id) != str(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anda tidak memiliki akses ke sesi ini.",
+            )
 
 

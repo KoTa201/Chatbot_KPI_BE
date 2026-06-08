@@ -4,7 +4,7 @@ import io
 import pandas as pd
 from fastapi import HTTPException, status
 
-from service.graphicParser import ParsedValue, KpiValueParser
+from utils.helper.parser.graphicParser import ParsedValue, KpiValueParser
 from utils.constants.graphicConstants import TARGET_COLUMN_HINTS
 
 
