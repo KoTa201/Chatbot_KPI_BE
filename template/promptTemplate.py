@@ -7,6 +7,8 @@ import json
 from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
+import logging
+logger = logging.getLogger(__name__)
 
 
 def _json_default_serializer(value):
@@ -259,7 +261,7 @@ def build_analysis_prompt(
       Selalu tampilkan angka persentase eksplisit, diikuti status "(tercapai)" 
       atau "(belum tercapai)".
       Jangan skip perhitungan untuk KPI apapun selama angka bisa diekstrak.
-      dan tambahkan keterangan status "(tercapai)" atau "(belum tercapai)".
+      dan tambahkan keterangan status "(tercapai)" atau "(belum tercapai)" serta tampilkan juga cara perhitungannya.
     - Tampilkan hasil persentase akhir saja (misal: 100%), 
       jangan sertakan formula kalkulasi seperti "(3/3) × 100%".
     - Jangan menghitung persentase jika target atau realisasi tidak ada di data.
@@ -345,7 +347,10 @@ def build_scope_policy_assessment_prompt(
       1. The question is plausibly about the KPI database domain or is a follow-up that session context resolves to the KPI domain.
       2. The question does not explicitly and directly violate active addon constraints.
       3. Any unknown names, dates, KPI terms, or metric choices are only unclear values/ambiguities, not scope failures.
-      4. The question only asks about the logged-in user's own KPI, progress, realization, target, achievement, or status.
+      4. Querying KPI data by a specific employee name is always a valid KPI domain 
+         question regardless of the requester's role. If the named employee differs 
+         from the logged-in user, that is an authorization concern handled downstream — 
+         it is NEVER a reason to return is_out_of_scope=true.
 
     Addon-policy precision rules:
       - Only mark addon_policy_violation when the current question directly asks for the forbidden action.
