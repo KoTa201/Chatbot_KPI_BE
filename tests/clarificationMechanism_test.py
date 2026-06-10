@@ -368,8 +368,7 @@ class TestClarificationService:
                 service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
                     return_value=SimpleNamespace(id=uuid4(), addon_prompt=None)
                 )
-                # Mock session_service methods
-                service.session_service.create_chatbot_message = AsyncMock()
+                service.create_chatbot_message = AsyncMock()
                 with patch.object(ClarificationService, "process_user_query", new_callable=AsyncMock) as mock_process:
                     mock_process.return_value = SimpleNamespace(
                         clarifying_question="Metrik mana?",
@@ -421,18 +420,18 @@ class TestClarificationService:
                     return_value=SimpleNamespace(id=uuid4(), addon_prompt=None)
                 )
                 service.session_service.create_session_if_missing = AsyncMock()
-                service.session_service.create_user_message = AsyncMock(
+                service.create_user_message = AsyncMock(
                     return_value=SimpleNamespace(message_id=uuid4())
                 )
-                service.session_service.create_chatbot_message = AsyncMock()
+                service.create_chatbot_message = AsyncMock()
 
-                from schema.wireguardSchema import ValidationResult
+                from schema.guardrailsSchema import ValidationResult
 
                 service.llm_service.generate_sql = AsyncMock(return_value="SELECT 1")
                 service.llm_service.decide_visualization_request = AsyncMock(
                     return_value=SimpleNamespace(is_visualize=False, chart_type=None)
                 )
-                service.wireguard_service.validate = Mock(
+                service.guardrails_service.validate = Mock(
                     return_value=ValidationResult(
                         is_valid=True, reason=None, sanitized_sql="SELECT 1",
                     )

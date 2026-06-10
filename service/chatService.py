@@ -12,7 +12,7 @@ from repository.chatMessageRepository import ChatMessageRepository
 from service.chatbotService import ChatbotService
 from service.llmService import LLMService
 from service.graphicService import GraphicService, GraphicResult
-from service.sqlGuardRailsService import SQLWireguardService
+from service.sqlGuardRailsService import SQLGuardrailsService
 from service.chatSessionService import ChatSessionService
 from service.columnStatisticsService import ColumnStatisticsService
 from template.promptTemplate import (
@@ -49,8 +49,33 @@ class ChatService:
         self.clarification_service = ClarificationService(db)
         self.column_statistics_service = ColumnStatisticsService(db)
         self.llm_service = LLMService()
-        self.wireguard_service = SQLWireguardService()
+        self.guardrails_service = SQLGuardrailsService()
         self.graphic_service = GraphicService()
+
+    async def create_user_message(self, session_id: UUID, message: str):
+        return await self.message_repo.create(
+            session_id=session_id,
+            message=message,
+            is_sender_chatbot=False,
+        )
+
+    async def create_chatbot_message(
+        self,
+        session_id: UUID,
+        message: str,
+        graphics: list[dict] | None = None,
+    ):
+        chat_message = await self.message_repo.create(
+            session_id=session_id,
+            message=message,
+            is_sender_chatbot=True,
+        )
+        if graphics:
+            await self.message_repo.create_graphics(
+                message_id=chat_message.message_id,
+                graphics=graphics,
+            )
+        return chat_message
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -82,7 +107,7 @@ class ChatService:
 
         user_chat_message = None
         if context_from_clarification is None:
-            user_chat_message = await self.session_service.create_user_message(
+            user_chat_message = await self.create_user_message(
                 session_id=session_id,
                 message=user_message,
             )
@@ -209,7 +234,7 @@ class ChatService:
         if clarification_response.is_out_of_scope:
             self._complete_stage(stage, "completed", "Query blocked by scope or policy")
             query_message = clarification_response.message or "Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan"
-            await self.session_service.create_chatbot_message(
+            await self.create_chatbot_message(
                 session_id=session_id,
                 message=query_message,
             )
@@ -226,7 +251,7 @@ class ChatService:
                 user_message=user_message,
                 questions=[q.question for q in (clarification_response.questions or [])],
             )
-            await self.session_service.create_chatbot_message(
+            await self.create_chatbot_message(
                 session_id=session_id,
                 message=query_message,
             )
@@ -300,7 +325,7 @@ class ChatService:
             self._complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
             yield format_sse_chunk(fallback)
             yield format_sse_done()
-            await self.session_service.create_chatbot_message(
+            await self.create_chatbot_message(
                 session_id=session_id,
                 message=fallback,
                 graphics=graphics_payload,
@@ -328,7 +353,7 @@ class ChatService:
 
         yield format_sse_done()
 
-        await self.session_service.create_chatbot_message(
+        await self.create_chatbot_message(
             session_id=session_id,
             message=full_narrative,
             graphics=graphics_payload,
@@ -465,7 +490,7 @@ class ChatService:
         pipeline: ChatPipelineContext,
     ):
         stage = self._start_stage(stages, "sql_validation")
-        validation = self.wireguard_service.validate(
+        validation = self.guardrails_service.validate(
             sql=generated_sql,
             user_id=user_id,
             user_role=user_role,

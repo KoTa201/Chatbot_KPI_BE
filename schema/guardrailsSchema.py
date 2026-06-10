@@ -1,5 +1,5 @@
 """
-schema/wireguardSchema.py
+schema/guardrailsSchema.py
 Schemas untuk SQL Wireguard Service validation results.
 """
 

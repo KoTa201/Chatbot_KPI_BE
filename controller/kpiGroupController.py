@@ -25,7 +25,6 @@ from utils.pagination import calculate_total_pages, validate_limit, validate_pag
 class KPIGroupController:
 
     def __init__(self, db: AsyncSession):
-        self.db: AsyncSession = db
         self.service: KPIGroupService = KPIGroupService(db)
 
     # ─── List ─────────────────────────────────────────────────────────────────

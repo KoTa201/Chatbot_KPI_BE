@@ -1,5 +1,5 @@
 """
-SQLWireguard Service - layer keamanan stateless & deterministic.
+SQLGuardrails Service - layer keamanan stateless & deterministic.
 Memvalidasi setiap SQL yang digenerate LLM sebelum dieksekusi ke database.
 Mengimplementasikan Rules W-01 s/d W-08 dari PRD Section 8.2.
 """
@@ -8,12 +8,12 @@ import re
 from uuid import UUID
 
 from configCredidential import get_settings
-from schema.wireguardSchema import ValidationResult
+from schema.guardrailsSchema import ValidationResult
 
 settings = get_settings()
 
 
-class SQLWireguardService:
+class SQLGuardrailsService:
     """
     Memvalidasi dan meng-sanitize SQL yang digenerate oleh LLM.
     Stateless - tidak bergantung pada LLM, tidak bisa di-bypass via prompt injection.
