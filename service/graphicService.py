@@ -15,13 +15,13 @@ from utils.constants.graphicConstants import (
     MONTH_LABELS,
     SUPPORTED_CHART_TYPES,
 )
-from service.graphicParser import (
+from utils.helper.parser.graphicParser import (
     ParsedValue,
     _KPI_PARSER,
 )
-from service.graphicPreparer import GraphicDataPreparer
-from service.graphicRenderer import GraphicRenderer
-from service.graphicStorage import GraphicStorage
+from utils.helper.graphicPreparer import GraphicDataPreparer
+from utils.helper.graphicRenderer import GraphicRenderer
+from utils.helper.graphicStorage import create_graphic_storage
 
 
 class GraphicResult:
@@ -40,7 +40,7 @@ class GraphicService:
         self.parser = _KPI_PARSER
         self.preparer = GraphicDataPreparer(parser=self.parser, month_labels=MONTH_LABELS)
         self.renderer = GraphicRenderer(parser=self.parser)
-        self.storage = GraphicStorage(public_dir=public_dir)
+        self.storage = create_graphic_storage(public_dir=public_dir)
 
         # Re-export variables for compatibility with external references / tests
         self.value_column_hints = self.preparer.value_column_hints
@@ -54,8 +54,8 @@ class GraphicService:
             "batang": "batang",
             "donut": "donat",
             "donat": "donat",
-            "pie": "lingkaran",
-            "lingkaran": "lingkaran",
+            "line": "garis",
+            "garis": "garis",
         }
 
     def _normalize_chart_type(
@@ -76,12 +76,15 @@ class GraphicService:
         kpi_meta: dict[str, list[ParsedValue]] | None = None,
     ) -> str:
         try:
+            category_col = self.preparer._pick_category_column(df, "", {})
+            if category_col and self.preparer._is_month_like_column(category_col):
+                return "garis"
+
             numeric_valid_counts = {}
             for col in df.columns:
                 n = int(pd.to_numeric(df[col], errors="coerce").notna().sum())
                 if n > 0:
                     numeric_valid_counts[col] = n
-
             value_col = self.preparer._pick_value_column(numeric_valid_counts)
             if value_col:
                 category_col = self.preparer._pick_category_column(

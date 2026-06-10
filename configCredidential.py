@@ -17,6 +17,10 @@ def get_required_int_env(key: str) -> int:
     return int(get_required_env(key))
 
 
+def get_optional_env(key: str, default: str = "") -> str:
+    return os.getenv(key, default)
+
+
 class Settings:
     DATABASE_URL: str = get_required_env("DATABASE_URL")
     GOOGLE_CREDENTIALS_PATH: str = get_required_env("GOOGLE_CREDENTIALS_PATH")
@@ -50,12 +54,19 @@ class Settings:
         "LLM_MODEL_GRAPHIC_CLASSIFIER")
     LLM_MODEL_DISAMBIGUATION: str = get_required_env(
         "LLM_MODEL_DISAMBIGUATION")
+    LLM_MODEL_OUT_SCOPE_CLASSIFIER: str = get_required_env(
+        "LLM_MODEL_OUT_SCOPE_CLASSIFIER")
     RATE_LIMIT_PER_MINUTE: int = get_required_int_env("RATE_LIMIT_PER_MINUTE")
     SQL_MAX_LIMIT: int = get_required_int_env("SQL_MAX_LIMIT")
     SQL_MAX_SUBQUERY_DEPTH: int = get_required_int_env("SQL_MAX_SUBQUERY_DEPTH")
     SQL_EXECUTION_TIMEOUT: int = get_required_int_env("SQL_EXECUTION_TIMEOUT")
     CORS_ORIGINS: str = get_required_env("CORS_ORIGINS")
     CORS_ORIGIN_REGEX: str = get_required_env("CORS_ORIGIN_REGEX")
+    CHART_STORAGE_BACKEND: str = get_optional_env("CHART_STORAGE_BACKEND", "local")
+    CHART_LOCAL_PUBLIC_DIR: str = get_optional_env("CHART_LOCAL_PUBLIC_DIR", "public")
+    S3_CHART_BUCKET: str = get_optional_env("S3_CHART_BUCKET", "")
+    S3_CHART_PREFIX: str = get_optional_env("S3_CHART_PREFIX", "charts")
+    S3_CHART_PUBLIC_BASE_URL: str = get_optional_env("S3_CHART_PUBLIC_BASE_URL", "")
 
 
 settings = Settings()

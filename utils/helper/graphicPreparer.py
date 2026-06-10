@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import cast
 import pandas as pd
 
-from service.graphicParser import (
+from utils.helper.parser.graphicParser import (
     ParsedValue,
     KpiValueParser,
     is_trl_column,
@@ -98,6 +98,31 @@ class GraphicDataPreparer:
             data[category_col] = [f"Baris {i + 1}" for i in range(len(data))]
 
         chart_df = data[[category_col, best_numeric]].copy()
+        chart_df[category_col] = chart_df[category_col].astype(str)
+
+        # Check if it is a KPI status/achievement category column
+        cat_lower = chart_df[category_col].str.lower().str.strip().tolist()
+        status_keywords = {"achieve", "achieved", "partial", "fail", "failed", "gagal", "tercapai", "belum tercapai"}
+        if any(any(kw in val for kw in status_keywords) for val in cat_lower):
+            expected_statuses = ["Achieve", "Partial", "Fail"]
+            existing_mapped = []
+            for val in chart_df[category_col]:
+                val_clean = val.strip().lower()
+                if "achieve" in val_clean:
+                    existing_mapped.append("Achieve")
+                elif "partial" in val_clean:
+                    existing_mapped.append("Partial")
+                elif "fail" in val_clean or "gagal" in val_clean or "belum" in val_clean:
+                    existing_mapped.append("Fail")
+                else:
+                    existing_mapped.append(val)
+            chart_df[category_col] = existing_mapped
+
+            # Add missing statuses with 0.0 value
+            for estatus in expected_statuses:
+                if estatus not in chart_df[category_col].values:
+                    new_row = pd.DataFrame([{category_col: estatus, best_numeric: 0.0}])
+                    chart_df = pd.concat([chart_df, new_row], ignore_index=True)
 
         if self._is_month_like_column(category_col):
             mn = cast(pd.Series, pd.to_numeric(chart_df[category_col], errors="coerce"))
@@ -110,10 +135,7 @@ class GraphicDataPreparer:
                     .fillna(chart_df[category_col])
                     .astype(str)
                 )
-            else:
-                chart_df[category_col] = chart_df[category_col].astype(str)
         else:
-            chart_df[category_col] = chart_df[category_col].astype(str)
             if chart_type in {"lingkaran", "donat"}:
                 chart_df = chart_df.sort_values(by=best_numeric, ascending=False)
 

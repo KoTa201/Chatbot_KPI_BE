@@ -6,6 +6,7 @@ from .Chatbot import Chatbot
 from .KPIMaster import KPIMaster
 from .ChatSession import ChatSession
 from .ChatMessage import ChatMessage
+from .ChatMessageGraphic import ChatMessageGraphic
 from .ClarificationQuestion import ClarificationQuestion
 from .ClarificationAnswerOption import ClarificationAnswerOption
 from .PasswordReset import PasswordReset

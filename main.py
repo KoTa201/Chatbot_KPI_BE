@@ -6,10 +6,12 @@ FastAPI - Structured RAG Ingestion KPI Tracker
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import logging
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 import model
-from databaseConfig import create_tables
+from databaseConfig import create_tables, engine
 from configCredidential import settings
 from router import (
     kpiTrackerRouter as ingestion,
@@ -26,8 +28,20 @@ from service.schedulerJobService import scheduler_job_service
 from repository.schedulerRepository import SchedulerRepository
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    try:
+        logger.info("Testing database connection...")
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.error("Database connection test succeeded.")
+    except Exception:
+        logger.error("Database connection test failed.")
+        raise
+
     scheduler_job_service.start()
     repo = SchedulerRepository()
     config = await repo.get_config()
@@ -52,6 +66,7 @@ PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/public", StaticFiles(directory=PUBLIC_DIR), name="public")
 
 app.add_middleware(JWTMiddleware)
+
 
 cors_origins = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
 

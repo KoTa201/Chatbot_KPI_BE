@@ -295,6 +295,7 @@ class ClarificationService:
             return ClarificationMessageResponse(
                 session_id=session_id,
                 message_type="out_of_scope",
+                message="Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan",
                 is_out_of_scope=True,
             )
 
