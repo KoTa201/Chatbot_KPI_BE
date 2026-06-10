@@ -35,6 +35,31 @@ class ChatSessionService:
                 chatbot_id=chatbot_id,
             )
 
+    async def create_user_message(self, session_id: UUID, message: str):
+        return await self.message_repo.create(
+            session_id=session_id,
+            message=message,
+            is_sender_chatbot=False,
+        )
+
+    async def create_chatbot_message(
+        self,
+        session_id: UUID,
+        message: str,
+        graphics: list[dict] | None = None,
+    ):
+        chat_message = await self.message_repo.create(
+            session_id=session_id,
+            message=message,
+            is_sender_chatbot=True,
+        )
+        if graphics:
+            await self.message_repo.create_graphics(
+                message_id=chat_message.message_id,
+                graphics=graphics,
+            )
+        return chat_message
+
     async def get_sessions(self, user_id: UUID) -> list:
         return await self.session_repo.get_by_user(user_id=user_id)
 
