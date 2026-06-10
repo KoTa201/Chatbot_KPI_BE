@@ -74,10 +74,18 @@ class ChatbotRouter:
     async def list_chatbots(
         self,
         page: int = Query(default=1, ge=1, description="Nomor halaman"),
-        limit: int = Query(default=10, ge=1, le=100,
-                           description="Jumlah item per halaman"),
+        limit: int = Query(
+            default=10,
+            ge=1,
+            le=100,
+            description="Jumlah item per halaman",
+            alias="page_size",
+        ),
         authority: Optional[AuthorityEnum] = Query(
-            default=None, description="Filter by authority"),
+            default=None,
+            description="Filter by authority",
+            alias="otoritas",
+        ),
         search: Optional[str] = Query(
             default=None, description="Cari nama atau addon_prompt"),
         db: AsyncSession = Depends(get_db),

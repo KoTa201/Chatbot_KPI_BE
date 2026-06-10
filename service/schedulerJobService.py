@@ -34,7 +34,7 @@ class SchedulerJobService:
         """
         import asyncio
         from databaseConfig import AsyncSessionLocal
-        from repository.KpiGroupRepository import KPIGroupRepository
+        from repository.kpiGroupRepository import KPIGroupRepository
         from service.TrackeringestionService import TrackerIngestionService
 
         async with AsyncSessionLocal() as db:
