@@ -78,8 +78,9 @@ class ChatMessageRepository:
 
         questions_result = await self.db.execute(
             select(ClarificationQuestion)
+            .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
             .options(selectinload(ClarificationQuestion.answer_options))
-            .where(ClarificationQuestion.session_id == session_id)
+            .where(ChatMessage.session_id == session_id)
             .where(ClarificationQuestion.message_id.is_not(None))
             .order_by(ClarificationQuestion.created_at.asc())
         )

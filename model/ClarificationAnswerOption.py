@@ -2,6 +2,7 @@ import uuid
 from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import UUID as SAUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from model.Base import Base
@@ -13,8 +14,8 @@ if TYPE_CHECKING:
 class ClarificationAnswerOption(Base):
     __tablename__ = "clarification_question_answer_options"
 
-    id: Mapped[str] = mapped_column(
-        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[uuid.UUID] = mapped_column(
+        SAUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     clarification_question_id: Mapped[str] = mapped_column(
         String(255),

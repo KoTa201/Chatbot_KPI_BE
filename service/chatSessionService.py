@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 
 from model import ChatSession
 from repository.chatSessionRepository import ChatSessionRepository
-from repository.chatMessageRepository import ChatSessionDetailRecord
+from repository.chatMessageRepository import ChatSessionDetailRecord, ChatMessageRepository
 from schema.sessionSchema import (
     SessionClarificationQuestionResponse,
     SessionGraphicItem,
@@ -17,6 +17,7 @@ class ChatSessionService:
     def __init__(self, db: AsyncSession):
         self.db: AsyncSession = db
         self.session_repo: ChatSessionRepository = ChatSessionRepository(db)
+        self.message_repo: ChatMessageRepository = ChatMessageRepository(db)
 
     async def create_session_if_missing(
         self,

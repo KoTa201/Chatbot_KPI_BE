@@ -36,13 +36,6 @@ class ClarificationQuestion(Base):
         nullable=True,
         index=True,
     )
-    session_id: Mapped[uuid.UUID | None] = mapped_column(
-        SAUUID(as_uuid=True),
-        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
     message_ref: Mapped["ChatMessage"] = relationship(
         "ChatMessage", back_populates="clarification_questions", lazy="noload"
     )

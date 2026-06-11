@@ -4,6 +4,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from model.ChatMessage import ChatMessage
 from model.ClarificationQuestion import ClarificationQuestion
 from model.ClarificationAnswerOption import ClarificationAnswerOption
 
@@ -28,7 +29,6 @@ class ClarificationRepository:
             clarification_question=clarifying_question,
             selected_answer=self._serialize_answer(clarification_answer),
             message_id=message_id,
-            session_id=session_id,
         )
         self.db.add(question)
         await self.db.flush()
@@ -75,8 +75,9 @@ class ClarificationRepository:
     async def get_by_session(self, session_id: UUID) -> list[ClarificationQuestion]:
         stmt = (
             select(ClarificationQuestion)
+            .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
             .options(selectinload(ClarificationQuestion.answer_options))
-            .where(ClarificationQuestion.session_id == session_id)
+            .where(ChatMessage.session_id == session_id)
             .order_by(desc(ClarificationQuestion.created_at))
         )
         result = await self.db.execute(stmt)
@@ -85,8 +86,9 @@ class ClarificationRepository:
     async def get_last_clarification(self, session_id: UUID) -> ClarificationQuestion | None:
         stmt = (
             select(ClarificationQuestion)
+            .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
             .options(selectinload(ClarificationQuestion.answer_options))
-            .where(ClarificationQuestion.session_id == session_id)
+            .where(ChatMessage.session_id == session_id)
             .order_by(desc(ClarificationQuestion.created_at))
             .limit(1)
         )

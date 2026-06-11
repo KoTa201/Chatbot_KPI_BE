@@ -26,6 +26,8 @@ from uuid import UUID, uuid4
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
+from sqlalchemy import String
+from sqlalchemy import UUID as SAUUID
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.future import select
 from sqlalchemy.pool import StaticPool
@@ -114,6 +116,13 @@ def test_clarification_question_has_no_answer_options_column():
     assert ClarificationQuestion.__table__.columns.get("answer_options") is None
 
 
+def test_clarification_question_has_no_session_id_column():
+    """ClarificationQuestion no longer stores session_id directly."""
+    from model.ClarificationQuestion import ClarificationQuestion
+
+    assert ClarificationQuestion.__table__.columns.get("session_id") is None
+
+
 def test_clarification_answer_option_table_shape():
     """Clarification answer options are stored as ordered child rows."""
     from model.ClarificationAnswerOption import ClarificationAnswerOption
@@ -127,6 +136,8 @@ def test_clarification_answer_option_table_shape():
     assert columns["clarification_question_id"].nullable is False
     assert columns["option_text"].nullable is False
     assert columns["option_order"].nullable is False
+    assert isinstance(columns["id"].type, SAUUID)
+    assert not isinstance(columns["id"].type, String)
 
 
 def test_clarification_question_response_excludes_ambiguous_phrase():
@@ -342,16 +353,27 @@ class TestClarificationService:
                     ],
                 ))
 
+                message = ChatMessage(
+                    message="Tampilkan KPI terbaik",
+                    is_sender_chatbot=False,
+                    session_id=session_id,
+                )
+                db.add(message)
+                await db.flush()
+
                 result = await service.process_user_query(
                     user_query="Tampilkan KPI terbaik",
                     user_role="karyawan",
                     session_id=session_id,
+                    message_id=message.message_id,
                 )
 
                 assert result is not None
-                stored = (await db.execute(select(ClarificationQuestion).where(
-                    ClarificationQuestion.session_id == session_id
-                ))).scalars().all()
+                stored = (await db.execute(
+                    select(ClarificationQuestion)
+                    .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
+                    .where(ChatMessage.session_id == session_id)
+                )).scalars().all()
                 assert len(stored) == 1
                 assert stored[0].clarification_question == "Metrik mana?"
         finally:
@@ -1453,6 +1475,56 @@ async def test_clarification_repository_persists_answer_options_as_ordered_rows(
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_clarification_repository_get_by_session_uses_message_link():
+    engine, session_factory = await _make_sqlite_session()
+    try:
+        async with session_factory() as db:
+            await _create_user_and_session(db, SESSION_TEST_1)
+            other_session_id = uuid4()
+            await _create_user_and_session(db, other_session_id)
+
+            message = ChatMessage(
+                message="Butuh klarifikasi",
+                is_sender_chatbot=False,
+                session_id=SESSION_TEST_1,
+            )
+            other_message = ChatMessage(
+                message="Session lain",
+                is_sender_chatbot=False,
+                session_id=other_session_id,
+            )
+            db.add_all([message, other_message])
+            await db.flush()
+
+            repo = ClarificationRepository(db)
+            expected = await repo.create(
+                session_id=SESSION_TEST_1,
+                ambiguity_type="scope",
+                is_ambiguity_level1_type_llm=True,
+                clarifying_question="Data untuk session ini?",
+                answer_options=["Ya", "Tidak"],
+                message_id=message.message_id,
+            )
+            await repo.create(
+                session_id=other_session_id,
+                ambiguity_type="scope",
+                is_ambiguity_level1_type_llm=True,
+                clarifying_question="Data session lain?",
+                message_id=other_message.message_id,
+            )
+            await db.commit()
+
+            rows = await repo.get_by_session(SESSION_TEST_1)
+
+            assert [row.clarification_question_id for row in rows] == [
+                expected.clarification_question_id
+            ]
+            assert rows[0].answer_options[0].option_text == "Ya"
+    finally:
+        await engine.dispose()
+
+
 def test_clarification_repository_preserves_text_answer():
     repo = ClarificationRepository(db=None)
 
@@ -2197,6 +2269,19 @@ class TestPreferenceTreeService:
         try:
             async with session_factory() as db:
                 await _create_user_and_session(db, session_id)
+                previous_message = ChatMessage(
+                    message="Klarifikasi metrik",
+                    is_sender_chatbot=False,
+                    session_id=session_id,
+                )
+                current_message = ChatMessage(
+                    message="Klarifikasi periode",
+                    is_sender_chatbot=False,
+                    session_id=session_id,
+                )
+                db.add_all([previous_message, current_message])
+                await db.flush()
+
                 repo = ClarificationRepository(db)
                 previous = await repo.create(
                     session_id=session_id,
@@ -2204,6 +2289,7 @@ class TestPreferenceTreeService:
                     is_ambiguity_level1_type_llm=True,
                     clarifying_question="Metrik mana yang dimaksud?",
                     answer_options=["Achievement %", "Total realisasi"],
+                    message_id=previous_message.message_id,
                 )
                 await repo.update_with_answer(
                     log_id=previous.clarification_question_id,
@@ -2215,6 +2301,7 @@ class TestPreferenceTreeService:
                     is_ambiguity_level1_type_llm=True,
                     clarifying_question="Periode mana yang dimaksud?",
                     answer_options=["Q1 2025", "Q2 2025"],
+                    message_id=current_message.message_id,
                 )
                 await db.commit()
 
