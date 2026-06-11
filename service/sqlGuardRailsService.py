@@ -13,7 +13,7 @@ from schema.wireguardSchema import ValidationResult
 settings = get_settings()
 
 
-class SQLWireguardService:
+class SQLGuardrailsService:
     """
     Memvalidasi dan meng-sanitize SQL yang digenerate oleh LLM.
     Stateless - tidak bergantung pada LLM, tidak bisa di-bypass via prompt injection.
@@ -21,7 +21,7 @@ class SQLWireguardService:
 
     def __init__(self):
 
-        self.forbidden_keywords = frozenset(
+        self.forbidden_keywords: frozenset[str] = frozenset(
             {
                 "INSERT",
                 "UPDATE",
@@ -42,13 +42,13 @@ class SQLWireguardService:
                 "SAVEPOINT",
             }
         )
-        self.forbidden_keyword_phrases = (
+        self.forbidden_keyword_phrases: tuple[str, ...] = (
             r"INTO\s+OUTFILE",
             r"LOAD\s+DATA",
             r"COPY\s+TO",
             r"COPY\s+FROM",
         )
-        self.forbidden_columns = frozenset(
+        self.forbidden_columns: frozenset[str] = frozenset(
             {
                 "password",
                 "password_hash",
@@ -60,7 +60,7 @@ class SQLWireguardService:
                 "reset_token",
             }
         )
-        self.injection_patterns = (
+        self.injection_patterns: tuple[tuple[re.Pattern[str], str], ...] = (
             (re.compile(r"--"), "Comment injection (--)"),
             (re.compile(r"/\*"), "Block comment (/*)"),
             (re.compile(r";\s*\w"), "Stacked queries (;)"),
@@ -77,15 +77,15 @@ class SQLWireguardService:
         )
 
         # Compiled regex reused across methods
-        self.table_pattern = re.compile(
+        self.table_pattern: re.Pattern[str] = re.compile(
             r"(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)", re.IGNORECASE
         )
-        self.limit_pattern = re.compile(r"\bLIMIT\s+(\d+)\b", re.IGNORECASE)
-        self.where_pattern = re.compile(r"\bWHERE\b", re.IGNORECASE)
-        self.owner_filter_pattern = re.compile(
+        self.limit_pattern: re.Pattern[str] = re.compile(r"\bLIMIT\s+(\d+)\b", re.IGNORECASE)
+        self.where_pattern: re.Pattern[str] = re.compile(r"\bWHERE\b", re.IGNORECASE)
+        self.owner_filter_pattern: re.Pattern[str] = re.compile(
             r"karyawan_id\s*=\s*['\"]?[0-9a-f\-]+['\"]?", re.IGNORECASE
         )
-        self.insertion_pattern = re.compile(
+        self.insertion_pattern: re.Pattern[str] = re.compile(
             r"\b(GROUP\s+BY|ORDER\s+BY|LIMIT|;|$)", re.IGNORECASE
         )
 

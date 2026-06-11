@@ -24,8 +24,8 @@ class ChatController:
     """Validasi & orkestrasi request/response untuk endpoint chatbot."""
 
     def __init__(self, db: AsyncSession = Depends(get_db)):
-        self.service = ChatService(db)
-        self.clarification_service = ClarificationService(db)
+        self.service: ChatService = ChatService(db)
+        self.clarification_service: ClarificationService = ClarificationService(db)
 
     async def handle_chat(
         self,
@@ -71,12 +71,12 @@ class ChatController:
                         first_message=request.message,
                         chatbot_id=active_chatbot.id,
                     )
-                    await self.service.session_service.create_user_message(
+                    await self.service.create_user_message(
                         session_id=session_id,
                         message=request.message,
                     )
                     warn_msg = f"⚠️ **Maaf, tipe grafik '{visualization_decision.chart_type}' tidak didukung oleh sistem.** Sistem saat ini hanya mendukung grafik **Batang**, **Donat**, dan **Garis**."
-                    await self.service.session_service.create_chatbot_message(
+                    await self.service.create_chatbot_message(
                         session_id=session_id,
                         message=warn_msg,
                     )

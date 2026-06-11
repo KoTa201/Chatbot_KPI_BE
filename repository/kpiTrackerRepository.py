@@ -12,7 +12,7 @@ from model.KPITracker import KPITracker
 class KPITrackerRepository:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     # ================================================================ #
     #  CREATE                                                           #

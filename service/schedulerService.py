@@ -5,7 +5,7 @@ Business layer untuk scheduler config.
 Config selalu tersedia (default JSON), tidak ada proses create.
 """
 from repository.schedulerRepository import SchedulerRepository
-from service.schedulerJobService import scheduler_job_service
+from service.schedulerJobService import SchedulerJobService, scheduler_job_service
 
 
 class SchedulerService:
@@ -15,8 +15,8 @@ class SchedulerService:
     """
 
     def __init__(self):
-        self.repo = SchedulerRepository()
-        self.job_service = scheduler_job_service
+        self.repo: SchedulerRepository = SchedulerRepository()
+        self.job_service: SchedulerJobService = scheduler_job_service
 
     async def get_config(self):
         return await self.repo.get_config()

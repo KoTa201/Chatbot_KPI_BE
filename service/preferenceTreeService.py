@@ -47,8 +47,8 @@ class TreeNode:
 
 class PreferenceTree:
     def __init__(self):
-        self.llm = llmService.LLMService()
-        self.root = TreeNode(node_type="root")
+        self.llm: llmService.LLMService = llmService.LLMService()
+        self.root: TreeNode = TreeNode(node_type="root")
         self.leaf_map: dict[tuple[str, str], TreeNode] = {}
 
     async def update_tree(self, qa_set: list[QAPair]) -> None:

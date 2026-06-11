@@ -12,8 +12,8 @@ class GraphicRenderer:
     """Mengurus visualisasi data ke bentuk grafik menggunakan matplotlib."""
 
     def __init__(self, parser: KpiValueParser, target_column_hints=TARGET_COLUMN_HINTS):
-        self.parser = parser
-        self.target_column_hints = target_column_hints
+        self.parser: KpiValueParser = parser
+        self.target_column_hints: list[str] = target_column_hints
 
     def render_simple_chart(
         self,

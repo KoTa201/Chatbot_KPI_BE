@@ -31,12 +31,12 @@ class GraphicDataPreparer:
         month_column_hints=MONTH_COLUMN_HINTS,
         month_labels=None,
     ):
-        self.parser = parser
-        self.value_column_hints = value_column_hints
-        self.target_column_hints = target_column_hints
-        self.category_column_hints = category_column_hints
-        self.month_column_hints = month_column_hints
-        self.month_labels = month_labels
+        self.parser: KpiValueParser = parser
+        self.value_column_hints: list[str] = value_column_hints
+        self.target_column_hints: list[str] = target_column_hints
+        self.category_column_hints: list[str] = category_column_hints
+        self.month_column_hints: list[str] = month_column_hints
+        self.month_labels: list[str] | None = month_labels
 
     def drop_non_data_columns(self, df: pd.DataFrame) -> pd.DataFrame:
         drop_cols: list[str] = []

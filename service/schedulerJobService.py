@@ -16,7 +16,7 @@ class SchedulerJobService:
     RATE_LIMIT_DELAY_SECONDS: float = 60.0
 
     def __init__(self):
-        self.scheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
+        self.scheduler: AsyncIOScheduler = AsyncIOScheduler(timezone=self.TIMEZONE)
 
     def _build_trigger(self, interval_value: datetime) -> CronTrigger:
         return CronTrigger(

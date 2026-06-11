@@ -37,8 +37,8 @@ _UPSERT_COLS = [
 class KPIMasterRepository:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.kpi_masters:  list[dict] = []
+        self.db: AsyncSession = db
+        self.kpi_masters: list[dict] = []
         self.upsert_count: int = 0
 
     # ================================================================ #
@@ -59,8 +59,8 @@ class KPIMasterRepository:
             Jumlah records yang di-upsert.
         """
         if not records:
-            self.kpi_masters = []
-            self.upsert_count = 0
+            self.kpi_masters: list[dict] = []
+            self.upsert_count: int = 0
             return 0
 
         # ── Pisahkan user_ids dari payload DB ───────────────────────────
@@ -76,7 +76,7 @@ class KPIMasterRepository:
             user_ids_map[(str(r["group_id"]), r["kpi_name"])] = user_ids
             clean_records.append(r)
 
-        self.kpi_masters = clean_records
+        self.kpi_masters: list[dict] = clean_records
 
         try:
             # ── Upsert KPI Master rows ───────────────────────────────────
@@ -106,19 +106,19 @@ class KPIMasterRepository:
             await self._sync_pic_users(name_to_id, user_ids_map)
 
             await self.db.commit()
-            self.upsert_count = len(clean_records)
+            self.upsert_count: int = len(clean_records)
             return self.upsert_count
 
         except HTTPException:
             await self.db.rollback()
-            self.kpi_masters = []
-            self.upsert_count = 0
+            self.kpi_masters: list[dict] = []
+            self.upsert_count: int = 0
             raise
 
         except Exception as e:
             await self.db.rollback()
-            self.kpi_masters = []
-            self.upsert_count = 0
+            self.kpi_masters: list[dict] = []
+            self.upsert_count: int = 0
             raise HTTPException(
                 status_code=500,
                 detail=(

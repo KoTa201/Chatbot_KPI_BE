@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 class ChatQueryRepository:
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     async def execute_read_query(self, sql: str) -> tuple[list[dict], int]:
         result = await self.db.execute(text(sql))

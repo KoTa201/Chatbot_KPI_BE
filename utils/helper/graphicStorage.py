@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 import uuid as _uuid_module
 
@@ -10,7 +11,7 @@ class LocalGraphicStorage:
     """Mengurus penyimpanan file gambar grafik ke local storage."""
 
     def __init__(self, public_dir: str | Path = "public"):
-        self.public_dir = Path(public_dir)
+        self.public_dir: Path = Path(public_dir)
 
     def save_chart_image(self, image_bytes: bytes, session_id: UUID | None) -> str:
         folder = str(session_id) if session_id else "unsessioned"
@@ -32,10 +33,10 @@ class S3GraphicStorage:
     ):
         if not bucket:
             raise ValueError("S3_CHART_BUCKET is required when CHART_STORAGE_BACKEND=s3")
-        self.bucket = bucket
-        self.prefix = prefix.strip("/") or "charts"
-        self.public_base_url = public_base_url.rstrip("/")
-        self.s3_client = s3_client or self._create_s3_client()
+        self.bucket: str = bucket
+        self.prefix: str = prefix.strip("/") or "charts"
+        self.public_base_url: str = public_base_url.rstrip("/")
+        self.s3_client: Any = s3_client or self._create_s3_client()
 
     def save_chart_image(self, image_bytes: bytes, session_id: UUID | None) -> str:
         folder = str(session_id) if session_id else "unsessioned"

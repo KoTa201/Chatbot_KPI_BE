@@ -20,7 +20,7 @@ class ChatRouter:
     """Router untuk endpoints chatbot KPI."""
 
     def __init__(self):
-        self.router = APIRouter()
+        self.router: APIRouter = APIRouter()
         self.setup_routes()
 
     def _get_controller(self) -> ChatController:

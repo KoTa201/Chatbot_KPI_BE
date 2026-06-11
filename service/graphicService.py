@@ -16,19 +16,20 @@ from utils.constants.graphicConstants import (
     SUPPORTED_CHART_TYPES,
 )
 from utils.helper.parser.graphicParser import (
+    KpiValueParser,
     ParsedValue,
     _KPI_PARSER,
 )
 from utils.helper.graphicPreparer import GraphicDataPreparer
 from utils.helper.graphicRenderer import GraphicRenderer
-from utils.helper.graphicStorage import create_graphic_storage
+from utils.helper.graphicStorage import GraphicStorage, create_graphic_storage
 
 
 class GraphicResult:
     def __init__(self, chart_type: str, image_url: str, kpi_name: str = ""):
-        self.chart_type = chart_type
-        self.image_url = image_url
-        self.kpi_name = kpi_name
+        self.chart_type: str = chart_type
+        self.image_url: str = image_url
+        self.kpi_name: str = kpi_name
 
 
 class GraphicService:
@@ -37,19 +38,19 @@ class GraphicService:
     SUPPORTED_CHART_TYPES = SUPPORTED_CHART_TYPES
 
     def __init__(self, public_dir: str | Path = "public"):
-        self.parser = _KPI_PARSER
-        self.preparer = GraphicDataPreparer(parser=self.parser, month_labels=MONTH_LABELS)
-        self.renderer = GraphicRenderer(parser=self.parser)
-        self.storage = create_graphic_storage(public_dir=public_dir)
+        self.parser: KpiValueParser = _KPI_PARSER
+        self.preparer: GraphicDataPreparer = GraphicDataPreparer(parser=self.parser, month_labels=MONTH_LABELS)
+        self.renderer: GraphicRenderer = GraphicRenderer(parser=self.parser)
+        self.storage: GraphicStorage = create_graphic_storage(public_dir=public_dir)
 
         # Re-export variables for compatibility with external references / tests
-        self.value_column_hints = self.preparer.value_column_hints
-        self.target_column_hints = self.preparer.target_column_hints
-        self.category_column_hints = self.preparer.category_column_hints
-        self.month_column_hints = self.preparer.month_column_hints
-        self.month_labels = MONTH_LABELS
+        self.value_column_hints: list[str] = self.preparer.value_column_hints
+        self.target_column_hints: list[str] = self.preparer.target_column_hints
+        self.category_column_hints: list[str] = self.preparer.category_column_hints
+        self.month_column_hints: list[str] = self.preparer.month_column_hints
+        self.month_labels: list[str] = MONTH_LABELS
 
-        self.chart_type_map = {
+        self.chart_type_map: dict[str, str] = {
             "bar": "batang",
             "batang": "batang",
             "donut": "donat",

@@ -45,11 +45,11 @@ class ClarificationService:
     """Orchestrator untuk clarification mechanism."""
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.ambiguity_detector = AmbiguityDetectorService()
-        self.llm = LLMService()
-        self.repo = ClarificationRepository(db)
-        self.chat_message_repo = ChatMessageRepository(db)
+        self.db: AsyncSession = db
+        self.ambiguity_detector: AmbiguityDetectorService = AmbiguityDetectorService()
+        self.llm: LLMService = LLMService()
+        self.repo: ClarificationRepository = ClarificationRepository(db)
+        self.chat_message_repo: ChatMessageRepository = ChatMessageRepository(db)
 
     async def process_user_query(
         self,

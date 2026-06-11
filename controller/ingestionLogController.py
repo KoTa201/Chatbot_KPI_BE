@@ -34,8 +34,8 @@ class IngestionLogController:
     """Controller untuk ingestion log operations."""
 
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.service = IngestionLogService(db)
+        self.db: AsyncSession = db
+        self.service: IngestionLogService = IngestionLogService(db)
 
     # ─────────────────────────────────────────────────────────────────────────
     # PUBLIC: Get ingestion logs

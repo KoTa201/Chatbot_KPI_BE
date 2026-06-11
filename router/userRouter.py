@@ -27,7 +27,7 @@ class UserRouter:
     """Router untuk endpoints user management dan authentication."""
 
     def __init__(self):
-        self.router = APIRouter()
+        self.router: APIRouter = APIRouter()
         self.auth_controller: AuthController | None = None
         self.user_controller: UserController | None = None
         self.setup_routes()
@@ -67,7 +67,7 @@ class UserRouter:
     # ─── Auth endpoints ───────────────────────────────────────────────────────
 
     async def login(self, payload: LoginRequest, db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
+        self.auth_controller: AuthController = AuthController(db)
         return await self.auth_controller.login(payload)
 
     async def refresh(
@@ -75,23 +75,23 @@ class UserRouter:
         payload: RefreshRequest,
         db: AsyncSession = Depends(get_db),
     ):
-        self.auth_controller = AuthController(db)
+        self.auth_controller: AuthController = AuthController(db)
         return await self.auth_controller.refresh(payload)
 
     async def forgot_password(self, payload: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
+        self.auth_controller: AuthController = AuthController(db)
         return await self.auth_controller.forgot_password(payload)
 
     async def verify_reset_pin(self, payload: VerifyResetPinRequest, db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
+        self.auth_controller: AuthController = AuthController(db)
         return await self.auth_controller.verify_reset_pin(payload)
 
     async def reset_password(self, payload: ResetPasswordRequest, db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
+        self.auth_controller: AuthController = AuthController(db)
         return await self.auth_controller.reset_password(payload)
 
     async def logout(self, payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
-        self.auth_controller = AuthController(db)
+        self.auth_controller: AuthController = AuthController(db)
         return await self.auth_controller.logout(payload)
 
     # ─── Current user endpoint ─────────────────────────────────────────────────
@@ -99,14 +99,14 @@ class UserRouter:
     async def get_current_user(self, request: Request, db: AsyncSession = Depends(get_db)):
         user_id: UUID = request.state.user_id
         if not self.user_controller:
-            self.user_controller = UserController(db)
+            self.user_controller: UserController = UserController(db)
         return await self.user_controller.get_user_by_id(user_id)
 
     # ─── Admin user management endpoints ───────────────────────────────────────
 
     async def create_user(self, payload: UserCreateRequest, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
-            self.user_controller = UserController(db)
+            self.user_controller: UserController = UserController(db)
         return await self.user_controller.create_user(payload)
 
     async def get_all_users(
@@ -128,7 +128,7 @@ class UserRouter:
         db: AsyncSession = Depends(get_db),
     ):
         if not self.user_controller:
-            self.user_controller = UserController(db)
+            self.user_controller: UserController = UserController(db)
         return await self.user_controller.get_all_users(
             page=page,
             limit=limit,
@@ -139,17 +139,17 @@ class UserRouter:
 
     async def get_user_by_id(self, user_id: UUID, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
-            self.user_controller = UserController(db)
+            self.user_controller: UserController = UserController(db)
         return await self.user_controller.get_user_by_id(user_id)
 
     async def update_user(self, user_id: UUID, payload: UpdateUserRequest, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
-            self.user_controller = UserController(db)
+            self.user_controller: UserController = UserController(db)
         return await self.user_controller.update_user(user_id, payload)
 
     async def delete_user(self, user_id: UUID, db: AsyncSession = Depends(get_db)):
         if not self.user_controller:
-            self.user_controller = UserController(db)
+            self.user_controller: UserController = UserController(db)
         return await self.user_controller.delete_user(user_id)
 
 

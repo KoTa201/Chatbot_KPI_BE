@@ -26,14 +26,14 @@ class LLMService:
     """Wrapper LLM API dengan alur request yang eksplisit."""
 
     def __init__(self, timeout_seconds: float = 20.0, max_retries: int = 3):
-        self.timeout_seconds = timeout_seconds
-        self.max_retries = max_retries
-        self.retry_delay_seconds = 1
-        self.api_key = (settings.LLM_API_KEY or "").strip()
-        self.base_url = (
+        self.timeout_seconds: float = timeout_seconds
+        self.max_retries: int = max_retries
+        self.retry_delay_seconds: int = 1
+        self.api_key: str = (settings.LLM_API_KEY or "").strip()
+        self.base_url: str = (
             settings.LLM_BASE_URL or "").strip().rstrip("/")
         # Inisialisasi client OpenAI (LLM kompatibel)
-        self.client = AsyncOpenAI(
+        self.client: AsyncOpenAI = AsyncOpenAI(
             base_url=self.base_url if self.base_url else None,
             api_key=self.api_key,
             timeout=self.timeout_seconds,

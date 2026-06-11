@@ -36,15 +36,15 @@ class TrackerIngestionService:
         group_repo:   KPIGroupRepository | None = None,
         master_repo:  KPIMasterRepository | None = None,
     ):
-        self.db = db
-        self.tracker_repo = tracker_repo or KPITrackerRepository(db)
-        self.log_repo = log_repo or IngestionLogRepository(db)
-        self.group_repo = group_repo or KPIGroupRepository(db)
-        self.master_repo = master_repo or KPIMasterRepository(db)
-        self.google_svc = GoogleSheetService()
-        self.logger = logging.getLogger(__name__)
+        self.db: AsyncSession = db
+        self.tracker_repo: KPITrackerRepository = tracker_repo or KPITrackerRepository(db)
+        self.log_repo: IngestionLogRepository = log_repo or IngestionLogRepository(db)
+        self.group_repo: KPIGroupRepository = group_repo or KPIGroupRepository(db)
+        self.master_repo: KPIMasterRepository = master_repo or KPIMasterRepository(db)
+        self.google_svc: GoogleSheetService = GoogleSheetService()
+        self.logger: logging.Logger = logging.getLogger(__name__)
 
-        self.strip_fields = {
+        self.strip_fields: set[str] = {
             "nama_kpi",
             "nama_orang",
             "source_sheet_name",

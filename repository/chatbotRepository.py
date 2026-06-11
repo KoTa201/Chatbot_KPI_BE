@@ -11,14 +11,14 @@ from schema.chatbotSchema import ChatbotCreate, ChatbotUpdate
 
 class ChatbotRepository:
     def __init__(self, db: AsyncSession) -> None:
-        self.db = db
+        self.db: AsyncSession = db
         self.chatbot: Chatbot | None = None  # Akan di-set di service sebelum operasi update/delete
 
     async def get_by_id(self, chatbot_id: UUID) -> Optional[Chatbot]:
         result = await self.db.execute(
             select(Chatbot).where(Chatbot.id == chatbot_id)
         )
-        self.chatbot = result.scalars().first()
+        self.chatbot: Chatbot | None = result.scalars().first()
         return self.chatbot
 
     async def get_by_chatbot_name(self, chatbot_name: str) -> Optional[Chatbot]:
@@ -66,7 +66,7 @@ class ChatbotRepository:
         return result.scalars().all(), total
 
     async def create(self, payload: ChatbotCreate) -> Chatbot:
-        self.chatbot = Chatbot(**payload.model_dump())
+        self.chatbot: Chatbot = Chatbot(**payload.model_dump())
         self.db.add(self.chatbot)
         await self.db.commit()
         await self.db.refresh(self.chatbot)
@@ -115,4 +115,4 @@ class ChatbotRepository:
         assert self.chatbot is not None
         await self.db.delete(self.chatbot)
         await self.db.commit()
-        self.chatbot = None
+        self.chatbot: Chatbot | None = None
