@@ -3,9 +3,9 @@
 FastAPI KPI chatbot backend. It ingests KPI data from Google Sheets, stores it in PostgreSQL, and answers role-scoped natural-language KPI questions through a structured RAG pipeline.
 
 Main flow:
-1. Optional ambiguity clarification before SQL generation
+1. ambiguity clarification before SQL generation
 2. NL-to-SQL prompt + LLM generation
-3. SQL guardrail validation
+3. SQL guardrails validation
 4. Async SQL execution
 5. Optional chart generation
 6. LLM result analysis
