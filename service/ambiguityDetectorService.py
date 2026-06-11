@@ -37,7 +37,7 @@ class AmbiguityDetectorService:
     """Service untuk deteksi ambiguitas query pengguna menggunakan LLM."""
 
     def __init__(self) -> None:
-        self.llm = LLMService()
+        self.llm: LLMService = LLMService()
 
     # -----------------------------------------------------------------------
     # Public API

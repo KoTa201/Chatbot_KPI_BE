@@ -52,10 +52,10 @@ class UserLookupUtil:
     """
 
     def __init__(self, db: AsyncSession) -> None:
-        self._db = db
+        self._db: AsyncSession = db
         # Cache: key = (strategy, normalized_value), value = UUID | None
         self._cache: dict[tuple[str, str], Optional[UUID]] = {}
-        self._preloaded = False
+        self._preloaded: bool = False
 
     # ──────────────────────────────────────────────────────────── #
     #  Public API                                                   #
@@ -81,7 +81,7 @@ class UserLookupUtil:
             if row.username:
                 self._cache[("username", _normalize(row.username))] = uid
 
-        self._preloaded = True
+        self._preloaded: bool = True
         logger.debug("[UserLookup] Preloaded %s users into cache.", len(rows))
 
     async def by_full_name(self, name: str | None) -> Optional[UUID]:

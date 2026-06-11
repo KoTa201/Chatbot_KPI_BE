@@ -33,11 +33,11 @@ class KPIMasterService:
         repository: KPIMasterRepository | None = None,
     ):
         if repository is not None:
-            self.repo = repository
+            self.repo: KPIMasterRepository = repository
         elif isinstance(db, KPIMasterRepository):
-            self.repo = db
+            self.repo: KPIMasterRepository = db
         elif db is not None:
-            self.repo = KPIMasterRepository(db)
+            self.repo: KPIMasterRepository = KPIMasterRepository(db)
         else:
             raise ValueError("KPIMasterService requires db or repository")
 

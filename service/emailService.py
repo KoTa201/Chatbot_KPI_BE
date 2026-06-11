@@ -28,7 +28,7 @@ class EmailService:
         self.smtp_user: str = settings.SMTP_USER
         self.smtp_password: str = settings.SMTP_PASSWORD
         self.smtp_from: str = settings.SMTP_FROM
-        self.logo_path = (
+        self.logo_path: Path = (
             Path(__file__).resolve().parents[1]
             / "assets"
             / "img"

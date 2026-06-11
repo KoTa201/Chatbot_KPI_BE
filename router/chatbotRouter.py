@@ -19,7 +19,7 @@ class ChatbotRouter:
     """Router untuk endpoints chatbot management."""
 
     def __init__(self):
-        self.router = APIRouter()
+        self.router: APIRouter = APIRouter()
         self.chatbot_controller: ChatbotController | None = None
         self.setup_routes()
 
@@ -90,7 +90,7 @@ class ChatbotRouter:
             default=None, description="Cari nama atau addon_prompt"),
         db: AsyncSession = Depends(get_db),
     ) -> ChatbotListResponse:
-        self.chatbot_controller = ChatbotController(db)
+        self.chatbot_controller: ChatbotController = ChatbotController(db)
         return await self.chatbot_controller.list_chatbots(
             page=page,
             limit=limit,
@@ -103,7 +103,7 @@ class ChatbotRouter:
         chatbot_id: UUID = Path(..., description="ID chatbot (UUID)"),
         db: AsyncSession = Depends(get_db),
     ) -> ChatbotResponse:
-        self.chatbot_controller = ChatbotController(db)
+        self.chatbot_controller: ChatbotController = ChatbotController(db)
         return await self.chatbot_controller.get_chatbot(chatbot_id=chatbot_id)
 
     async def create_chatbot(
@@ -111,7 +111,7 @@ class ChatbotRouter:
         payload: ChatbotCreate,
         db: AsyncSession = Depends(get_db),
     ) -> ChatbotResponse:
-        self.chatbot_controller = ChatbotController(db)
+        self.chatbot_controller: ChatbotController = ChatbotController(db)
         return await self.chatbot_controller.create_chatbot(payload=payload)
 
     async def update_chatbot(
@@ -120,7 +120,7 @@ class ChatbotRouter:
         payload: ChatbotUpdate = ...,
         db: AsyncSession = Depends(get_db),
     ) -> ChatbotResponse:
-        self.chatbot_controller = ChatbotController(db)
+        self.chatbot_controller: ChatbotController = ChatbotController(db)
         return await self.chatbot_controller.update_chatbot(
             chatbot_id=chatbot_id,
             payload=payload,
@@ -133,7 +133,7 @@ class ChatbotRouter:
             default=False, description="True = hard delete, False = soft delete"),
         db: AsyncSession = Depends(get_db),
     ) -> MessageResponse:
-        self.chatbot_controller = ChatbotController(db)
+        self.chatbot_controller: ChatbotController = ChatbotController(db)
         return await self.chatbot_controller.delete_chatbot(
             chatbot_id=chatbot_id,
             hard=hard,

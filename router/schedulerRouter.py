@@ -13,7 +13,7 @@ class SchedulerRouter:
     """Router untuk endpoints scheduler configuration."""
 
     def __init__(self):
-        self.router = APIRouter(tags=["Scheduler"])
+        self.router: APIRouter = APIRouter(tags=["Scheduler"])
         self.scheduler_controller: SchedulerController | None = None
         self.setup_routes()
 
@@ -28,17 +28,17 @@ class SchedulerRouter:
 
     async def get_config(self):
         """Get current scheduler configuration."""
-        self.scheduler_controller = SchedulerController()
+        self.scheduler_controller: SchedulerController = SchedulerController()
         return await self.scheduler_controller.get_config()
 
     async def update_config(self, body: SchedulerConfigUpdate):
         """Update existing scheduler configuration."""
-        self.scheduler_controller = SchedulerController()
+        self.scheduler_controller: SchedulerController = SchedulerController()
         return await self.scheduler_controller.update_config(payload=body)
 
     async def trigger_scheduler(self):
         """Manually trigger ingestion job."""
-        self.scheduler_controller = SchedulerController()
+        self.scheduler_controller: SchedulerController = SchedulerController()
         return await self.scheduler_controller.trigger_now()
 
 

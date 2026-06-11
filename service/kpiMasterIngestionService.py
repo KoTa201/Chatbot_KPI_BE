@@ -49,11 +49,11 @@ class KPIMasterIngestionService:
         log_repo:    IngestionLogRepository | None = None,
         group_repo:  KPIGroupRepository | None = None,
     ):
-        self.db = db
-        self.kpi_repo = kpi_repo or KPIMasterRepository(db)
-        self.kpi_service = kpi_service or KPIMasterService(repository=self.kpi_repo)
-        self.log_repo = log_repo or IngestionLogRepository(db)
-        self.group_repo = group_repo or KPIGroupRepository(db)
+        self.db: AsyncSession = db
+        self.kpi_repo: KPIMasterRepository = kpi_repo or KPIMasterRepository(db)
+        self.kpi_service: KPIMasterService = kpi_service or KPIMasterService(repository=self.kpi_repo)
+        self.log_repo: IngestionLogRepository = log_repo or IngestionLogRepository(db)
+        self.group_repo: KPIGroupRepository = group_repo or KPIGroupRepository(db)
 
     # ================================================================ #
     #  PUBLIC: Entry point ingestion                                    #

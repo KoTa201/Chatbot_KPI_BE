@@ -13,7 +13,7 @@ from service.schedulerService import SchedulerService
 class SchedulerController:
 
     def __init__(self):
-        self.service = SchedulerService()
+        self.service: SchedulerService = SchedulerService()
 
     async def get_config(self) -> SchedulerConfigResponse:
         config = await self.service.get_config()

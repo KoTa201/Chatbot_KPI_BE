@@ -11,7 +11,7 @@ from typing import cast as type_cast
 
 class ColumnStatisticsService:
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     async def build_nl_to_sql_statistics(self) -> str:
         lines: list[str] = []

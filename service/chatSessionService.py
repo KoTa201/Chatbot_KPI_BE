@@ -5,7 +5,7 @@ from fastapi import HTTPException, status
 
 from model import ChatSession
 from repository.chatSessionRepository import ChatSessionRepository
-from repository.chatMessageRepository import ChatMessageRepository, ChatSessionDetailRecord
+from repository.chatMessageRepository import ChatSessionDetailRecord
 from schema.sessionSchema import (
     SessionClarificationQuestionResponse,
     SessionGraphicItem,
@@ -15,9 +15,8 @@ from schema.sessionSchema import (
 
 class ChatSessionService:
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.session_repo = ChatSessionRepository(db)
-        self.message_repo = ChatMessageRepository(db)
+        self.db: AsyncSession = db
+        self.session_repo: ChatSessionRepository = ChatSessionRepository(db)
 
     async def create_session_if_missing(
         self,
@@ -34,31 +33,6 @@ class ChatSessionService:
                 title=first_message[:80].strip() or "New Chat",
                 chatbot_id=chatbot_id,
             )
-
-    async def create_user_message(self, session_id: UUID, message: str):
-        return await self.message_repo.create(
-            session_id=session_id,
-            message=message,
-            is_sender_chatbot=False,
-        )
-
-    async def create_chatbot_message(
-        self,
-        session_id: UUID,
-        message: str,
-        graphics: list[dict] | None = None,
-    ):
-        chat_message = await self.message_repo.create(
-            session_id=session_id,
-            message=message,
-            is_sender_chatbot=True,
-        )
-        if graphics:
-            await self.message_repo.create_graphics(
-                message_id=chat_message.message_id,
-                graphics=graphics,
-            )
-        return chat_message
 
     async def get_sessions(self, user_id: UUID) -> list:
         return await self.session_repo.get_by_user(user_id=user_id)

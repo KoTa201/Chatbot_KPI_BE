@@ -37,7 +37,7 @@ class KPIGroupRouter:
     """Router untuk endpoints KPI Group management."""
 
     def __init__(self):
-        self.router = APIRouter()
+        self.router: APIRouter = APIRouter()
         self.kpi_group_controller: KPIGroupController | None = None
         self.setup_routes()
 
@@ -129,7 +129,7 @@ class KPIGroupRouter:
         ),
         db: AsyncSession = Depends(get_db),
     ) -> KPIGroupListResponse:
-        self.kpi_group_controller = KPIGroupController(db)
+        self.kpi_group_controller: KPIGroupController = KPIGroupController(db)
         return await self.kpi_group_controller.list_groups(
             page=page,
             limit=limit,
@@ -143,7 +143,7 @@ class KPIGroupRouter:
         group_id: UUID = Path(..., description="UUID KPI Group"),
         db: AsyncSession = Depends(get_db),
     ) -> KPIGroupResponse:
-        self.kpi_group_controller = KPIGroupController(db)
+        self.kpi_group_controller: KPIGroupController = KPIGroupController(db)
         return await self.kpi_group_controller.get_group(group_id=group_id)
 
     async def create_group(
@@ -151,7 +151,7 @@ class KPIGroupRouter:
         payload: KPIGroupCreate,
         db: AsyncSession = Depends(get_db),
     ) -> KPIGroupResponse:
-        self.kpi_group_controller = KPIGroupController(db)
+        self.kpi_group_controller: KPIGroupController = KPIGroupController(db)
         return await self.kpi_group_controller.create_group(payload=payload)
 
     async def update_group(
@@ -160,7 +160,7 @@ class KPIGroupRouter:
         payload:  KPIGroupUpdate = ...,
         db: AsyncSession = Depends(get_db),
     ) -> KPIGroupResponse:
-        self.kpi_group_controller = KPIGroupController(db)
+        self.kpi_group_controller: KPIGroupController = KPIGroupController(db)
         return await self.kpi_group_controller.update_group(
             group_id=group_id,
             payload=payload,
@@ -171,7 +171,7 @@ class KPIGroupRouter:
         group_id: UUID = Path(..., description="UUID KPI Group"),
         db: AsyncSession = Depends(get_db),
     ) -> MessageResponse:
-        self.kpi_group_controller = KPIGroupController(db)
+        self.kpi_group_controller: KPIGroupController = KPIGroupController(db)
         return await self.kpi_group_controller.delete_group(group_id=group_id)
 
 

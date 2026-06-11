@@ -20,7 +20,7 @@ from utils.datetime import utc_now
 class UserRepository:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
         self.user: User | None = None
         self.token: RevokedToken | None = None
 
@@ -30,7 +30,7 @@ class UserRepository:
 
     async def create_user(self, user: User) -> User | None:
         """Insert user baru. Kembalikan instance yang sudah ter-refresh (id terisi)."""
-        self.user = user
+        self.user: User | None = user
         self.db.add(self.user)
         await self.db.commit()
         await self.db.refresh(self.user)
@@ -44,7 +44,7 @@ class UserRepository:
         result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
-        self.user = result.scalar_one_or_none()
+        self.user: User | None = result.scalar_one_or_none()
         return self.user
 
     async def get_by_username_or_email(self, identifier: str) -> Optional[User]:
@@ -125,7 +125,7 @@ class UserRepository:
     # ------------------------------------------------------------------ #
 
     async def save(self, user: User) -> User:
-        self.user = user
+        self.user: User | None = user
         self.db.add(self.user)
         await self.db.commit()
         await self.db.refresh(self.user)
@@ -136,10 +136,10 @@ class UserRepository:
     # ------------------------------------------------------------------ #
 
     async def delete_user(self, user: User) -> None:
-        self.user = user
+        self.user: User | None = user
         await self.db.delete(self.user)
         await self.db.commit()
-        self.user = None
+        self.user: User | None = None
 
     # ------------------------------------------------------------------ #
     #  Existence checks                                                    #
@@ -169,7 +169,7 @@ class UserRepository:
         """
         already_revoked = await self.is_token_revoked(token)
         if not already_revoked:
-            self.token = RevokedToken(token=token, user_id=user_id)
+            self.token: RevokedToken = RevokedToken(token=token, user_id=user_id)
             self.db.add(self.token)
             await self.db.commit()
 

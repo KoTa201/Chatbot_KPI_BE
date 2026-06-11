@@ -25,7 +25,7 @@ class ChatSessionDetailRecord:
 
 class ChatMessageRepository:
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     async def create(
         self,

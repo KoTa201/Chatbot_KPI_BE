@@ -18,7 +18,7 @@ class KPIMasterRouter:
     """Router untuk endpoints KPI Master."""
 
     def __init__(self):
-        self.router = APIRouter()
+        self.router: APIRouter = APIRouter()
         self.setup_routes()
 
     def _get_controller(self, db: AsyncSession) -> KPIMasterController:

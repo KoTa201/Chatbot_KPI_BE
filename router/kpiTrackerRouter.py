@@ -24,7 +24,7 @@ class IngestionRouter:
     """Router untuk endpoints ingestion data KPI."""
 
     def __init__(self):
-        self.router = APIRouter()
+        self.router: APIRouter = APIRouter()
         self.setup_routes()
 
     def _get_tracker_controller(self, db: AsyncSession) -> KPITrackerController:

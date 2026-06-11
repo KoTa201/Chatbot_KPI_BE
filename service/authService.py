@@ -39,11 +39,11 @@ class AuthService:
         repo: UserRepository | None = None,
     ):
         if repo is not None:
-            self.repo = repo
+            self.repo: UserRepository = repo
         elif isinstance(db, UserRepository):
-            self.repo = db
+            self.repo: UserRepository = db
         elif db is not None:
-            self.repo = UserRepository(db)
+            self.repo: UserRepository = UserRepository(db)
         else:
             raise ValueError("AuthService requires db or repo")
         self.secret_key: str = settings.SECRET_KEY

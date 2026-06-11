@@ -15,7 +15,7 @@ from model.User import User
 class ChatSessionController:
 
     def __init__(self, db: AsyncSession = Depends(get_db)):
-        self.service = ChatSessionService(db)
+        self.service: ChatSessionService = ChatSessionService(db)
 
     async def handle_get_sessions(
         self,

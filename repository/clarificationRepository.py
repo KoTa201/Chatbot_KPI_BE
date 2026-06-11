@@ -10,7 +10,7 @@ from model.ClarificationAnswerOption import ClarificationAnswerOption
 
 class ClarificationRepository:
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     async def create(
         self,

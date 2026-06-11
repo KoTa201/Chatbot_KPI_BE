@@ -238,7 +238,7 @@ class GoogleSheetService:
 
     def _get_client(self) -> gspread.Client:
         if self._client is None:
-            self._client = self._build_client()
+            self._client: Optional[gspread.Client] = self._build_client()
         return self._client
 
     def _build_client(self) -> gspread.Client:

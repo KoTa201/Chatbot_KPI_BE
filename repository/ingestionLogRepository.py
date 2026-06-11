@@ -26,7 +26,7 @@ from model.KPIGroup import KPIGroup
 class IngestionLogRepository:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     # ── CREATE ───────────────────────────────────────────────────────────────
 

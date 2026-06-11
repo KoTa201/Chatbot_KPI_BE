@@ -19,7 +19,7 @@ class IngestionLogService:
     """Service untuk ingestion log operations."""
 
     def __init__(self, db: AsyncSession):
-        self.repo = IngestionLogRepository(db)
+        self.repo: IngestionLogRepository = IngestionLogRepository(db)
 
     async def get_ingestion_logs(
         self,

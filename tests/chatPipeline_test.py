@@ -97,10 +97,10 @@ def _create_chat_service(monkeypatch) -> ChatService:
         side_effect=lambda sid: Mock(user_id=sid)
     )
     service.session_service.create_session_if_missing = AsyncMock(return_value=None)
-    service.session_service.create_user_message = AsyncMock(
+    service.create_user_message = AsyncMock(
         return_value=Mock(message_id="00000000-0000-0000-0000-000000000301")
     )
-    service.session_service.create_chatbot_message = AsyncMock(return_value=None)
+    service.create_chatbot_message = AsyncMock(return_value=None)
     service.chatbot_service = Mock()
     service.chatbot_service.get_active_chatbot_for_role = AsyncMock(
         return_value=Mock(
@@ -270,7 +270,7 @@ async def test_process_query_returns_security_message_when_sql_validation_fails(
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
     monkeypatch.setattr(
-        service.wireguard_service,
+        service.guardrails_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=False,
@@ -316,7 +316,7 @@ async def test_process_query_success_without_visualization(monkeypatch):
         lambda prompt: _fake_analyze_stream(prompt),
     )
     monkeypatch.setattr(
-        service.wireguard_service,
+        service.guardrails_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -367,7 +367,7 @@ async def test_process_query_success_with_visualization(monkeypatch):
         lambda prompt: _fake_analyze_stream(prompt),
     )
     monkeypatch.setattr(
-        service.wireguard_service,
+        service.guardrails_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -427,7 +427,7 @@ async def test_process_query_falls_back_when_analysis_rate_limited(monkeypatch):
 
     monkeypatch.setattr(service.llm_service, "analyze_result_stream", _ratelimited_stream)
     monkeypatch.setattr(
-        service.wireguard_service,
+        service.guardrails_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,
@@ -462,7 +462,7 @@ async def test_process_query_propagates_timeout_http_exception(monkeypatch):
         AsyncMock(return_value=VisualizationDecision(is_visualize=False, chart_type=None)),
     )
     monkeypatch.setattr(
-        service.wireguard_service,
+        service.guardrails_service,
         "validate",
         lambda sql, user_id, user_role: ValidationResult(
             is_valid=True,

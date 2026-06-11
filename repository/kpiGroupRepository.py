@@ -29,7 +29,7 @@ from sqlalchemy.orm import selectinload
 class KPIGroupRepository:
 
     def __init__(self, db: AsyncSession):
-        self.db = db
+        self.db: AsyncSession = db
 
     # ─── Get or Create (upsert) ───────────────────────────────────────────────
 
