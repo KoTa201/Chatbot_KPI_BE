@@ -14,7 +14,7 @@ class SessionResponse(BaseModel):
 
 
 class SessionClarificationQuestionResponse(BaseModel):
-    id: str
+    id: UUID
     ambiguity_type: str | None = None
     question: str
     options: list[str] = Field(default_factory=list)

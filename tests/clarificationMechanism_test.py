@@ -114,16 +114,29 @@ def test_clarification_question_has_no_answer_options_column():
     assert ClarificationQuestion.__table__.columns.get("answer_options") is None
 
 
+def test_clarification_question_has_no_session_id_column():
+    """ClarificationQuestion uses message_id to reach sessions, not its own session_id."""
+    from model.ClarificationQuestion import ClarificationQuestion
+
+    assert ClarificationQuestion.__table__.columns.get("session_id") is None
+
+
 def test_clarification_answer_option_table_shape():
     """Clarification answer options are stored as ordered child rows."""
+    from sqlalchemy import UUID as SAUUID
+
     from model.ClarificationAnswerOption import ClarificationAnswerOption
+    from model.ClarificationQuestion import ClarificationQuestion
 
     columns = ClarificationAnswerOption.__table__.columns
 
+    assert isinstance(ClarificationQuestion.__table__.columns["clarification_question_id"].type, SAUUID)
     assert columns.get("id") is not None
     assert columns.get("clarification_question_id") is not None
     assert columns.get("option_text") is not None
     assert columns.get("option_order") is not None
+    assert isinstance(columns["id"].type, SAUUID)
+    assert isinstance(columns["clarification_question_id"].type, SAUUID)
     assert columns["clarification_question_id"].nullable is False
     assert columns["option_text"].nullable is False
     assert columns["option_order"].nullable is False
@@ -349,9 +362,7 @@ class TestClarificationService:
                 )
 
                 assert result is not None
-                stored = (await db.execute(select(ClarificationQuestion).where(
-                    ClarificationQuestion.session_id == session_id
-                ))).scalars().all()
+                stored = (await db.execute(select(ClarificationQuestion))).scalars().all()
                 assert len(stored) == 1
                 assert stored[0].clarification_question == "Metrik mana?"
         finally:
@@ -2197,6 +2208,19 @@ class TestPreferenceTreeService:
         try:
             async with session_factory() as db:
                 await _create_user_and_session(db, session_id)
+                previous_message = ChatMessage(
+                    session_id=session_id,
+                    message="Tampilkan KPI terbaik",
+                    is_sender_chatbot=False,
+                )
+                current_message = ChatMessage(
+                    session_id=session_id,
+                    message="Tampilkan KPI untuk periode ini",
+                    is_sender_chatbot=False,
+                )
+                db.add_all([previous_message, current_message])
+                await db.flush()
+
                 repo = ClarificationRepository(db)
                 previous = await repo.create(
                     session_id=session_id,
@@ -2204,6 +2228,7 @@ class TestPreferenceTreeService:
                     is_ambiguity_level1_type_llm=True,
                     clarifying_question="Metrik mana yang dimaksud?",
                     answer_options=["Achievement %", "Total realisasi"],
+                    message_id=previous_message.message_id,
                 )
                 await repo.update_with_answer(
                     log_id=previous.clarification_question_id,
@@ -2215,6 +2240,7 @@ class TestPreferenceTreeService:
                     is_ambiguity_level1_type_llm=True,
                     clarifying_question="Periode mana yang dimaksud?",
                     answer_options=["Q1 2025", "Q2 2025"],
+                    message_id=current_message.message_id,
                 )
                 await db.commit()
 
@@ -2243,7 +2269,7 @@ class TestPreferenceTreeService:
                             session_id=session_id,
                             clarification_answers=[
                                 ClarificationAnswerItem(
-                                    question_id=current.clarification_question_id,
+                                    question_id=str(current.clarification_question_id),
                                     selected_option="Q1 2025",
                                 )
                             ],

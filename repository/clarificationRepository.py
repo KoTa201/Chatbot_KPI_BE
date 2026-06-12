@@ -4,6 +4,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from model.ChatMessage import ChatMessage
 from model.ClarificationQuestion import ClarificationQuestion
 from model.ClarificationAnswerOption import ClarificationAnswerOption
 
@@ -28,7 +29,6 @@ class ClarificationRepository:
             clarification_question=clarifying_question,
             selected_answer=self._serialize_answer(clarification_answer),
             message_id=message_id,
-            session_id=session_id,
         )
         self.db.add(question)
         await self.db.flush()
@@ -47,7 +47,7 @@ class ClarificationRepository:
 
     async def update_with_answer(
         self,
-        log_id: str,
+        log_id: UUID | str,
         clarification_answer: str,
         free_text_answer: str | None = None,
     ) -> ClarificationQuestion:
@@ -55,7 +55,7 @@ class ClarificationRepository:
             select(ClarificationQuestion)
             .options(selectinload(ClarificationQuestion.answer_options))
             .where(
-                ClarificationQuestion.clarification_question_id == str(log_id)
+                ClarificationQuestion.clarification_question_id == self._normalize_question_id(log_id)
             )
         )
         result = await self.db.execute(stmt)
@@ -76,7 +76,9 @@ class ClarificationRepository:
         stmt = (
             select(ClarificationQuestion)
             .options(selectinload(ClarificationQuestion.answer_options))
-            .where(ClarificationQuestion.session_id == session_id)
+            .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
+            .where(ChatMessage.session_id == session_id)
+            .where(ClarificationQuestion.message_id.is_not(None))
             .order_by(desc(ClarificationQuestion.created_at))
         )
         result = await self.db.execute(stmt)
@@ -86,12 +88,18 @@ class ClarificationRepository:
         stmt = (
             select(ClarificationQuestion)
             .options(selectinload(ClarificationQuestion.answer_options))
-            .where(ClarificationQuestion.session_id == session_id)
+            .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
+            .where(ChatMessage.session_id == session_id)
+            .where(ClarificationQuestion.message_id.is_not(None))
             .order_by(desc(ClarificationQuestion.created_at))
             .limit(1)
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    def _normalize_question_id(log_id: UUID | str) -> UUID:
+        return log_id if isinstance(log_id, UUID) else UUID(str(log_id))
 
     @staticmethod
     def _serialize_answer(clarification_answer: str | None) -> str | None:

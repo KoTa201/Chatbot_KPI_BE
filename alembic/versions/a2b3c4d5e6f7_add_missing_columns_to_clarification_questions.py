@@ -27,24 +27,8 @@ def upgrade() -> None:
         "ALTER TABLE clarification_questions "
         "ADD COLUMN IF NOT EXISTS free_text_answer VARCHAR(255)"
     )
-    op.execute(
-        "ALTER TABLE clarification_questions "
-        "ADD COLUMN IF NOT EXISTS session_id UUID "
-        "REFERENCES chat_sessions(session_id) ON DELETE CASCADE"
-    )
-    op.create_index(
-        "ix_clarification_questions_session_id",
-        "clarification_questions",
-        ["session_id"],
-        if_not_exists=True,
-    )
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_clarification_questions_session_id",
-        table_name="clarification_questions",
-    )
-    op.drop_column("clarification_questions", "session_id")
     op.drop_column("clarification_questions", "free_text_answer")
     op.drop_column("clarification_questions", "selected_answer")

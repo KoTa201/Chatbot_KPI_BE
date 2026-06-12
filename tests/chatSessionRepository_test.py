@@ -86,7 +86,6 @@ async def test_get_detail_returns_messages_with_clarification_questions():
             await db_session.flush()
 
             question = ClarificationQuestion(
-                session_id=session_id,
                 message_id=user_message.message_id,
                 ambiguity_type="level1",
                 is_ambiguity_level1_type_llm=True,

@@ -1,6 +1,4 @@
-
-
-
+import asyncio
 import uuid
 from dataclasses import dataclass
 from typing import Optional
@@ -74,31 +72,31 @@ class ChatMessageRepository:
             .where(ChatMessage.session_id == session_id)
             .order_by(ChatMessage.send_at.asc())
         )
-        messages = list(messages_result.scalars().all())
 
         questions_result = await self.db.execute(
             select(ClarificationQuestion)
             .options(selectinload(ClarificationQuestion.answer_options))
-            .where(ClarificationQuestion.session_id == session_id)
-            .where(ClarificationQuestion.message_id.is_not(None))
+            .join(ChatMessage, ClarificationQuestion.message_id == ChatMessage.message_id)
+            .where(ChatMessage.session_id == session_id)
             .order_by(ClarificationQuestion.created_at.asc())
         )
+
+        graphics_result = await self.db.execute(
+            select(ChatMessageGraphic)
+            .join(ChatMessage, ChatMessageGraphic.message_id == ChatMessage.message_id)
+            .where(ChatMessage.session_id == session_id)
+            .order_by(ChatMessageGraphic.message_id, ChatMessageGraphic.display_order)
+        )
+
+        messages = messages_result.scalars().all()
+
         questions_by_message_id: dict[uuid.UUID, list[ClarificationQuestion]] = {}
         for question in questions_result.scalars().all():
-            if question.message_id is None:
-                continue
             questions_by_message_id.setdefault(question.message_id, []).append(question)
 
-        message_ids = [m.message_id for m in messages]
         graphics_by_message_id: dict[uuid.UUID, list[ChatMessageGraphic]] = {}
-        if message_ids:
-            graphics_result = await self.db.execute(
-                select(ChatMessageGraphic)
-                .where(ChatMessageGraphic.message_id.in_(message_ids))
-                .order_by(ChatMessageGraphic.message_id, ChatMessageGraphic.display_order)
-            )
-            for graphic in graphics_result.scalars().all():
-                graphics_by_message_id.setdefault(graphic.message_id, []).append(graphic)
+        for graphic in graphics_result.scalars().all():
+            graphics_by_message_id.setdefault(graphic.message_id, []).append(graphic)
 
         return ChatSessionDetailRecord(
             session=session,
