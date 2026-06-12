@@ -17,8 +17,8 @@ if TYPE_CHECKING:
 class ClarificationQuestion(Base):
     __tablename__ = "clarification_questions"
 
-    clarification_question_id: Mapped[str] = mapped_column(
-        String(255), primary_key=True, default=lambda: str(uuid.uuid4())
+    clarification_question_id: Mapped[uuid.UUID] = mapped_column(
+        SAUUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
     ambiguity_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_ambiguity_level1_type_llm: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
@@ -36,13 +36,6 @@ class ClarificationQuestion(Base):
         nullable=True,
         index=True,
     )
-    session_id: Mapped[uuid.UUID | None] = mapped_column(
-        SAUUID(as_uuid=True),
-        ForeignKey("chat_sessions.session_id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-    )
-
     message_ref: Mapped["ChatMessage"] = relationship(
         "ChatMessage", back_populates="clarification_questions", lazy="noload"
     )

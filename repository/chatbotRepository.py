@@ -12,13 +12,13 @@ from schema.chatbotSchema import ChatbotCreate, ChatbotUpdate
 class ChatbotRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db: AsyncSession = db
-        self.chatbot: Chatbot | None = None  # Akan di-set di service sebelum operasi update/delete
+        self.chatbot: Chatbot
 
     async def get_by_id(self, chatbot_id: UUID) -> Optional[Chatbot]:
         result = await self.db.execute(
             select(Chatbot).where(Chatbot.id == chatbot_id)
         )
-        self.chatbot: Chatbot | None = result.scalars().first()
+        self.chatbot = result.scalars().first()
         return self.chatbot
 
     async def get_by_chatbot_name(self, chatbot_name: str) -> Optional[Chatbot]:
@@ -41,29 +41,40 @@ class ChatbotRepository:
         return result.scalars().first()
 
     async def get_all(self, page, limit, authority=None, search=None):
-        query = select(Chatbot).where(Chatbot.is_active == True)
         offset = (page - 1) * limit
 
+        # Build base filter conditions
+        conditions = []
         if authority:
-            query = query.where(Chatbot.authority == authority)
+            conditions.append(Chatbot.authority == authority)
         if search:
-            query = query.where(
+            conditions.append(
                 or_(
                     Chatbot.chatbot_name.ilike(f"%{search}%"),
                     Chatbot.addon_prompt.ilike(f"%{search}%"),
                 )
             )
 
-        count_result = await self.db.execute(select(func.count()).select_from(query.subquery()))
-        total = count_result.scalar_one()
-
-        result = await self.db.execute(
-            query.order_by(Chatbot.created_at.desc())
+        # Single query using window function — one DB round-trip instead of two
+        total_col = func.count().over().label("total")
+        query = (
+            select(Chatbot, total_col)
+            .where(*conditions)
+            .order_by(Chatbot.created_at.desc())
             .offset(offset)
             .limit(limit)
-            .execution_options(populate_existing=True)
         )
-        return result.scalars().all(), total
+
+        result = await self.db.execute(query)
+        rows = result.all()
+
+        if not rows:
+            return [], 0
+
+        chatbots = [row[0] for row in rows]
+        total = rows[0][1]
+
+        return chatbots, total
 
     async def create(self, payload: ChatbotCreate) -> Chatbot:
         self.chatbot: Chatbot = Chatbot(**payload.model_dump())

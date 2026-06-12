@@ -224,8 +224,8 @@ class TestCreateChatbot:
 
         assert res.status_code == 201
         data = res.json()
-        assert data["chatbot_name"] == "HR Assistant"
-        assert data["authority"] == "kepala_divisi"
+        assert data["nama_chatbot"] == "HR Assistant"
+        assert data["otoritas"] == "kepala_divisi"
         assert data["addon_prompt"] == "Kamu adalah asisten kepala_divisi yang ramah."
         assert data["is_active"] is True
         assert "id" in data
@@ -237,7 +237,7 @@ class TestCreateChatbot:
         res = await client.post("/api/v1/chatbots/", json=make_payload(name="Karyawan Bot", authority="karyawan"))
 
         assert res.status_code == 201
-        assert res.json()["authority"] == "karyawan"
+        assert res.json()["otoritas"] == "karyawan"
 
     async def test_create_without_addon_prompt(self, client: AsyncClient):
         """addon_prompt bersifat opsional — boleh null."""
@@ -315,7 +315,7 @@ class TestCreateChatbot:
         res = await client.post("/api/v1/chatbots/", json=make_payload(name="  Stripped Bot  "))
 
         assert res.status_code == 201
-        assert res.json()["chatbot_name"] == "Stripped Bot"
+        assert res.json()["nama_chatbot"] == "Stripped Bot"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -352,15 +352,15 @@ class TestListChatbot:
 
         body = res.json()
         assert body["total"] == 2
-        names = {item["chatbot_name"] for item in body["data"]}
+        names = {item["nama_chatbot"] for item in body["data"]}
         assert names == {"Aktif Bot", "Nonaktif Bot"}
 
     async def test_list_pagination_limit(self, client: AsyncClient, db_session: AsyncSession):
-        """limit membatasi jumlah item per halaman."""
+        """page_size membatasi jumlah item per halaman."""
         for i in range(5):
             await seed_chatbot(db_session, chatbot_name=f"Bot {i}")
 
-        res = await client.get("/api/v1/chatbots/?page=1&limit=2")
+        res = await client.get("/api/v1/chatbots/?page=1&page_size=2")
 
         body = res.json()
         assert len(body["data"]) == 2
@@ -372,8 +372,8 @@ class TestListChatbot:
         for i in range(4):
             await seed_chatbot(db_session, chatbot_name=f"Bot {i}")
 
-        res1 = await client.get("/api/v1/chatbots/?page=1&limit=2")
-        res2 = await client.get("/api/v1/chatbots/?page=2&limit=2")
+        res1 = await client.get("/api/v1/chatbots/?page=1&page_size=2")
+        res2 = await client.get("/api/v1/chatbots/?page=2&page_size=2")
 
         ids_page1 = {c["id"] for c in res1.json()["data"]}
         ids_page2 = {c["id"] for c in res2.json()["data"]}
@@ -386,30 +386,30 @@ class TestListChatbot:
         assert res.status_code == 422
 
     async def test_list_filter_kepala_divisi(self, client: AsyncClient, db_session: AsyncSession):
-        """Filter authority=Kepala Divisi hanya return chatbot Kepala Divisi."""
+        """Filter otoritas=kepala_divisi hanya return chatbot Kepala Divisi."""
         await seed_chatbot(db_session, chatbot_name="Kepala Divisi Bot", authority=AuthorityEnum.KEPALA_DIVISI)
         await seed_chatbot(db_session, chatbot_name="Karyawan Bot", authority=AuthorityEnum.KARYAWAN)
 
-        res = await client.get("/api/v1/chatbots/?authority=kepala_divisi")
+        res = await client.get("/api/v1/chatbots/?otoritas=kepala_divisi")
 
         body = res.json()
         assert body["total"] == 1
-        assert body["data"][0]["authority"] == "kepala_divisi"
+        assert body["data"][0]["otoritas"] == "kepala_divisi"
 
     async def test_list_filter_karyawan(self, client: AsyncClient, db_session: AsyncSession):
-        """Filter authority=karyawan hanya return chatbot Karyawan."""
+        """Filter otoritas=karyawan hanya return chatbot Karyawan."""
         await seed_chatbot(db_session, chatbot_name="kepala_divisi Bot", authority=AuthorityEnum.KEPALA_DIVISI)
         await seed_chatbot(db_session, chatbot_name="Kar Bot", authority=AuthorityEnum.KARYAWAN)
 
-        res = await client.get("/api/v1/chatbots/?authority=karyawan")
+        res = await client.get("/api/v1/chatbots/?otoritas=karyawan")
 
         body = res.json()
         assert body["total"] == 1
-        assert body["data"][0]["authority"] == "karyawan"
+        assert body["data"][0]["otoritas"] == "karyawan"
 
     async def test_list_filter_invalid_authority_returns_422(self, client: AsyncClient):
-        """Filter dengan nilai authority tidak valid harus return 422."""
-        res = await client.get("/api/v1/chatbots/?authority=INVALID")
+        """Filter dengan nilai otoritas tidak valid harus return 422."""
+        res = await client.get("/api/v1/chatbots/?otoritas=INVALID")
 
         assert res.status_code == 422
 
@@ -421,7 +421,7 @@ class TestListChatbot:
         res = await client.get("/api/v1/chatbots/?search=Recruit")
 
         assert res.json()["total"] == 1
-        assert "Recruitment" in res.json()["data"][0]["chatbot_name"]
+        assert "Recruitment" in res.json()["data"][0]["nama_chatbot"]
 
     async def test_list_search_by_addon_prompt(self, client: AsyncClient, db_session: AsyncSession):
         """Search juga mencakup konten addon_prompt."""
@@ -457,8 +457,8 @@ class TestGetChatbotById:
         assert res.status_code == 200
         data = res.json()
         assert data["id"] == str(chatbot.id)
-        assert data["chatbot_name"] == "Detail Bot"
-        assert data["authority"] == "kepala_divisi"
+        assert data["nama_chatbot"] == "Detail Bot"
+        assert data["otoritas"] == "kepala_divisi"
 
     async def test_get_by_id_not_found(self, client: AsyncClient):
         """GET dengan ID yang tidak ada harus return 404."""
@@ -499,8 +499,8 @@ class TestUpdateChatbot:
 
         assert res.status_code == 200
         data = res.json()
-        assert data["chatbot_name"] == "Baru Bot"
-        assert data["authority"] == "kepala_divisi"  # tidak berubah
+        assert data["nama_chatbot"] == "Baru Bot"
+        assert data["otoritas"] == "kepala_divisi"  # tidak berubah
 
     async def test_update_authority_only(self, client: AsyncClient, db_session: AsyncSession):
         """Update hanya authority — nama tidak berubah."""
@@ -510,8 +510,8 @@ class TestUpdateChatbot:
 
         assert res.status_code == 200
         data = res.json()
-        assert data["authority"] == "karyawan"
-        assert data["chatbot_name"] == "Switch Bot"  # tidak berubah
+        assert data["otoritas"] == "karyawan"
+        assert data["nama_chatbot"] == "Switch Bot"  # tidak berubah
 
     async def test_update_addon_prompt(self, client: AsyncClient, db_session: AsyncSession):
         """Update addon_prompt dengan nilai baru."""
@@ -545,8 +545,8 @@ class TestUpdateChatbot:
 
         assert res.status_code == 200
         data = res.json()
-        assert data["chatbot_name"] == "New Bot"
-        assert data["authority"] == "karyawan"
+        assert data["nama_chatbot"] == "New Bot"
+        assert data["otoritas"] == "karyawan"
         assert data["addon_prompt"] == "Prompt baru."
 
     async def test_update_is_active_to_false(self, client: AsyncClient, db_session: AsyncSession):
@@ -618,7 +618,7 @@ class TestUpdateChatbot:
 
         assert res.status_code == 200
         data = res.json()
-        assert data["authority"] == "karyawan"
+        assert data["otoritas"] == "karyawan"
         assert data["is_active"] is True
 
         result = await db_session.execute(
