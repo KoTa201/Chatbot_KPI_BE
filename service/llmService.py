@@ -150,6 +150,10 @@ class LLMService:
             return VisualizationDecision(is_visualize=False, chart_type=None)
 
     @staticmethod
+    def _is_reasoning_model(model: str) -> bool:
+        return model.startswith(("gpt-5", "o1", "o3", "o4"))
+
+    @staticmethod
     def _build_payload(
             model: str,
         prompt: str,
@@ -160,9 +164,15 @@ class LLMService:
         payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_output_tokens,
         }
+        if LLMService._is_reasoning_model(model):
+            # Reasoning models only accept default temperature and use
+            # max_completion_tokens instead of the legacy max_tokens. Send it via
+            # extra_body so older openai SDKs without the typed kwarg still forward it.
+            payload["extra_body"] = {"max_completion_tokens": max_output_tokens}
+        else:
+            payload["temperature"] = temperature
+            payload["max_tokens"] = max_output_tokens
         if stop_sequences:
             payload["stop"] = stop_sequences
         return payload
@@ -219,6 +229,12 @@ class LLMService:
                                    status_code, wait, attempt + 1, self.max_retries + 1)
                     await asyncio.sleep(wait)
                     continue
+                if 400 <= status_code < 500:
+                    logger.error("LLM API request error %d: %s", status_code, error)
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"Permintaan ke layanan AI ditolak ({status_code}).",
+                    ) from error
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
