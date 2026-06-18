@@ -8,6 +8,8 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 import logging
+from zipfile import error
+
 logger = logging.getLogger(__name__)
 
 
@@ -316,6 +318,10 @@ def build_scope_policy_assessment_prompt(
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
     session_context_block = (session_context or "").strip() or "Tidak ada konteks percakapan sebelumnya."
     evidence_block = (kpi_context or "").strip() or "Tidak ada evidence KPI tambahan."
+
+    log = addon_prompt_block or "Tidak ada constraint addon tambahan."
+    logger.error(f"Addon prompt: {log}")
+    logger.error(f"Evidence: {evidence_block}")
 
     prompt = f"""You are a strict scope and policy classifier for a KPI data analytics chatbot.
 
