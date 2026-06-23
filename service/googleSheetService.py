@@ -9,6 +9,7 @@ Struktur sheet yang didukung:
     Baris 4+: data
 """
 
+import json
 import re
 from typing import Optional
 
@@ -243,10 +244,14 @@ class GoogleSheetService:
 
     def _build_client(self) -> gspread.Client:
         try:
-            creds = Credentials.from_service_account_file(
-                self.google_credentials_path,
-                scopes=SCOPES,
-            )
+            raw = self.google_credentials_path.strip()
+            # ponytail: inline JSON in env, else treat as file path (back-compat)
+            if raw.startswith("{"):
+                creds = Credentials.from_service_account_info(
+                    json.loads(raw), scopes=SCOPES)
+            else:
+                creds = Credentials.from_service_account_file(
+                    raw, scopes=SCOPES)
             return gspread.authorize(creds)
         except FileNotFoundError:
             raise HTTPException(
@@ -255,6 +260,11 @@ class GoogleSheetService:
                     f"File credentials tidak ditemukan: '{self.google_credentials_path}'. "
                     "Pastikan file JSON Service Account sudah ada dan path-nya benar di .env"
                 ),
+            )
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"GOOGLE_CREDENTIALS_PATH bukan JSON valid: {str(e)}",
             )
         except Exception as e:
             raise HTTPException(
