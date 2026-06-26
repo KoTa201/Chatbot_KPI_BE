@@ -8,7 +8,6 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from uuid import UUID
 import logging
-from zipfile import error
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +145,7 @@ def build_nl_to_sql_prompt(
     - Tambahkan LIMIT 1000 jika tidak ada limit spesifik.
     - Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
     - Rata-rata & Performa: JANGAN langsung menggunakan fungsi agregasi SQL (seperti AVG) jika pertanyaan menanyakan rata-rata/performa campuran dari berbagai KPI (yang mungkin berisi nilai TRL). Lebih baik SELECT data detail per baris (km.kpi_name, kt.realisasi, km.target, kt.bulan_num) agar LLM pada tahap analisis dapat menghitung rata-rata untuk KPI numerik dan melaporkan status TRL secara terpisah.
+    - WHERE clause: SELALU normalisasi nilai string menggunakan LOWER() di kedua sisi untuk menghindari mismatch akibat inkonsistensi kapitalisasi data. Contoh: LOWER(kt.status) = LOWER('aktif'), LOWER(km.kategori) = LOWER('keuangan'), LOWER(km.tipe) = LOWER('persentase'), LOWER(kg.group_type) = LOWER('master'). Pengecualian: untuk nama orang gunakan UPPER(u.full_name) LIKE UPPER('%nama%'). Untuk nilai numerik dan boolean tidak perlu normalisasi.    
     
     PILIHAN TABEL:
     - GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
