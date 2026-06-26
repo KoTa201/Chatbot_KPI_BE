@@ -35,8 +35,6 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
-
-
 class ChatService:
     """Orchestrator pipeline RAG untuk chatbot KPI."""
 
