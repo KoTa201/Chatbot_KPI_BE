@@ -99,13 +99,12 @@ def build_nl_to_sql_prompt(
         column_statistics: str | None = None,
         session_context: str | None = None,
 ) -> str:
-    addon_prompt_block = _build_addon_prompt_block(addon_prompt)
     column_statistics_block = (
-        (column_statistics or "").strip()
-        or (
-            "Statistik kolom belum tersedia. Tetap gunakan schema dan pertanyaan pengguna; "
-            "jangan mengarang nilai unik, mean, maksimum, minimum, non-zero, atau non-null."
-        )
+            (column_statistics or "").strip()
+            or (
+                "Statistik kolom belum tersedia. Tetap gunakan schema dan pertanyaan pengguna; "
+                "jangan mengarang nilai unik, mean, maksimum, minimum, non-zero, atau non-null."
+            )
     )
 
     session_context_block = (session_context or "").strip() or "Tidak ada konteks percakapan sebelumnya."
@@ -113,29 +112,43 @@ def build_nl_to_sql_prompt(
     prompt = f"""[SYSTEM]
     Kamu adalah SQL expert. Konversi pertanyaan bahasa Indonesia ke PostgreSQL SELECT query.
 
-    [SESSION CONTEXT]
+    [SESSION CONTEXT — HANYA UNTUK RESOLVE REFERENSI AMBIGU]
     {session_context_block}
+
+    ATURAN PEMAKAIAN SESSION CONTEXT (PENTING):
+    - Session context HANYA dipakai untuk resolve kata ganti/referensi implisit di [PERTANYAAN ASLI PENGGUNA] seperti
+      "dia", "nya", "itu", "yang tadi", "orang itu", atau pertanyaan lanjutan yang TIDAK menyebut entity baru sama sekali.
+    - Jika [PERTANYAAN ASLI PENGGUNA] menyebut nama orang/entity secara EKSPLISIT, query baru WAJIB fokus HANYA pada
+      entity yang disebut eksplisit tersebut — ABAIKAN entity lain yang muncul di session context, walaupun entity
+      itu disebut di query sebelumnya (misal hasil perbandingan/komparasi).
+    - JANGAN menggabungkan/membawa entity dari session context ke query baru hanya karena pernah disebut bersamaan
+      sebelumnya. Contoh: jika sebelumnya user membandingkan "Andi vs Budi", lalu query baru bertanya
+      "kenapa Andi tidak capai target", maka query baru HANYA boleh memfilter Andi — JANGAN ikut menyertakan Budi.
+    - Session context tidak pernah menjadi sumber filter tambahan (WHERE) kecuali pertanyaan saat ini secara eksplisit
+      merujuknya melalui kata ganti/referensi implisit di atas.
+    - Jika ragu apakah suatu entity di session context relevan: ABAIKAN, dan prioritaskan apa yang tertulis literal
+      di [PERTANYAAN ASLI PENGGUNA].
 
     [PERTANYAAN ASLI PENGGUNA (q)]
     {user_query}
-    
+
     [SKEMA DATABASE (S)]
     {DB_SCHEMA}
-    
+
     [STATISTIK SETIAP KOLOM]
     {column_statistics_block}
-    
+
     [ATURAN]
     OUTPUT: Hanya SQL mentah — tanpa markdown, tanpa komentar, tanpa penjelasan.
             Jika tidak bisa dijawab: SELECT 'Data tidak tersedia untuk pertanyaan ini' AS pesan;
-    
+
     KEAMANAN:
     - Hanya generate query SELECT. Dilarang: INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, EXEC.
     - user_id di [CONTEXT] adalah user login, BUKAN filter default.
       Jika user menyebut "saya/milik saya/KPI saya": filter dengan kt.user_id = '{user_id}'
       (atau kmu.user_id = '{user_id}'). JANGAN filter via u.full_name untuk kasus ini.
       Abaikan untuk pertanyaan tim atau orang lain.
-    
+
     QUERY:
     - Gunakan tabel/kolom dari schema. Inferensi via (pertanyaan + schema + statistik kolom). Untuk numerik manfaatkan mean, maksimum, minimum, non-zero, non-null; untuk string/boolean manfaatkan nilai unik, non-zero, non-null.
     - Nama orang lain: UPPER(u.full_name) LIKE UPPER('%nama%'). JOIN users u ON u.id = kt.user_id.
@@ -145,7 +158,7 @@ def build_nl_to_sql_prompt(
     - Gunakan alias deskriptif. DISTINCT/GROUP BY jika menghitung orang atau item unik.
     - Rata-rata & Performa: JANGAN langsung menggunakan fungsi agregasi SQL (seperti AVG) jika pertanyaan menanyakan rata-rata/performa campuran dari berbagai KPI (yang mungkin berisi nilai TRL). Lebih baik SELECT data detail per baris (km.kpi_name, kt.realisasi, km.target, kt.bulan_num) agar LLM pada tahap analisis dapat menghitung rata-rata untuk KPI numerik dan melaporkan status TRL secara terpisah.
     - WHERE clause: SELALU normalisasi nilai string menggunakan LOWER() di kedua sisi untuk menghindari mismatch akibat inkonsistensi kapitalisasi data. Contoh: LOWER(kt.status) = LOWER('aktif'), LOWER(km.kategori) = LOWER('keuangan'), LOWER(km.tipe) = LOWER('persentase'), LOWER(kg.group_type) = LOWER('master'). Pengecualian: untuk nama orang gunakan UPPER(u.full_name) LIKE UPPER('%nama%'). Untuk nilai numerik dan boolean tidak perlu normalisasi.    
-    
+
     PILIHAN TABEL:
     - GUNAKAN kpi_tracker_records kt untuk realisasi/progress/capaian/tren
         JOIN kpi_master_records km ON kt.kpi_master_id = km.id
@@ -155,22 +168,22 @@ def build_nl_to_sql_prompt(
         JOIN users u ON u.id = kmu.user_id
         JOIN kpi_master_records km ON km.id = kmu.kpi_master_id
         JOIN kpi_groups kg ON km.group_id = kg.id  ← jika perlu filter tahun/group
-    
+
     KOLOM KPI:
     - km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
       Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
     - Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
       kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu (misal Adiansyah, Andi, dll.), wajib sertakan juga nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
       pertanyaan eksplisit minta threshold/status/kategori.
-    
+
     CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
     - DILARANG KERAS melakukan cast langsung ::NUMERIC atau CAST(... AS NUMERIC) pada kt.realisasi/km.target.
     - JANGAN cast ke NUMERIC dalam bentuk apapun (::NUMERIC, CAST(... AS NUMERIC), dsb.)
     - JANGAN lakukan kalkulasi persentase (/ target * 100) di query ini
-    
+
     [CONTEXT]
     Role: {user_role} | user_id: {user_id} | Tahun: {datetime.now().year}
-    
+
     SQL:"""
 
     return prompt
@@ -184,7 +197,6 @@ def build_analysis_prompt(
     addon_prompt: str | None = None,
 ) -> str:
     compact_rows = query_result
-    logger.error(f"Compact rows: {compact_rows}")
     result_str = json.dumps(
         compact_rows,
         ensure_ascii=False,
@@ -209,126 +221,185 @@ def build_analysis_prompt(
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         1. Jawab pertanyaan pengguna langsung terlebih dahulu.
-        2. Gunakan HANYA data di [DATA MENTAH]. Jangan tambah nama, angka, atau 
+        2. Gunakan HANYA data di [DATA MENTAH]. Jangan tambah nama, angka, atau
            periode yang tidak ada di data.
         3. Jangan tampilkan tabel kecuali diminta eksplisit.
-        4. Format jawaban sesuai scope pertanyaan:
-           - Jika [DATA MENTAH] mengandung kolom keterangan, realisasi, dan 
-             nama KPI → WAJIB gunakan format berikut per KPI:
+        4. Sebelum menjawab, petakan kolom di [DATA MENTAH] ke konsep berikut
+           (nama kolom asli bisa berbeda-beda tergantung query, jangan
+           berasumsi nama baku):
+           - kolom berisi nilai capaian saat ini   → REALISASI
+           - kolom berisi nilai sasaran             → TARGET
+           - kolom berisi nama KPI/metrik            → NAMA KPI
+           - kolom berisi nama orang/tim              → ENTITAS
+           - kolom berisi bulan/periode/tanggal        → PERIODE
+           - kolom berisi catatan/narasi bebas          → KETERANGAN
+           - kolom berisi status kategorikal (mis. achieve/partial/fail) → STATUS
+           Jika sebuah konsep tidak punya kolom yang cocok di data, anggap
+           konsep itu TIDAK TERSEDIA dan jangan mengarang isinya.
+        5. Format jawaban sesuai scope pertanyaan:
+           - Jika KETERANGAN, REALISASI, dan NAMA KPI tersedia → WAJIB gunakan
+             format berikut per KPI:
              1. [Nama KPI]
                 - Progress: realisasi [nilai] dari target [nilai]
-                - Keterangan: [dari kolom keterangan, tulis "-" jika kosong]
-                - Status: [dari kolom achieve/partial/fail jika tersedia](status punya segmen sendiri jangan digabung dengan keterangan)
-             Jika ada >1 individu, kelompokkan per individu terlebih dahulu,
+                - Keterangan: [dari KETERANGAN, tulis "-" jika kosong]
+                - Status: [dari STATUS jika tersedia](status punya segmen sendiri, jangan digabung dengan keterangan)
+             Jika ada >1 ENTITAS, kelompokkan per entitas terlebih dahulu,
              lalu per KPI di bawahnya.
-           - Jika >1 bulan per KPI:
+           - Jika >1 PERIODE per KPI:
              1. [Nama KPI] — Target: [nilai]
-                [Nama Bulan]:
+                [Nama Periode]:
                 - Progress: [nilai realisasi]
                 - Keterangan: [keterangan, tulis "-" jika kosong]
-                - Status: [tercapai/belum tercapai/dari kolom achieve/partial/fail]
-    
-                [Nama Bulan]:
+                - Status: [tercapai/belum tercapai/dari STATUS]
+
+                [Nama Periode]:
                 - Progress: [nilai realisasi]
                 - Keterangan: [keterangan, tulis "-" jika kosong]
-                - Status: [tercapai/belum tercapai/dari kolom achieve/partial/fail]
-               - Daftar/apa saja tanpa kolom keterangan → nama KPI + realisasi + 
-                 target saja.
-               - Level tim/agregat → rangkum per KPI, bukan per orang.
-               - Per individu → tampilkan per orang.
-        5. Jangan tambahkan rekomendasi, saran, atau opini.
-        6. Output hanya teks.
-        7. Jangan sebut keterbatasan sistem, grafik, atau visualisasi.
-        8. Data disajikan lebih dahulu, insight di bagian akhir.
+                - Status: [tercapai/belum tercapai/dari STATUS]
+           - Daftar/apa saja tanpa KETERANGAN → nama KPI + realisasi + target saja.
+           - Level tim/agregat (tanpa ENTITAS individual) → rangkum per KPI, bukan per orang.
+           - Per individu (ENTITAS tersedia & jadi fokus pertanyaan) → tampilkan per orang.
+        6. Jangan tambahkan rekomendasi, saran, atau opini di bagian jawaban utama.
+        7. Output hanya teks.
+        8. Jangan sebut keterbatasan sistem, grafik, atau visualisasi.
+        9. Data disajikan lebih dahulu, insight di bagian akhir.
 
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         ATURAN KPI TARGET / PROGRESS:
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
         - Tampilkan realisasi dan target apa adanya dari data.
-        - Jika keduanya tersedia, boleh tambahkan "(tercapai)" atau 
+        - Jika keduanya tersedia, boleh tambahkan "(tercapai)" atau
           "(belum tercapai)": numerik → realisasi >= target; TRL N → N >= target.
         - Jangan tulis status jika salah satu nilai tidak ada di data.
-        - Kolom achieve/partial/fail hanya sebut jika ada eksplisit di data.
-        - Jika bulan_num tersedia → sebut "bulan [N]" atau nama bulannya.
-          Jika tidak → tulis "bulan terakhir" saja.
-        - Untuk pertanyaan tanpa batas waktu eksplisit → tampilkan bulan 
-          terakhir; jika histori tersedia dan relevan, maksimal 3 bulan terakhir.
+        - STATUS (achieve/partial/fail) hanya disebut jika ada eksplisit di data.
+        - Jika PERIODE berupa nomor bulan → sebut "bulan [N]" atau nama bulannya.
+          Jika tidak ada PERIODE → tulis "bulan terakhir" saja.
+        - Untuk pertanyaan tanpa batas waktu eksplisit → tampilkan periode
+          terakhir; jika histori tersedia dan relevan, maksimal 3 periode terakhir.
         - Jika pertanyaan mengandung "persen" / "%" / "persentase capaian":
-          Hitung untuk SEMUA KPI: ekstrak angka dari realisasi dan target 
+          Hitung untuk SEMUA KPI: ekstrak angka dari realisasi dan target
           (abaikan satuan: TRL, /Hari, >, %), lalu hitung persentasenya.
           Tampilkan hasil akhir (misal: 71.43%) + status (tercapai/belum).
           Jangan tampilkan formula. Jangan hitung jika salah satu nilai tidak ada.
 
-      ATURAN INSIGHT:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ATURAN INSIGHT:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-        Tambahkan insight HANYA jika pertanyaan bersifat open-ended atau meminta 
+        Tambahkan insight HANYA jika pertanyaan bersifat open-ended atau meminta
         analisis/evaluasi/tren/perbandingan/kinerja.
-    
-        FORMAT:
+
+        LANGKAH 0 — KLASIFIKASI STRUKTUR DATA (wajib, lakukan diam-diam
+        sebelum menulis insight, jangan ditampilkan ke pengguna):
+
+        Tentukan struktur [DATA MENTAH] termasuk salah satu dari:
+        (a) SINGLE SNAPSHOT     — 1 entitas/KPI, 1 periode, tanpa histori.
+        (b) TIME-SERIES         — 1 entitas, >1 periode untuk KPI yang sama.
+        (c) MULTI-ENTITAS       — >1 ENTITAS (individu/tim), periode sama atau diabaikan.
+        (d) MULTI-ENTITAS + TIME-SERIES — >1 ENTITAS, masing-masing >1 periode.
+        (e) AGREGAT TIM         — data sudah dirangkum di level tim/grup, tanpa breakdown individu.
+
+        Struktur ini menentukan jenis insight yang relevan — jangan memakai
+        template insight yang sama untuk semua struktur.
+
+        CHECKLIST TEMUAN PER STRUKTUR (cek satu per satu, isi HANYA poin yang
+        benar-benar didukung data, lewati poin yang tidak relevan/tidak ada
+        datanya — jangan dipaksa diisi):
+
+        Untuk (a) SINGLE SNAPSHOT:
+          - Seberapa besar gap realisasi vs target (bukan cuma "belum tercapai", tapi seberapa jauh)?
+          - Apakah KETERANGAN menyebut pihak/sebab spesifik? Jika ya, itu jadi inti insight.
+          - Jika tidak ada KETERANGAN dan tidak ada histori → insight cukup satu kalimat faktual soal gap, jangan dipaksakan jadi panjang.
+
+        Untuk (b) TIME-SERIES (1 entitas):
+          - Arah pergerakan antar periode: naik konsisten / turun / stagnan / fluktuatif?
+          - Di periode mana terjadi perubahan paling tajam (naik tajam atau turun tajam)? Sebut periode-nya.
+          - Apakah ada periode tercapai lalu periode berikutnya gagal lagi (tidak stabil)?
+          - Jika KETERANGAN tersedia di periode anomali, kutip ringkas sebagai penyebab.
+
+        Untuk (c) MULTI-ENTITAS (tanpa time-series berarti):
+          - Siapa/apa yang paling unggul dan paling tertinggal untuk KPI yang sama?
+          - Apakah gap antar entitas besar atau tipis?
+          - Untuk entitas yang gagal: klasifikasikan hambatan internal vs eksternal HANYA jika KETERANGAN menyebut pihak yang bertanggung jawab. Jika tidak disebut, tulis "tidak teridentifikasi dari keterangan" — jangan menebak.
+
+        Untuk (d) MULTI-ENTITAS + TIME-SERIES:
+          - Gabungkan checklist (b) per entitas dan (c) antar entitas.
+          - PRIORITASKAN pola lintas: apakah >1 entitas gagal di KPI berbeda karena akar masalah yang mirip (mis. sama-sama menunggu pihak ketiga, sama-sama terhambat tim lain)? Ini lebih bernilai daripada melaporkan tiap KPI terpisah — sebutkan eksplisit di "Pola Lintas".
+          - Apakah gap antar entitas konsisten di banyak KPI (indikasi sistemik) atau hanya di satu KPI (indikasi insidental)? Sebutkan mana yang berlaku.
+          - Jika satu entitas tercapai di satu KPI tapi gagal di KPI lain dengan sifat hambatan berbeda (satu internal-only, satu bergantung pihak luar), catat kontras ini.
+
+        Untuk (e) AGREGAT TIM:
+          - Apakah seluruh KPI tim bergerak searah, atau ada KPI yang jadi outlier (jauh di bawah/atas KPI lain)?
+          - Jika ada histori multi-periode di level tim, terapkan checklist (b) pada level tim.
+          - Jangan berspekulasi soal individu yang menyebabkan hasil agregat — data ini tidak punya breakdown individu.
+
+        ATURAN PRINSIP (berlaku untuk semua struktur):
+        - Kegagalan eksternal tidak otomatis berarti kinerja individu/tim buruk — catat ini eksplisit bila relevan, agar pembaca tidak salah menilai.
+        - Jangan menyimpulkan "kinerja buruk" hanya dari target tidak tercapai tanpa mengecek sifat hambatan (internal/eksternal) dari KETERANGAN.
+        - Boleh skip poin yang tidak menghasilkan temuan nyata — kosong/dihilangkan lebih baik daripada generik.
+
+        KEWAJIBAN MENGGALI KETERANGAN (wajib, berlaku untuk semua struktur):
+        - Baca SELURUH baris KETERANGAN yang ada di [DATA MENTAH], bukan hanya
+          baris terakhir atau baris yang paling mencolok. Penyebab harus
+          disintesis dari keseluruhan KETERANGAN yang relevan dengan KPI/entitas
+          yang dibahas, bukan dikutip dari satu baris saja.
+        - Jika beberapa baris KETERANGAN untuk KPI/entitas/periode yang sama
+          menunjukkan sebab yang sama atau berkembang (mis. "menunggu approval"
+          lalu "masih menunggu approval" lalu "approval selesai, eksekusi
+          berjalan") → rangkum sebagai satu narasi penyebab yang menunjukkan
+          perkembangan, bukan menulis ulang tiap baris terpisah.
+        - Jika KETERANGAN antar baris saling bertentangan atau menyebut sebab
+          berbeda di periode berbeda → sebut keduanya, jangan pilih salah satu
+          secara sepihak.
+        - Penyebab tidak boleh berhenti di kutipan singkat tanpa makna (mis.
+          hanya "-" atau menyalin satu frasa) jika KETERANGAN sebenarnya berisi
+          konteks lebih kaya yang relevan dengan pertanyaan pengguna — gali isi
+          KETERANGAN itu, jangan hanya menempel potongannya.
+
+        FORMAT OUTPUT INSIGHT — FLEKSIBEL, MENGIKUTI KONTEKS PERTANYAAN:
         ---
         💡 Insight:
-    
-        [Nama KPI atau Nama Individu]
-        Pola      : [konsisten naik / stagnan sejak bulan X / melonjak di bulan X / 
-                     tidak ada progres / tercapai di bulan X / tidak tercapai di bulan X]
-        Penyebab  : [kutip ringkas inti keterangan bulan anomali, atau "-" jika keterangan kosong]
-        Catatan   : [hal paling menonjol dan actionable: gap terbesar, pencapaian 
-                     paling awal/akhir, paling tertinggal dibanding yang lain, pola 
-                     berulang di beberapa KPI/individu, atau "-" jika tidak ada]
-    
-        [Nama KPI atau Nama Individu berikutnya]
-        Pola      : ...
-        Penyebab  : ...
-        Sifat Hambatan : ...
-        Catatan   : ...
-    
-        [Jika relevan — hanya saat ada lebih dari satu blok dengan keterkaitan nyata]
-        Pola Lintas [KPI/Individu]: [hubungan sebab-akibat atau pola berulang yang 
-                     menghubungkan beberapa blok di atas, isi hanya jika benar-benar 
-                     didukung data, atau hilangkan bagian ini jika tidak ada]
-    
-        ATURAN ANALISIS (KEDALAMAN):
-        - Untuk setiap KPI/individu yang tidak mencapai target, klasifikasikan 
-          penyebabnya sebagai hambatan internal atau eksternal berdasarkan kolom 
-          keterangan saja — jangan menebak jika keterangan tidak menyebutkan pihak 
-          yang bertanggung jawab.
-        - Jika dua atau lebih KPI milik individu yang sama gagal karena akar masalah 
-          yang serupa (mis. sama-sama menunggu pihak ketiga, sama-sama terhambat tim 
-          lain), sebutkan keterkaitan ini secara eksplisit di "Pola Lintas" — ini 
-          lebih bernilai bagi HRD daripada melaporkan tiap KPI secara terpisah.
-        - Bedakan kegagalan karena kapasitas/kinerja individu vs kegagalan karena 
-          ketergantungan di luar kendalinya. Kegagalan eksternal tidak otomatis 
-          berarti kinerja individu buruk — catat ini secara eksplisit agar HRD 
-          tidak salah menilai.
-        - Untuk perbandingan antar individu: identifikasi bukan hanya siapa yang 
-          paling unggul/tertinggal, tapi apakah gap tersebut konsisten di banyak 
-          KPI atau hanya terjadi di satu KPI tertentu (indikasi masalah sistemik 
-          vs insidental).
-        - Jika sebuah KPI tercapai sementara KPI lain milik individu yang sama 
-          gagal, dan keduanya berbeda sifat (satu internal-only, satu bergantung 
-          pihak luar), catat kontras ini sebagai temuan yang relevan.
-    
+
+        Tidak ada struktur blok yang baku. Sesuaikan bentuk penyampaian dengan
+        apa yang ditanyakan pengguna (mis. pertanyaan soal tren → uraikan sebagai
+        narasi pergerakan waktu; pertanyaan perbandingan → uraikan sebagai
+        perbandingan langsung; pertanyaan terbuka tentang satu KPI/entitas →
+        boleh prosa singkat tanpa sub-label). Namun, poin-poin berikut WAJIB
+        termuat dalam insight (boleh dalam bentuk prosa, sub-judul, atau list,
+        sesuai mana yang paling jelas untuk konteks pertanyaan) — bukan
+        kosongan/template, dan hanya diisi bila benar-benar didukung data:
+          - Pola/arah: apa yang sebenarnya terjadi (naik/turun/stagnan/tercapai/
+            tidak tercapai), disertai periode spesifik bila PERIODE tersedia.
+          - Temuan: disintesis dari seluruh KETERANGAN relevan (lihat
+            KEWAJIBAN MENGGALI KETERANGAN di atas). Tulis "-" hanya jika memang
+            tidak ada KETERANGAN sama sekali untuk KPI/entitas itu.
+        - Untuk struktur (d) MULTI-ENTITAS + TIME-SERIES, bila checklist
+          menemukan keterkaitan nyata antar entitas/KPI, sertakan sebagai
+          bagian terpisah (mis. "Pola Lintas: ...") agar tidak tenggelam di
+          blok per-KPI.
+
         ATURAN ISI:
-        - Satu blok per KPI jika pertanyaan fokus ke KPI.
-          Satu blok per individu jika pertanyaan fokus ke perbandingan orang.
-        - Jika data hanya 1 bulan dan keterangan kosong: tulis 1 blok saja untuk 
-          KPI/individu dengan gap terbesar, isi Pola dengan status bulan itu.
-        - Isi "Pola" wajib menyebut bulan spesifik jika bulan_num tersedia.
-        - Isi "Penyebab" hanya dari kolom keterangan — jangan spekulasi.
-        - Isi "Sifat Hambatan" hanya berdasarkan apa yang tersurat di keterangan, 
-          bukan asumsi siapa yang "salah".
-        - Isi "Catatan" dan "Pola Lintas" hanya jika ada sesuatu yang benar-benar 
-          menonjol atau berdasar dari data. Jangan isi dengan kalimat generik 
-          seperti "performa baik" atau "hasil positif".
-    
+        - Kedalaman insight mengikuti scope pertanyaan: pertanyaan fokus ke
+          satu KPI → insight fokus ke KPI itu saja, tidak perlu membahas
+          entitas/KPI lain yang tidak ditanyakan.
+        - Pertanyaan fokus ke perbandingan orang/tim → utamakan insight
+          berbentuk perbandingan, bukan blok terpisah per orang.
+        - Jika struktur (a) SINGLE SNAPSHOT dengan KETERANGAN kosong: insight
+          cukup satu-dua kalimat soal gap, Penyebab "-".
+        - Klasifikasi hambatan internal/eksternal hanya berdasarkan apa yang
+          tersurat di KETERANGAN, bukan asumsi siapa yang "salah".
+
         LARANGAN:
-        - Jangan ulangi angka realisasi/target yang sudah tersaji di atas.
+        - Jangan ulangi angka realisasi/target yang sudah tersaji di bagian data utama.
         - Jangan spekulasi di luar [DATA MENTAH].
         - Jangan tambahkan saran atau rekomendasi.
-        - Jangan menyimpulkan "kinerja buruk" atau sejenisnya hanya dari target 
-          tidak tercapai tanpa mengecek sifat hambatannya (internal/eksternal) 
-          terlebih dahulu.
+        - Jangan isi penyebab/temuan dengan kalimat generik seperti
+          "performa baik", "hasil positif", atau "perlu ditingkatkan" — jika
+          tidak ada temuan konkret dari data, tulis "-" atau hilangkan poin itu.
+        - Jangan memaksakan format blok berulang (Pola/Penyebab/Catatan) jika
+          konteks pertanyaan lebih cocok disampaikan sebagai narasi singkat.
+
         [PERTANYAAN PENGGUNA]
         {user_query}
 
@@ -352,10 +423,6 @@ def build_scope_policy_assessment_prompt(
     addon_prompt_block = _build_addon_prompt_block(addon_prompt)
     session_context_block = (session_context or "").strip() or "Tidak ada konteks percakapan sebelumnya."
     evidence_block = (kpi_context or "").strip() or "Tidak ada evidence KPI tambahan."
-
-    log = addon_prompt_block or "Tidak ada constraint addon tambahan."
-    logger.error(f"Addon prompt: {log}")
-    logger.error(f"Evidence: {evidence_block}")
 
     prompt = f"""You are a strict scope and policy classifier for a KPI data analytics chatbot.
 

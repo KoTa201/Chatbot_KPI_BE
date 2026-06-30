@@ -18,32 +18,6 @@ class ChatbotService:
     def __init__(self, db: AsyncSession) -> None:  # ← AsyncSession
         self.repo: ChatbotRepository = ChatbotRepository(db)
 
-    # ─── Helper ───────────────────────────────────────────────────────────────
-
-    async def _get_or_404(self, chatbot_id: UUID) -> Chatbot:
-        chatbot = await self.repo.get_by_id(chatbot_id)
-        if not chatbot:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Chatbot id={chatbot_id} tidak ditemukan."
-            )
-        return chatbot
-
-    async def _check_chatbot_name_unique(self, chatbot_name: str, exclude_id: Optional[UUID] = None) -> None:
-        existing = await self.repo.get_by_chatbot_name(chatbot_name)
-        if existing and existing.id != exclude_id:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Chatbot name '{chatbot_name}' is already used."
-            )
-
-    async def _enforce_single_active_per_authority(
-        self,
-        authority: AuthorityEnum,
-        exclude_id: Optional[UUID] = None,
-    ) -> None:
-        await self.repo.deactivate_active_by_authority(authority, exclude_id=exclude_id)
-
     # ─── CRUD ─────────────────────────────────────────────────────────────────
 
     async def get_all(
@@ -103,4 +77,30 @@ class ChatbotService:
                 detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
             )
         return chatbot
+
+    # ─── Helper ───────────────────────────────────────────────────────────────
+
+    async def _get_or_404(self, chatbot_id: UUID) -> Chatbot:
+        chatbot = await self.repo.get_by_id(chatbot_id)
+        if not chatbot:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chatbot id={chatbot_id} tidak ditemukan."
+            )
+        return chatbot
+
+    async def _check_chatbot_name_unique(self, chatbot_name: str, exclude_id: Optional[UUID] = None) -> None:
+        existing = await self.repo.get_by_chatbot_name(chatbot_name)
+        if existing and existing.id != exclude_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Chatbot name '{chatbot_name}' is already used."
+            )
+
+    async def _enforce_single_active_per_authority(
+        self,
+        authority: AuthorityEnum,
+        exclude_id: Optional[UUID] = None,
+    ) -> None:
+        await self.repo.deactivate_active_by_authority(authority, exclude_id=exclude_id)
 
