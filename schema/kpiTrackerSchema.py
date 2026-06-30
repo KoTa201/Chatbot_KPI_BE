@@ -275,7 +275,7 @@ class BatchTrackerIngestionRequest(BaseModel):
         description="Skip tab yang gagal atau batalkan per-spreadsheet",
     )
     delay_between_sources: float = Field(
-        default=0.0,
+        default=2.0,
         ge=0.0,
         description="Jeda (detik) antar ingest spreadsheet. Gunakan untuk menghindari rate limit Google Sheets API.",
     )
