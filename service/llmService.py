@@ -1,25 +1,26 @@
 """Service untuk komunikasi ke LLM (NL-to-SQL dan analisis hasil)."""
 
 import asyncio
-import json
 import logging
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any, cast, NoReturn
 import httpx
 from fastapi import HTTPException, status
 from openai import AsyncOpenAI, APIConnectionError, APITimeoutError, APIStatusError
-from openai.types.chat import ChatCompletion,ChatCompletionUserMessageParam
+from openai.types.chat import ChatCompletion
 from configCredidential import get_settings
+from utils.helper.llmPayloadHelpers import (
+    VisualizationDecision,
+    build_payload,
+    clean_sql_output,
+    extract_text,
+    parse_visualization_decision,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class VisualizationDecision:
-    is_visualize: bool
-    chart_type: str | None = None
+__all__ = ["LLMService", "VisualizationDecision"]
 
 
 class LLMService:
@@ -84,7 +85,7 @@ class LLMService:
         )
 
         logger.debug("Raw SQL output from LLM: %s", raw)
-        return self._clean_sql_output(raw)
+        return clean_sql_output(raw)
 
     async def analyze_result(self, prompt: str) -> str:
         """
@@ -103,15 +104,20 @@ class LLMService:
         Stage 4 (streaming): Yield token chunks satu per satu dari LLM.
         Menggunakan stream=True agar respon muncul secara token-by-token.
         """
-        self._ensure_runtime_config(settings.LLM_MODEL_ANALYSIS)
+        model = settings.LLM_MODEL_ANALYSIS
+        self._ensure_runtime_config(model)
+        # Reuse the shared payload builder so gpt-5/reasoning models are handled
+        # the same way as non-streaming calls (max_completion_tokens, no temperature).
+        payload = build_payload(
+            model=model,
+            prompt=prompt,
+            temperature=0.4,
+            max_output_tokens=3000,
+            stop_sequences=None,
+        )
+        payload["stream"] = True
         try:
-            stream = await self.client.chat.completions.create(
-                model=settings.LLM_MODEL_ANALYSIS,
-                messages=[ChatCompletionUserMessageParam(role="user", content=prompt)],
-                temperature=0.4,
-                max_tokens=3000,
-                stream=True,
-            )
+            stream = await self.client.chat.completions.create(**payload)
             async for chunk in stream:
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta and delta.content:
@@ -145,37 +151,9 @@ class LLMService:
                 temperature=0.0,
                 max_output_tokens=100,
             )
-            return self._parse_visualization_decision(raw)
+            return parse_visualization_decision(raw)
         except HTTPException:
             return VisualizationDecision(is_visualize=False, chart_type=None)
-
-    @staticmethod
-    def _is_reasoning_model(model: str) -> bool:
-        return model.startswith(("gpt-5", "o1", "o3", "o4"))
-
-    @staticmethod
-    def _build_payload(
-            model: str,
-        prompt: str,
-        temperature: float,
-        max_output_tokens: int,
-        stop_sequences: list[str] | None,
-    ) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if LLMService._is_reasoning_model(model):
-            # Reasoning models only accept default temperature and use
-            # max_completion_tokens instead of the legacy max_tokens. Send it via
-            # extra_body so older openai SDKs without the typed kwarg still forward it.
-            payload["extra_body"] = {"max_completion_tokens": max_output_tokens}
-        else:
-            payload["temperature"] = temperature
-            payload["max_tokens"] = max_output_tokens
-        if stop_sequences:
-            payload["stop"] = stop_sequences
-        return payload
 
     async def _post_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = await self.client.chat.completions.create(**payload)
@@ -190,7 +168,7 @@ class LLMService:
         for attempt in range(self.max_retries + 1):
             try:
                 data = await self._post_chat_completion(payload)
-                return self._extract_text(data)
+                return extract_text(data)
 
             except APITimeoutError as error:
                 is_last_attempt = attempt >= self.max_retries
@@ -269,7 +247,7 @@ class LLMService:
     ) -> str:
         try:
             self._ensure_runtime_config(model)
-            payload = self._build_payload(
+            payload = build_payload(
                 model=model,
                 prompt=prompt,
                 temperature=temperature,
@@ -306,90 +284,6 @@ class LLMService:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
         )
-
-    def _extract_text(self, response_data: dict[str, Any]) -> str:
-        try:
-            self._raise_if_error_payload(response_data)
-            message_content = self._extract_message_content(response_data)
-            text = self._normalize_content_to_text(message_content)
-            if not text:
-                raise ValueError("Response LLM kosong.")
-            return text
-        except (KeyError, IndexError) as error:
-            raise ValueError(
-                f"Format response AI tidak sesuai: {str(error)}") from error
-
-    @staticmethod
-    def _raise_if_error_payload(response_data: dict[str, Any]) -> None:
-        if "error" not in response_data:
-            return
-        error_payload = response_data.get("error") or {}
-        error_message = error_payload.get("message") or "Unknown LLM error"
-        raise ValueError(f"LLM error payload: {error_message}")
-
-    @staticmethod
-    def _extract_message_content(response_data: dict[str, Any]) -> Any:
-        choices = response_data.get("choices", [])
-        if not choices:
-            raise ValueError("Tidak ada choices pada response LLM.")
-        message = choices[0].get("message") or {}
-        return message.get("content")
-
-    @staticmethod
-    def _normalize_content_to_text(content: Any) -> str:
-        if isinstance(content, str):
-            return content.strip()
-
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str) and item.strip():
-                    parts.append(item.strip())
-                    continue
-                if isinstance(item, dict):
-                    text_part = item.get("text")
-                    if isinstance(text_part, str) and text_part.strip():
-                        parts.append(text_part.strip())
-            return "\n".join(parts)
-
-        return ""
-
-    @staticmethod
-    def _parse_visualization_decision(raw: str) -> VisualizationDecision:
-        cleaned = (raw or "").strip()
-        if cleaned.startswith("```"):
-            lines = [line for line in cleaned.splitlines()
-                     if not line.strip().startswith("```")]
-            cleaned = "\n".join(lines).strip()
-
-        try:
-            payload = json.loads(cleaned)
-        except json.JSONDecodeError:
-            return VisualizationDecision(is_visualize=False, chart_type=None)
-
-        is_visualize = bool(payload.get("is_visualize", False))
-        chart_type = payload.get("chart_type")
-        if is_visualize and not chart_type:
-            chart_type = "bar"
-
-        return VisualizationDecision(
-            is_visualize=is_visualize,
-            chart_type=chart_type,
-        )
-
-    @staticmethod
-    def _clean_sql_output(raw: str) -> str:
-        """
-        Bersihkan output LLM dari artefak markdown atau karakter tak diinginkan.
-        """
-        # Hapus backtick markdown jika ada
-        sql = raw.strip()
-        if sql.startswith("```"):
-            lines = sql.split("\n")
-            # Hapus baris pertama (```sql atau ```) dan terakhir (```)
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            sql = "\n".join(lines).strip()
-        return sql
 
 
 class _UseNextModelCandidate(Exception):

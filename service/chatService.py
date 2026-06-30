@@ -30,6 +30,13 @@ from utils.responses.chatResponseBuilder import (
     build_security_blocked_response,
 )
 from utils.helper.sseHelpers import emit_sse_response, format_sse_metadata, format_sse_chunk, format_sse_done
+from utils.helper.pipelineStageHelpers import (
+    build_pipeline_context,
+    coerce_message_id,
+    complete_stage,
+    map_pipeline_error,
+    start_stage,
+)
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -87,7 +94,7 @@ class ChatService:
 
         session_context = await self.clarification_service._build_recent_conversation_information(session_id, user_message)
 
-        pipeline = self._build_pipeline_context(session_id, user_id, user_role, user_message)
+        pipeline = build_pipeline_context(session_id, user_id, user_role, user_message)
         stages: list[PipelineStageInfo] = []
         total_start = time.monotonic()
 
@@ -109,8 +116,8 @@ class ChatService:
                         yield event
                     return
             else:
-                stage = self._start_stage(stages, "Ambiguity Detection")
-                self._complete_stage(stage, "completed", "Using disambiguated query")
+                stage = start_stage(stages, "Ambiguity Detection")
+                complete_stage(stage, "completed", "Using disambiguated query")
 
             # Stage 2-3: NL-to-SQL + Visualization Decision (parallel)
 
@@ -128,7 +135,7 @@ class ChatService:
                 return
 
             sanitized_sql = validation.sanitized_sql or ""
-            logger.error("Sanitized SQL: %s", sanitized_sql)
+            logger.debug("Sanitized SQL: %s", sanitized_sql)
 
             # Stage 5: SQL Execution
             query_result, rows_count = await self._run_sql_execution_stage(stages, sanitized_sql, pipeline)
@@ -166,7 +173,7 @@ class ChatService:
 
         except Exception as error:
             await self.db.rollback()
-            raise await self._handle_pipeline_error(pipeline, error)
+            raise map_pipeline_error(pipeline, error)
 
     # ------------------------------------------------------------------
     # Extracted pipeline sub-flows
@@ -189,23 +196,23 @@ class ChatService:
                 (caller must yield from it and return).
             None if no clarification needed — pipeline should continue.
         """
-        stage = self._start_stage(stages, "Ambiguity Detection")
+        stage = start_stage(stages, "Ambiguity Detection")
 
         clarification_response = await self.clarification_service.process_user_query(
             user_query=user_message,
             user_role=user_role,
             session_id=session_id,
             addon_prompt=addon_prompt,
-            message_id=self._coerce_message_id(user_chat_message_id) if user_chat_message_id else None,
+            message_id=coerce_message_id(user_chat_message_id) if user_chat_message_id else None,
             session_context=session_context
         )
 
         if clarification_response is None:
-            self._complete_stage(stage, "completed", "No clarification needed")
+            complete_stage(stage, "completed", "No clarification needed")
             return None
 
         if clarification_response.is_out_of_scope:
-            self._complete_stage(stage, "completed", "Query blocked by scope or policy")
+            complete_stage(stage, "completed", "Query blocked by scope or policy")
             query_message = clarification_response.message or "Mohon maaf pertanyaan anda diluar konteks domain sistem atau melanggar aturan yang telah ditetapkan"
             await self.create_chatbot_message(
                 session_id=session_id,
@@ -219,7 +226,7 @@ class ChatService:
             )
 
         if clarification_response.clarifying_question:
-            self._complete_stage(stage, "completed", "Clarification question generated")
+            complete_stage(stage, "completed", "Clarification question generated")
             query_message = build_clarification_prompt_message(
                 user_message=user_message,
                 questions=[q.question for q in (clarification_response.questions or [])],
@@ -236,36 +243,64 @@ class ChatService:
                 clarification_questions=clarification_response.questions,
             )
 
-        self._complete_stage(stage, "completed", "No clarification needed")
+        complete_stage(stage, "completed", "No clarification needed")
         return None
 
     async def _stream_narrative_analysis(
-        self,
-        stages: list[PipelineStageInfo],
-        session_id: UUID,
-        user_message: str,
-        sanitized_sql: str,
-        query_result: list[dict],
-        rows_count: int,
-        graphic_results: list[GraphicResult],
-        addon_prompt: str | None,
-        show_sql: bool,
-        total_start: float,
-        unsupported_message: str | None = None,
+            self,
+            stages: list[PipelineStageInfo],
+            session_id: UUID,
+            user_message: str,
+            sanitized_sql: str,
+            query_result: list[dict],
+            rows_count: int,
+            graphic_results: list[GraphicResult],
+            addon_prompt: str | None,
+            show_sql: bool,
+            total_start: float,
+            unsupported_message: str | None = None,
     ) -> AsyncIterator[str]:
         """Stream narrative analysis: metadata → LLM tokens → done, then persist."""
-        analysis_stage = self._start_stage(stages, "result_analysis")
-        analysis_prompt = build_analysis_prompt(
-            user_query=user_message,
-            executed_sql=sanitized_sql,
-            query_result=query_result,
-            rows_count=rows_count,
-            addon_prompt=addon_prompt,
+        analysis_stage = start_stage(stages, "result_analysis")
+        total_ms = int((time.monotonic() - total_start) * 1000)
+
+        yield self._build_metadata_event(
+            session_id, sanitized_sql, graphic_results, rows_count, total_ms, stages, query_result, show_sql
         )
 
-        total_ms = int((time.monotonic() - total_start) * 1000)
-        graphics_payload = build_graphics_payload(graphic_results)
+        prefix = unsupported_message or ""
+        if unsupported_message:
+            yield format_sse_chunk(unsupported_message)
 
+        has_data = rows_count > 0 and bool(query_result)
+        if not has_data:
+            full_narrative = await self._handle_no_data(analysis_stage, session_id, graphic_results, prefix)
+            yield format_sse_chunk(full_narrative)
+            yield format_sse_done()
+            return
+
+        narrative_out: list[str] = []
+        async for event in self._stream_llm_analysis(
+            analysis_stage, narrative_out, user_message, sanitized_sql,
+            query_result, rows_count, addon_prompt, prefix,
+        ):
+            yield event
+
+        full_narrative = narrative_out[0] if narrative_out else prefix
+        yield format_sse_done()
+        await self._persist_message(session_id, full_narrative, graphic_results)
+
+    def _build_metadata_event(
+            self,
+            session_id: UUID,
+            sanitized_sql: str,
+            graphic_results: list[GraphicResult],
+            rows_count: int,
+            total_ms: int,
+            stages: list[PipelineStageInfo],
+            query_result: list[dict],
+            show_sql: bool,
+    ) -> str:
         metadata_resp = ChatResponse(
             session_id=session_id,
             message="",
@@ -285,119 +320,72 @@ class ChatService:
         )
         payload = metadata_resp.model_dump(mode="json")
         metadata = {k: v for k, v in payload.items() if k != "message"}
-        yield format_sse_metadata(metadata)
+        return format_sse_metadata(metadata)
 
-        full_narrative = unsupported_message or ""
-        if unsupported_message:
-            yield format_sse_chunk(unsupported_message)
+    async def _handle_no_data(
+            self,
+            analysis_stage,
+            session_id: UUID,
+            graphic_results: list[GraphicResult],
+            prefix: str,
+    ) -> str:
+        fallback = prefix + "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
+        complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
+        await self._persist_message(session_id, fallback, graphic_results)
+        return fallback
 
-        if rows_count == 0 or not query_result:
+    async def _stream_llm_analysis(
+            self,
+            analysis_stage,
+            narrative_out: list[str],
+            user_message: str,
+            sanitized_sql: str,
+            query_result: list[dict],
+            rows_count: int,
+            addon_prompt: str | None,
+            prefix: str,
+    ) -> AsyncIterator[str]:
+        """Yield SSE token chunks; append the full narrative to narrative_out for the caller."""
+        analysis_prompt = build_analysis_prompt(
+            user_query=user_message,
+            executed_sql=sanitized_sql,
+            query_result=query_result,
+            rows_count=rows_count,
+            addon_prompt=addon_prompt,
+        )
 
-            fallback = (unsupported_message or "") + "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
-
-            self._complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
-            yield format_sse_chunk(fallback)
-            yield format_sse_done()
-            await self.create_chatbot_message(
-                session_id=session_id,
-                message=fallback,
-                graphics=graphics_payload,
-            )
-            await self.db.commit()
-            return
-
+        accumulated = ""
         try:
             async for token in self.llm_service.analyze_result_stream(analysis_prompt):
-                full_narrative += token
+                accumulated += token
                 yield format_sse_chunk(token)
                 await asyncio.sleep(0)
-            self._complete_stage(analysis_stage, "success", "Analisis naratif berhasil dibuat.")
+            complete_stage(analysis_stage, "success", "Analisis naratif berhasil dibuat.")
         except HTTPException as e:
-            if e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
-                self._complete_stage(analysis_stage, "degraded", "Dilewati karena rate limit.")
-                fallback = (
-                    "Data berhasil diambil, namun analisis AI belum tersedia "
-                    "karena kuota/rate limit LLM tercapai. Silakan coba lagi nanti."
-                )
-                yield format_sse_chunk(fallback)
-                full_narrative = fallback
-            else:
+            if e.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
                 raise
+            complete_stage(analysis_stage, "degraded", "Dilewati karena rate limit.")
+            accumulated = (
+                "Data berhasil diambil, namun analisis AI belum tersedia "
+                "karena kuota/rate limit LLM tercapai. Silakan coba lagi nanti."
+            )
+            yield format_sse_chunk(accumulated)
 
-        yield format_sse_done()
+        narrative_out.append(prefix + accumulated)
 
+    async def _persist_message(
+            self,
+            session_id: UUID,
+            message: str,
+            graphic_results: list[GraphicResult],
+    ) -> None:
+        graphics_payload = build_graphics_payload(graphic_results)
         await self.create_chatbot_message(
             session_id=session_id,
-            message=full_narrative,
+            message=message,
             graphics=graphics_payload,
         )
         await self.db.commit()
-
-    # ------------------------------------------------------------------
-    # Static helpers
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _build_pipeline_context(
-        session_id: UUID,
-        user_id: UUID,
-        user_role: str,
-        user_message: str,
-    ) -> ChatPipelineContext:
-        return ChatPipelineContext(
-            session_id=session_id,
-            user_id=user_id,
-            user_role=user_role,
-            user_query=user_message,
-        )
-
-    @staticmethod
-    def _coerce_message_id(message_id: UUID | str) -> UUID:
-        return message_id if isinstance(message_id, UUID) else UUID(str(message_id))
-
-    @staticmethod
-    def _start_stage(stages: list[PipelineStageInfo], stage_name: str) -> PipelineStageInfo:
-        stage = PipelineStageInfo(stage=stage_name, status="running")
-        stages.append(stage)
-        return stage
-
-    @staticmethod
-    def _complete_stage(stage: PipelineStageInfo, status_value: str, detail: str) -> None:
-        stage.status = status_value
-        stage.detail = detail
-
-    @staticmethod
-    async def _handle_pipeline_error(
-        pipeline: ChatPipelineContext,
-        error: Exception,
-    ) -> HTTPException:
-        pipeline.execution_status = "error"
-
-        if isinstance(error, HTTPException):
-            if error.status_code in (
-                status.HTTP_408_REQUEST_TIMEOUT,
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                status.HTTP_429_TOO_MANY_REQUESTS,
-            ):
-                return error
-
-            if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
-                logger.error("Error server saat memproses query: %s", error)
-                return HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Layanan chatbot sementara tidak tersedia. Silakan coba lagi.",
-                )
-
-            return HTTPException(
-                status_code=error.status_code,
-                detail="Permintaan tidak dapat diproses.",
-            )
-
-        logger.error("Error tidak terduga dalam memproses query: %s", error)
-        return HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Terjadi kesalahan saat memproses permintaan Anda. Silakan coba lagi.",
-        )
 
     # ------------------------------------------------------------------
     # Pipeline stages
@@ -413,7 +401,7 @@ class ChatService:
         addon_prompt: str | None = None,
         session_context: str | None = None,
     ) -> str:
-        stage = self._start_stage(stages, "nl_to_sql")
+        stage = start_stage(stages, "nl_to_sql")
         try:
             column_statistics = await self.column_statistics_service.build_nl_to_sql_statistics()
             nl_prompt = build_nl_to_sql_prompt(
@@ -426,17 +414,17 @@ class ChatService:
             )
             generated_sql = await self.llm_service.generate_sql(nl_prompt)
             pipeline.generated_sql = generated_sql
-            self._complete_stage(stage, "success", "SQL berhasil digenerate.")
+            complete_stage(stage, "success", "SQL berhasil digenerate.")
             return generated_sql
         except HTTPException as error:
             if error.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
-                self._complete_stage(
+                complete_stage(
                     stage,
                     "degraded",
                     "SQL tidak dapat digenerate karena layanan AI sedang tidak tersedia.",
                 )
             else:
-                self._complete_stage(stage, "failed", "Gagal melakukan proses NL-to-SQL.")
+                complete_stage(stage, "failed", "Gagal melakukan proses NL-to-SQL.")
             raise
 
     async def _run_visualization_decision_stage(
@@ -444,14 +432,14 @@ class ChatService:
         stages: list[PipelineStageInfo],
         user_message: str,
     ):
-        stage = self._start_stage(stages, "visualization_decision")
+        stage = start_stage(stages, "visualization_decision")
         prompt = build_graphic_generation_prompt(user_query=user_message)
         decision = await self.llm_service.decide_visualization_request(prompt=prompt)
         if decision.is_visualize:
             detail = f"Permintaan visualisasi terdeteksi (chart: {decision.chart_type or 'bar'})."
         else:
             detail = "Permintaan visualisasi tidak terdeteksi."
-        self._complete_stage(stage, "success", detail)
+        complete_stage(stage, "success", detail)
         return decision
 
     def _run_sql_validation_stage(
@@ -462,7 +450,7 @@ class ChatService:
         user_role: str,
         pipeline: ChatPipelineContext,
     ):
-        stage = self._start_stage(stages, "sql_validation")
+        stage = start_stage(stages, "sql_validation")
         validation = self.guardrails_service.validate(
             sql=generated_sql,
             user_id=user_id,
@@ -472,9 +460,9 @@ class ChatService:
         pipeline.wireguard_reason = validation.reason
 
         if validation.is_valid:
-            self._complete_stage(stage, "success", "Query lolos validasi keamanan.")
+            complete_stage(stage, "success", "Query lolos validasi keamanan.")
         else:
-            self._complete_stage(stage, "blocked", validation.reason or "")
+            complete_stage(stage, "blocked", validation.reason or "")
         return validation
 
     async def _run_sql_execution_stage(
@@ -483,7 +471,7 @@ class ChatService:
         sanitized_sql: str,
         pipeline: ChatPipelineContext,
     ) -> tuple[list[dict], int]:
-        stage = self._start_stage(stages, "sql_execution")
+        stage = start_stage(stages, "sql_execution")
         exec_start = time.monotonic()
 
         logger.info("Menjalankan SQL: %s", sanitized_sql)
@@ -509,7 +497,7 @@ class ChatService:
         pipeline.execution_status = "success"
         pipeline.rows_returned = rows_count
         pipeline.execution_time_ms = exec_ms
-        self._complete_stage(
+        complete_stage(
             stage,
             "success",
             f"{rows_count} baris data ditemukan ({exec_ms}ms).",
@@ -523,7 +511,7 @@ class ChatService:
         chart_type: str,
         session_id: UUID,
     ) -> list[GraphicResult]:
-        stage = self._start_stage(stages, "graphic_generation")
+        stage = start_stage(stages, "graphic_generation")
         try:
             results = self.graphic_service.generateGraphicPerKpi(
                 query_result=query_result,
@@ -531,14 +519,14 @@ class ChatService:
                 session_id=session_id,
             )
             chart_types = list(dict.fromkeys(r.chart_type for r in results))
-            self._complete_stage(
+            complete_stage(
                 stage,
                 "success",
                 f"{len(results)} grafik berhasil digenerate (type: {', '.join(chart_types)}).",
             )
             return results
         except ValueError as error:
-            self._complete_stage(stage, "degraded", str(error))
+            complete_stage(stage, "degraded", str(error))
             return []
 
 
