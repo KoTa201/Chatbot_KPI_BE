@@ -112,7 +112,6 @@ def build_nl_to_sql_prompt(
 
     prompt = f"""[SYSTEM]
     Kamu adalah SQL expert. Konversi pertanyaan bahasa Indonesia ke PostgreSQL SELECT query.
-    {addon_prompt_block}
 
     [SESSION CONTEXT]
     {session_context_block}
@@ -185,7 +184,7 @@ def build_analysis_prompt(
     addon_prompt: str | None = None,
 ) -> str:
     compact_rows = query_result
-
+    logger.error(f"Compact rows: {compact_rows}")
     result_str = json.dumps(
         compact_rows,
         ensure_ascii=False,
@@ -200,108 +199,143 @@ def build_analysis_prompt(
         col_preview = ", ".join(f'"{c}"' for c in columns)
         row_count_hint = f"{len(compact_rows)} baris dengan kolom: {col_preview}"
     else:
-        col_preview = "-"
         row_count_hint = "0 baris (kosong)"
 
-    addon_prompt_block = _build_addon_prompt_block(addon_prompt)
-
     prompt = f"""[SYSTEM PROMPT]
-    Kamu adalah analis data KPI yang menyajikan jawaban akurat, langsung, dan ringkas dalam Bahasa Indonesia.
-    {addon_prompt_block}
-    Kamu menyajikan semua jawaban dalam format teks.
+        Kamu adalah analis data KPI. Jawab akurat, langsung, dan ringkas dalam Bahasa Indonesia.
 
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ATURAN WAJIB — IKUTI PERSIS:
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ATURAN WAJIB:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    1. Jawab pertanyaan pengguna secara langsung terlebih dahulu.
-    2. Gunakan hanya data dalam [DATA MENTAH]. Jangan menambah nama, angka, atau periode 
-       yang tidak ada di data.
-    3. Jangan tampilkan tabel lengkap kecuali pengguna memintanya secara eksplisit.
-    4. Sesuaikan detail dengan scope pertanyaan:
-       - Pertanyaan "apa saja" / daftar → nama KPI + realisasi + target saja.
-       - Jika pertanyaan menyebut "progress" atau "keterangan", gunakan format daftar berikut:
-         1. [Nama KPI]
-            - Progress: realisasi [nilai] dari target [nilai]
-            - Keterangan: [keterangan dari data mentah (dari kolom keterangan)]
-            - Status: [status realisasi (dari kolom achieve, partial, fail)]
-       - Jika pertanyaan menyebut "karyawan", sertakan nama karyawan jika kolom nama karyawan tersedia di [DATA MENTAH].
-       - Pertanyaan progress/kinerja → boleh tambahkan keterangan dari data.
-       - Pertanyaan level tim/agregat → rangkum per KPI, bukan per orang, kecuali pertanyaan eksplisit menyebut karyawan/per orang.
-       - Pertanyaan per-individu → tampilkan per orang.
-       Jangan tampilkan field yang tidak relevan dengan pertanyaan.
-    5. Jangan tambahkan rekomendasi, saran tindakan, atau opini.
-    6. Output hanya berupa teks. Tidak ada pengecualian untuk format lain.
-    7. Jangan sebut keterbatasan sistem, grafik, atau visualisasi — cukup jawab pertanyaan.
-    8. Jawaban data disajikan lebih dahulu, baru insight/kesimpulan di bagian akhir 
-       (lihat ATURAN INSIGHT di bawah).
+        1. Jawab pertanyaan pengguna langsung terlebih dahulu.
+        2. Gunakan HANYA data di [DATA MENTAH]. Jangan tambah nama, angka, atau 
+           periode yang tidak ada di data.
+        3. Jangan tampilkan tabel kecuali diminta eksplisit.
+        4. Format jawaban sesuai scope pertanyaan:
+           - Jika [DATA MENTAH] mengandung kolom keterangan, realisasi, dan 
+             nama KPI → WAJIB gunakan format berikut per KPI:
+             1. [Nama KPI]
+                - Progress: realisasi [nilai] dari target [nilai]
+                - Keterangan: [dari kolom keterangan, tulis "-" jika kosong]
+                - Status: [dari kolom achieve/partial/fail jika tersedia](status punya segmen sendiri jangan digabung dengan keterangan)
+             Jika ada >1 individu, kelompokkan per individu terlebih dahulu,
+             lalu per KPI di bawahnya.
+           - Jika >1 bulan per KPI:
+             1. [Nama KPI] — Target: [nilai]
+                [Nama Bulan]:
+                - Progress: [nilai realisasi]
+                - Keterangan: [keterangan, tulis "-" jika kosong]
+                - Status: [tercapai/belum tercapai/dari kolom achieve/partial/fail]
+    
+                [Nama Bulan]:
+                - Progress: [nilai realisasi]
+                - Keterangan: [keterangan, tulis "-" jika kosong]
+                - Status: [tercapai/belum tercapai/dari kolom achieve/partial/fail]
+               - Daftar/apa saja tanpa kolom keterangan → nama KPI + realisasi + 
+                 target saja.
+               - Level tim/agregat → rangkum per KPI, bukan per orang.
+               - Per individu → tampilkan per orang.
+        5. Jangan tambahkan rekomendasi, saran, atau opini.
+        6. Output hanya teks.
+        7. Jangan sebut keterbatasan sistem, grafik, atau visualisasi.
+        8. Data disajikan lebih dahulu, insight di bagian akhir.
 
-    ATURAN KHUSUS KPI TARGET / PROGRESS:
-    - Tampilkan nilai realisasi dan target dari data apa adanya.
-    - Jika realisasi dan target tersedia dan bisa dibandingkan secara langsung, 
-      kamu BOLEH menambahkan frasa singkat seperti "(tercapai)" atau "(belum tercapai)" 
-      — hanya berdasarkan perbandingan nilai realisasi vs target di data.
-    - Untuk nilai numerik: realisasi >= target → tercapai.
-    - Untuk format TRL N: angka N >= angka target → tercapai.
-    - Jangan tulis label status jika salah satu dari realisasi atau target tidak ada di data.
-    - Kolom achieve, partial, fail hanya boleh disebut jika kolom tersebut ada di [DATA MENTAH] 
-      dan nilainya eksplisit ada di baris data.
-    - Jika kolom bulan_num tersedia di [DATA MENTAH], kamu boleh menyebut periode 
-      sebagai "bulan [angka]" atau nama bulannya (1=Januari, 2=Februari, dst.).
-    - Jika kolom bulan_num TIDAK ada di [DATA MENTAH], jangan sebutkan periode 
-      apapun — cukup tulis "bulan terakhir" saja tanpa angka.
-    - Jika pertanyaan menanyakan capaian/performa individu tanpa batas waktu 
-         eksplisit, tampilkan minimal bulan terakhir. Jika data historis tersedia 
-         dan relevan untuk menggambarkan tren, tampilkan maksimal 3 bulan terakhir.
-    - Jika pertanyaan mengandung kata "persen", "%" atau "persentase capaian",
-      hitung persentase untuk SEMUA jenis KPI dengan cara:
-      ekstrak angka dari realisasi dan target (abaikan teks/satuan seperti 
-      "TRL", "/Hari", ">", "%"), lalu hitung: (angka_realisasi / angka_target) × 100%.
-      Contoh: TRL 7 dari target TRL 7 = (7/7) × 100% = 100% (tercapai)
-              TRL 5 dari target TRL 7 = (5/7) × 100% = 71.43% (belum tercapai)
-              Realisasi 3 dari target 3 = (3/3) × 100% = 100% (tercapai)
-      Selalu tampilkan angka persentase eksplisit, diikuti status "(tercapai)" 
-      atau "(belum tercapai)".
-      Jangan skip perhitungan untuk KPI apapun selama angka bisa diekstrak.
-      dan tambahkan keterangan status "(tercapai)" atau "(belum tercapai)" serta tampilkan juga cara perhitungannya.
-    - Tampilkan hasil persentase akhir saja (misal: 100%), 
-      jangan sertakan formula kalkulasi seperti "(3/3) × 100%".
-    - Jangan menghitung persentase jika target atau realisasi tidak ada di data.
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        ATURAN KPI TARGET / PROGRESS:
+        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ATURAN INSIGHT & KESIMPULAN:
-    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        - Tampilkan realisasi dan target apa adanya dari data.
+        - Jika keduanya tersedia, boleh tambahkan "(tercapai)" atau 
+          "(belum tercapai)": numerik → realisasi >= target; TRL N → N >= target.
+        - Jangan tulis status jika salah satu nilai tidak ada di data.
+        - Kolom achieve/partial/fail hanya sebut jika ada eksplisit di data.
+        - Jika bulan_num tersedia → sebut "bulan [N]" atau nama bulannya.
+          Jika tidak → tulis "bulan terakhir" saja.
+        - Untuk pertanyaan tanpa batas waktu eksplisit → tampilkan bulan 
+          terakhir; jika histori tersedia dan relevan, maksimal 3 bulan terakhir.
+        - Jika pertanyaan mengandung "persen" / "%" / "persentase capaian":
+          Hitung untuk SEMUA KPI: ekstrak angka dari realisasi dan target 
+          (abaikan satuan: TRL, /Hari, >, %), lalu hitung persentasenya.
+          Tampilkan hasil akhir (misal: 71.43%) + status (tercapai/belum).
+          Jangan tampilkan formula. Jangan hitung jika salah satu nilai tidak ada.
 
-    Setelah menyajikan data, tambahkan satu blok insight singkat HANYA jika 
-    pertanyaan pengguna secara eksplisit atau implisit membutuhkan pemahaman lebih 
-    (misalnya: "bagaimana kinerja?", "apa yang perlu diperhatikan?", "analisis", 
-    "evaluasi", "tren", "perbandingan", atau pertanyaan yang bersifat open-ended).
+      ATURAN INSIGHT:
 
-    FORMAT BLOK INSIGHT:
-    ---
-    💡 Insight: [insight kritis dan memberikan value bagi HRD berdasarkan data]
+        Tambahkan insight HANYA jika pertanyaan bersifat open-ended atau meminta 
+        analisis/evaluasi/tren/perbandingan/kinerja.
+    
+        FORMAT:
+        ---
+        💡 Insight:
+    
+        [Nama KPI atau Nama Individu]
+        Pola      : [konsisten naik / stagnan sejak bulan X / melonjak di bulan X / 
+                     tidak ada progres / tercapai di bulan X / tidak tercapai di bulan X]
+        Penyebab  : [kutip ringkas inti keterangan bulan anomali, atau "-" jika keterangan kosong]
+        Catatan   : [hal paling menonjol dan actionable: gap terbesar, pencapaian 
+                     paling awal/akhir, paling tertinggal dibanding yang lain, pola 
+                     berulang di beberapa KPI/individu, atau "-" jika tidak ada]
+    
+        [Nama KPI atau Nama Individu berikutnya]
+        Pola      : ...
+        Penyebab  : ...
+        Sifat Hambatan : ...
+        Catatan   : ...
+    
+        [Jika relevan — hanya saat ada lebih dari satu blok dengan keterkaitan nyata]
+        Pola Lintas [KPI/Individu]: [hubungan sebab-akibat atau pola berulang yang 
+                     menghubungkan beberapa blok di atas, isi hanya jika benar-benar 
+                     didukung data, atau hilangkan bagian ini jika tidak ada]
+    
+        ATURAN ANALISIS (KEDALAMAN):
+        - Untuk setiap KPI/individu yang tidak mencapai target, klasifikasikan 
+          penyebabnya sebagai hambatan internal atau eksternal berdasarkan kolom 
+          keterangan saja — jangan menebak jika keterangan tidak menyebutkan pihak 
+          yang bertanggung jawab.
+        - Jika dua atau lebih KPI milik individu yang sama gagal karena akar masalah 
+          yang serupa (mis. sama-sama menunggu pihak ketiga, sama-sama terhambat tim 
+          lain), sebutkan keterkaitan ini secara eksplisit di "Pola Lintas" — ini 
+          lebih bernilai bagi HRD daripada melaporkan tiap KPI secara terpisah.
+        - Bedakan kegagalan karena kapasitas/kinerja individu vs kegagalan karena 
+          ketergantungan di luar kendalinya. Kegagalan eksternal tidak otomatis 
+          berarti kinerja individu buruk — catat ini secara eksplisit agar HRD 
+          tidak salah menilai.
+        - Untuk perbandingan antar individu: identifikasi bukan hanya siapa yang 
+          paling unggul/tertinggal, tapi apakah gap tersebut konsisten di banyak 
+          KPI atau hanya terjadi di satu KPI tertentu (indikasi masalah sistemik 
+          vs insidental).
+        - Jika sebuah KPI tercapai sementara KPI lain milik individu yang sama 
+          gagal, dan keduanya berbeda sifat (satu internal-only, satu bergantung 
+          pihak luar), catat kontras ini sebagai temuan yang relevan.
+    
+        ATURAN ISI:
+        - Satu blok per KPI jika pertanyaan fokus ke KPI.
+          Satu blok per individu jika pertanyaan fokus ke perbandingan orang.
+        - Jika data hanya 1 bulan dan keterangan kosong: tulis 1 blok saja untuk 
+          KPI/individu dengan gap terbesar, isi Pola dengan status bulan itu.
+        - Isi "Pola" wajib menyebut bulan spesifik jika bulan_num tersedia.
+        - Isi "Penyebab" hanya dari kolom keterangan — jangan spekulasi.
+        - Isi "Sifat Hambatan" hanya berdasarkan apa yang tersurat di keterangan, 
+          bukan asumsi siapa yang "salah".
+        - Isi "Catatan" dan "Pola Lintas" hanya jika ada sesuatu yang benar-benar 
+          menonjol atau berdasar dari data. Jangan isi dengan kalimat generik 
+          seperti "performa baik" atau "hasil positif".
+    
+        LARANGAN:
+        - Jangan ulangi angka realisasi/target yang sudah tersaji di atas.
+        - Jangan spekulasi di luar [DATA MENTAH].
+        - Jangan tambahkan saran atau rekomendasi.
+        - Jangan menyimpulkan "kinerja buruk" atau sejenisnya hanya dari target 
+          tidak tercapai tanpa mengecek sifat hambatannya (internal/eksternal) 
+          terlebih dahulu.
+        [PERTANYAAN PENGGUNA]
+        {user_query}
 
-    ATURAN ISI INSIGHT:
-    - Insight harus relevan langsung dengan konteks pertanyaan pengguna ([PERTANYAAN PENGGUNA]).
-    - Hanya gunakan fakta yang ada di [DATA MENTAH] — jangan mengarang atau mengasumsikan 
-      data di luar yang tersedia.
-    - Boleh menyebut pola, kesenjangan, atau hal yang menonjol dari data 
-      (misal: KPI yang paling jauh dari target, tren naik/turun antar bulan, 
-      individu dengan capaian tertinggi/terendah).
-    - Jangan ulangi angka yang sudah disajikan di atas — cukup simpulkan polanya.
-    - Jangan tambahkan saran tindakan, rekomendasi, atau opini subjektif.
-    - Gunakan bahasa yang faktual dan netral.
+        [DATA MENTAH — {row_count_hint} — {truncation_note}]
+        {result_str}
 
-    [PERTANYAAN PENGGUNA]
-    {user_query}
-
-    [SQL YANG DIEKSEKUSI]
-    {executed_sql}
-
-    [DATA MENTAH — {row_count_hint} — {truncation_note}]
-    {result_str}
-
-    [MULAI RESPONS]"""
+        [MULAI RESPONS]"""
 
     return prompt
 
@@ -336,7 +370,6 @@ def build_scope_policy_assessment_prompt(
     [INPUT]
       Question : "{user_query}"
       Role     : {user_role}
-      Schema   : {DB_SCHEMA}
       Evidence : {evidence_block}
 
     ════════════════════════════════════════════
@@ -459,7 +492,6 @@ def build_ambiguity_assessment_prompt(
 
     INPUT:
       Question : "{user_query}"
-      Role     : {user_role}
       Schema   : {DB_SCHEMA}
       Evidence : {kpi_context}
 
@@ -564,7 +596,6 @@ def build_ambiguity_assessment_prompt(
     Output:
     {{
       "has_ambiguity": true,
-      "is_out_of_scope": false,
       "question_set": [
         {{
           "question": "Progress KPI Andi ingin dilihat pada periode atau waktu apa?",
@@ -612,7 +643,6 @@ def build_ambiguity_assessment_prompt(
     AMBIGUOUS:
       {{
         "has_ambiguity": true,
-        "is_out_of_scope": false,
         "question_set": [
           {{
             "question": "<pertanyaan klarifikasi dalam Bahasa Indonesia>",
@@ -624,7 +654,7 @@ def build_ambiguity_assessment_prompt(
       }}
 
     UNAMBIGUOUS:
-      {{"has_ambiguity": false, "is_out_of_scope": false, "question_set": []}}
+      {{"has_ambiguity": false, "question_set": []}}
 
     ABSOLUTE RULES:
       - STEP 0 always runs first — resolve from session context before raising any ambiguity
