@@ -155,87 +155,6 @@ class LLMService:
         except HTTPException:
             return VisualizationDecision(is_visualize=False, chart_type=None)
 
-    async def _post_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = await self.client.chat.completions.create(**payload)
-        response = cast(ChatCompletion, response)
-        return response.model_dump()  # pydantic v2; atau .dict() jika v1
-
-    async def _request_with_retry(
-        self,
-        payload: dict[str, Any],
-        has_next_model: bool,
-    ) -> str:
-        for attempt in range(self.max_retries + 1):
-            try:
-                data = await self._post_chat_completion(payload)
-                return extract_text(data)
-
-            except APITimeoutError as error:
-                is_last_attempt = attempt >= self.max_retries
-                if is_last_attempt:
-                    logger.error(
-                        "LLM request timed out after %.1f seconds: %s",
-                        self.timeout_seconds,
-                        error,
-                    )
-                    self._raise_model_not_available()
-                await asyncio.sleep(self.retry_delay_seconds)
-
-            except APIConnectionError as error:
-                is_last_attempt = attempt >= self.max_retries
-                if is_last_attempt:
-                    logger.error("LLM connection failed: %s", error)
-                    self._raise_model_not_available()
-                await asyncio.sleep(self.retry_delay_seconds)
-
-            except APIStatusError as error:
-                status_code = error.status_code
-                if status_code == 404 and has_next_model:
-                    raise _UseNextModelCandidate() from error
-                if status_code == 429:
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail="Terlalu banyak permintaan. Silakan coba lagi nanti.",
-                    ) from error
-                if status_code >= 500:
-                    is_last_attempt = attempt >= self.max_retries
-                    if is_last_attempt:
-                        logger.error("LLM API server error %d: %s", status_code, error)
-                        self._raise_model_not_available()
-                    wait = self.retry_delay_seconds * (2 ** attempt)
-                    logger.warning("LLM API server error %d, retrying in %.1fs (attempt %d/%d)",
-                                   status_code, wait, attempt + 1, self.max_retries + 1)
-                    await asyncio.sleep(wait)
-                    continue
-                if 400 <= status_code < 500:
-                    logger.error("LLM API request error %d: %s", status_code, error)
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail=f"Permintaan ke layanan AI ditolak ({status_code}).",
-                    ) from error
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
-                ) from error
-
-            except httpx.TimeoutException as error:
-                is_last_attempt = attempt >= self.max_retries
-                if is_last_attempt:
-                    logger.error(
-                        "LLM HTTP timeout after %.1f seconds: %s",
-                        self.timeout_seconds,
-                        error,
-                    )
-                    self._raise_model_not_available()
-                await asyncio.sleep(self.retry_delay_seconds)
-
-            except httpx.HTTPError as error:
-                is_last_attempt = attempt >= self.max_retries
-                if is_last_attempt:
-                    logger.error("LLM HTTP request failed: %s", error)
-                    self._raise_model_not_available()
-                await asyncio.sleep(self.retry_delay_seconds)
-        self._raise_model_not_available()
 
     async def _call_llm(
         self,
@@ -278,6 +197,9 @@ class LLMService:
             detail="Konfigurasi layanan AI belum lengkap. Hubungi admin.",
         )
 
+    def _is_last_attempt(self, attempt: int) -> bool:
+        return attempt >= self.max_retries
+
     @staticmethod
     def _raise_model_not_available() -> NoReturn:
         raise HTTPException(
@@ -285,6 +207,91 @@ class LLMService:
             detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
         )
 
+    async def _request_with_retry(
+            self,
+            payload: dict[str, Any],
+            has_next_model: bool,
+    ) -> str:
+        for attempt in range(self.max_retries + 1):
+            try:
+                data = await self._post_chat_completion(payload)
+                return extract_text(data)
 
-class _UseNextModelCandidate(Exception):
-    """Signal internal agar service mencoba kandidat model berikutnya."""
+            except (APITimeoutError, httpx.TimeoutException) as error:
+                await self._retry_or_raise(
+                    attempt,
+                    error,
+                    "LLM request timed out after %.1f seconds: %s",
+                    self.timeout_seconds,
+                )
+
+            except APIConnectionError as error:
+                await self._retry_or_raise(
+                    attempt, error, "LLM connection failed: %s",
+                )
+
+            except httpx.HTTPError as error:
+                await self._retry_or_raise(
+                    attempt, error, "LLM HTTP request failed: %s",
+                )
+
+            except APIStatusError as error:
+                await self._handle_status_error(error, attempt, has_next_model)
+
+        self._raise_model_not_available()
+
+    async def _retry_or_raise(
+            self,
+            attempt: int,
+            error: Exception,
+            log_message: str,
+            *log_args: Any,
+    ) -> None:
+        """Sleep and continue if attempts remain, otherwise log and raise."""
+        if self._is_last_attempt(attempt):
+            logger.error(log_message, *log_args, error)
+            self._raise_model_not_available()
+        await asyncio.sleep(self.retry_delay_seconds)
+
+    async def _handle_status_error(
+            self,
+            error: APIStatusError,
+            attempt: int,
+            has_next_model: bool,
+    ) -> None:
+        status_code = error.status_code
+
+        if status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Terlalu banyak permintaan. Silakan coba lagi nanti.",
+            ) from error
+
+        if status_code >= 500:
+            if self._is_last_attempt(attempt):
+                logger.error("LLM API server error %d: %s", status_code, error)
+                self._raise_model_not_available()
+            wait = self.retry_delay_seconds * (2 ** attempt)
+            logger.warning(
+                "LLM API server error %d, retrying in %.1fs (attempt %d/%d)",
+                status_code, wait, attempt + 1, self.max_retries + 1,
+            )
+            await asyncio.sleep(wait)
+            return
+
+        if 400 <= status_code < 500:
+            logger.error("LLM API request error %d: %s", status_code, error)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Permintaan ke layanan AI ditolak ({status_code}).",
+            ) from error
+
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Layanan AI sementara tidak tersedia. Silakan coba lagi.",
+        ) from error
+
+    async def _post_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = await self.client.chat.completions.create(**payload)
+        response = cast(ChatCompletion, response)
+        return response.model_dump()  # pydantic v2; atau .dict() jika v1

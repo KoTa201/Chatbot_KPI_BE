@@ -9,9 +9,12 @@ from typing import Any
 
 from schema.clarificationSchema import ClarificationAnswerItem
 from service.preferenceTreeService import QAPair
+import json
 
 SKIP_OPTION = "Lewati"
 FREE_TEXT_OPTION = "Lainnya"
+IGNORED_CHOICE_LABELS = {"Abstain", "Others", SKIP_OPTION, FREE_TEXT_OPTION}
+FALLBACK_CHOICE_LABELS = [SKIP_OPTION, FREE_TEXT_OPTION]
 UNKNOWN_AMBIGUITY_TYPE = "unknown"
 
 
@@ -172,3 +175,54 @@ def build_fallback_disambiguated_query(
     if not additions:
         return query
     return f"{query} ({'; '.join(additions)})"
+
+def _choice_generation_templates() -> str:
+    return """
+    AmbiSchema: list every plausible column as a descriptive sentence using column_name::table_name and the column description.
+    AmbiValue: list every plausible database value or WHERE interpretation with short evidence.
+    AmbiView: list every plausible metric, aggregation, or SQL operation with a clear user-facing meaning.
+    AmbiContext: list concrete values, ranges, or constraints the user can choose.
+    AmbiFallacy: list likely corrections for the contradictory reference.
+    AmbiRef: list concrete temporal or spatial interpretations.
+    """.strip()
+
+
+def _normalize_generated_choices(response: str) -> list[str]:
+    payload = json.loads(_clean_json_response(response))
+    raw_choices = payload.get("choices")
+    if not isinstance(raw_choices, list):
+        raise ValueError("CQ generation response must contain choices list")
+
+    content_choices = _content_choices(raw_choices)
+    if not content_choices:
+        raise ValueError("CQ generation returned no content choices")
+
+    return _limit_content_choices(content_choices) + FALLBACK_CHOICE_LABELS
+
+def _clean_json_response(response: str) -> str:
+    cleaned = (response or "").strip()
+    if cleaned.startswith("```"):
+        lines = [line for line in cleaned.splitlines() if not line.strip().startswith("```")]
+        cleaned = "\n".join(lines).strip()
+    return cleaned
+
+
+def _fallback_choices(candidate_options: list[str]) -> list[str]:
+    content_choices = _content_choices(candidate_options)
+    return _limit_content_choices(content_choices) + FALLBACK_CHOICE_LABELS
+
+
+def _content_choices(choices: list[str]) -> list[str]:
+    return [
+        str(choice).strip()
+        for choice in choices
+        if str(choice).strip() and str(choice).strip() not in IGNORED_CHOICE_LABELS
+    ]
+
+
+def _limit_content_choices(content_choices: list[str]) -> list[str]:
+    seen = []
+    for choice in content_choices:
+        if choice not in seen:
+            seen.append(choice)
+    return seen[:5]

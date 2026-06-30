@@ -1,12 +1,14 @@
 from datetime import datetime
 from typing import Optional
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-
 from repository.schedulerRepository import SchedulerRepository
 from model.SchedulerConfig import SchedulerConfigModel
 from utils.datetime import utc_now
+import asyncio
+from databaseConfig import AsyncSessionLocal
+from repository.kpiGroupRepository import KPIGroupRepository
+from service.TrackeringestionService import TrackerIngestionService
 
 
 class SchedulerJobService:
@@ -32,10 +34,6 @@ class SchedulerJobService:
         Opens its own sessions because it runs outside any request context.
         Processes each source one by one with a 60-second delay between them.
         """
-        import asyncio
-        from databaseConfig import AsyncSessionLocal
-        from repository.kpiGroupRepository import KPIGroupRepository
-        from service.TrackeringestionService import TrackerIngestionService
 
         async with AsyncSessionLocal() as db:
             group_repo = KPIGroupRepository(db)

@@ -4,7 +4,6 @@ Orchestrator untuk seluruh clarification mechanism.
 Mengkoordinasikan: ambiguity detection → question generation → response handling.
 """
 
-import json
 import logging
 from typing import Optional, Any
 from uuid import UUID
@@ -27,6 +26,9 @@ from utils.helper.clarificationHelpers import (
     build_session_qa_set,
     effective_answer,
     filter_unanswered_ambiguities,
+    _choice_generation_templates,
+    _fallback_choices,
+    _normalize_generated_choices,
 )
 from service.llmService import LLMService
 from service.preferenceTreeService import PreferenceTree
@@ -187,6 +189,23 @@ class ClarificationService:
             preference_tree=preference_tree.serialize(),
         )
 
+    async def get_session_clarification_history(
+        self, session_id: UUID
+    ) -> list[dict]:
+        """Ambil riwayat clarification untuk satu session."""
+        logs = await self.repo.get_by_session(session_id)
+        return [
+            {
+                "question": log.clarifying_question,
+                "answer": log.clarification_answer,
+                "ambiguity_type": log.ambiguity_type,
+                "timestamp": log.created_at.isoformat() if log.created_at else None,
+            }
+            for log in logs
+            if log.clarifying_question  # Only clarifications, not direct answers
+        ]
+
+
     async def _disambiguate_query(
         self,
         original_query: str,
@@ -208,10 +227,10 @@ class ClarificationService:
                 additional_information=additional_information,
             )
 
-            response = await self.llm._call_llm(
+            response = await self.llm.call_model(
                 prompt=prompt,
                 temperature=0.2,
-                max_output_tokens=200,
+                max_tokens=200,
                 model=settings.LLM_MODEL_DISAMBIGUATION,
             )
 
@@ -355,22 +374,22 @@ class ClarificationService:
             prompt = build_clarification_choice_generation_prompt(
                 question=question,
                 description=candidate_options,
-                templates=self._choice_generation_templates(),
+                templates=_choice_generation_templates(),
             )
-            response = await self.llm._call_llm(
+            response = await self.llm.call_model(
                 prompt=prompt,
                 temperature=0.2,
-                max_output_tokens=300,
+                max_tokens=300,
                 model=settings.LLM_MODEL_DISAMBIGUATION,
             )
-            options = self._normalize_generated_choices(response)
+            options = _normalize_generated_choices(response)
             logger.info("[ClarificationGenerator] Generated options via standalone CQ prompt")
         except Exception as exc:
             logger.warning(
                 "[ClarificationGenerator] CQ generation failed (%s); using detector options fallback",
                 exc,
             )
-            options = self._fallback_choices(candidate_options)
+            options = _fallback_choices(candidate_options)
 
         return ClarifyingQuestionData(
             clarifying_question=question,
@@ -380,74 +399,8 @@ class ClarificationService:
             metadata=metadata or {},
         )
 
-    @staticmethod
-    def _choice_generation_templates() -> str:
-        return """
-        AmbiSchema: list every plausible column as a descriptive sentence using column_name::table_name and the column description.
-        AmbiValue: list every plausible database value or WHERE interpretation with short evidence.
-        AmbiView: list every plausible metric, aggregation, or SQL operation with a clear user-facing meaning.
-        AmbiContext: list concrete values, ranges, or constraints the user can choose.
-        AmbiFallacy: list likely corrections for the contradictory reference.
-        AmbiRef: list concrete temporal or spatial interpretations.
-        """.strip()
 
-    @classmethod
-    def _normalize_generated_choices(cls, response: str) -> list[str]:
-        payload = json.loads(cls._clean_json_response(response))
-        raw_choices = payload.get("choices")
-        if not isinstance(raw_choices, list):
-            raise ValueError("CQ generation response must contain choices list")
 
-        content_choices = [
-            str(choice).strip()
-            for choice in raw_choices
-            if str(choice).strip() and str(choice).strip() not in {"Abstain", "Others", "Lewati", "Lainnya"}
-        ]
-        if not content_choices:
-            raise ValueError("CQ generation returned no content choices")
-
-        return cls._limit_content_choices(content_choices) + ["Lewati", "Lainnya"]
-
-    @staticmethod
-    def _clean_json_response(response: str) -> str:
-        cleaned = (response or "").strip()
-        if cleaned.startswith("```"):
-            lines = [line for line in cleaned.splitlines() if not line.strip().startswith("```")]
-            cleaned = "\n".join(lines).strip()
-        return cleaned
-
-    @classmethod
-    def _fallback_choices(cls, candidate_options: list[str]) -> list[str]:
-        content_choices = [
-            str(option).strip()
-            for option in candidate_options
-            if str(option).strip() and str(option).strip() not in {"Abstain", "Others", "Lewati", "Lainnya"}
-        ]
-        return cls._limit_content_choices(content_choices) + ["Lewati", "Lainnya"]
-
-    @staticmethod
-    def _limit_content_choices(content_choices: list[str]) -> list[str]:
-        seen = []
-        for choice in content_choices:
-            if choice not in seen:
-                seen.append(choice)
-        return seen[:5]
-
-    async def get_session_clarification_history(
-        self, session_id: UUID
-    ) -> list[dict]:
-        """Ambil riwayat clarification untuk satu session."""
-        logs = await self.repo.get_by_session(session_id)
-        return [
-            {
-                "question": log.clarifying_question,
-                "answer": log.clarification_answer,
-                "ambiguity_type": log.ambiguity_type,
-                "timestamp": log.created_at.isoformat() if log.created_at else None,
-            }
-            for log in logs
-            if log.clarifying_question  # Only clarifications, not direct answers
-        ]
 
 
 

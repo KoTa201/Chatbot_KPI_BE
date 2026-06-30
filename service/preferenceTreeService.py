@@ -123,11 +123,11 @@ class PreferenceTree:
             from template.promptTemplate import build_node_merge_prompt
 
             prompt = build_node_merge_prompt(old_list=old_list, new_pair=new_pair)
-            response = await self.llm._call_llm(
+            response = await self.llm.call_model(
                 model=settings.LLM_MODEL_DISAMBIGUATION,
                 prompt=prompt,
                 temperature=0.0,
-                max_output_tokens=500,
+                max_tokens=500,
             )
             merged = json.loads(response.strip())
             if not isinstance(merged, list):

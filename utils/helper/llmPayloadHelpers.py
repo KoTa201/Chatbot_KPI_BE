@@ -117,3 +117,4 @@ def clean_sql_output(raw: str) -> str:
         lines = [l for l in sql.split("\n") if not l.strip().startswith("```")]
         sql = "\n".join(lines).strip()
     return sql
+

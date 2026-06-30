@@ -6,7 +6,11 @@ from collections.abc import AsyncIterator
 from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
-
+from utils.responses.chatResponseBuilder import (
+    _build_metadata_event,
+    _handle_no_data,
+    _handle_unsupported_visualization_type
+)
 from configCredidential import get_settings
 from repository.chatMessageRepository import ChatMessageRepository
 from service.chatbotService import ChatbotService
@@ -21,7 +25,7 @@ from template.promptTemplate import (
     build_graphic_generation_prompt,
 )
 from repository.chatQueryRepository import ChatQueryRepository
-from schema.chatSchema import ChatResponse, PipelineStageInfo, GraphicItemResponse
+from schema.chatSchema import PipelineStageInfo
 from service.clarificationService import ClarificationService
 from utils.dataClass.chatPipelineTypes import ChatPipelineContext
 from utils.responses.chatResponseBuilder import (
@@ -29,7 +33,7 @@ from utils.responses.chatResponseBuilder import (
     build_graphics_payload,
     build_security_blocked_response,
 )
-from utils.helper.sseHelpers import emit_sse_response, format_sse_metadata, format_sse_chunk, format_sse_done
+from utils.helper.sseHelpers import emit_sse_response, format_sse_chunk, format_sse_done
 from utils.helper.pipelineStageHelpers import (
     build_pipeline_context,
     coerce_message_id,
@@ -142,13 +146,7 @@ class ChatService:
 
             # Stage 6: Graphic Generation (conditional)
             graphic_results: list[GraphicResult] = []
-            unsupported_message = None
-            if visualization_decision.is_visualize:
-                req_type = (visualization_decision.chart_type or "").strip().lower()
-                supported_types = {"bar", "batang", "donut", "donat", "line", "garis"}
-                if req_type not in supported_types:
-                    unsupported_message = f"⚠️ **Maaf, tipe grafik '{visualization_decision.chart_type}' tidak didukung oleh sistem.** Sistem saat ini hanya mendukung grafik **Batang**, **Donat**, dan **Garis**.\n\nBerikut adalah data dalam bentuk teks:\n\n"
-                    visualization_decision.is_visualize = False
+            unsupported_message = _handle_unsupported_visualization_type(visualization_decision)
 
             if visualization_decision.is_visualize:
                 graphic_results = self._run_graphic_production_stage(
@@ -174,6 +172,58 @@ class ChatService:
         except Exception as error:
             await self.db.rollback()
             raise map_pipeline_error(pipeline, error)
+
+    async def create_user_message(self, session_id: UUID, message: str):
+        return await self.message_repo.create(
+            session_id=session_id,
+            message=message,
+            is_sender_chatbot=False,
+        )
+
+    async def create_chatbot_message(
+        self,
+        session_id: UUID,
+        message: str,
+        graphics: list[dict] | None = None,
+    ):
+        chat_message = await self.message_repo.create(
+            session_id=session_id,
+            message=message,
+            is_sender_chatbot=True,
+        )
+        if graphics:
+            await self.message_repo.create_graphics(
+                message_id=chat_message.message_id,
+                graphics=graphics,
+            )
+        return chat_message
+
+    async def _persist_chatbot_message(
+            self,
+            session_id: UUID,
+            message: str,
+            graphic_results: list[GraphicResult],
+    ) -> None:
+        graphics_payload = build_graphics_payload(graphic_results)
+        await self.create_chatbot_message(
+            session_id=session_id,
+            message=message,
+            graphics=graphics_payload,
+        )
+        await self.db.commit()
+
+    async def verify_session(self, session_id: UUID, user_id: UUID) -> None:
+        existing_session = await self.session_service.session_repo.get_by_id(session_id)
+        if existing_session is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna.",
+            )
+        if str(existing_session.user_id) != str(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Anda tidak memiliki akses ke sesi ini.",
+            )
 
     # ------------------------------------------------------------------
     # Extracted pipeline sub-flows
@@ -245,147 +295,6 @@ class ChatService:
 
         complete_stage(stage, "completed", "No clarification needed")
         return None
-
-    async def _stream_narrative_analysis(
-            self,
-            stages: list[PipelineStageInfo],
-            session_id: UUID,
-            user_message: str,
-            sanitized_sql: str,
-            query_result: list[dict],
-            rows_count: int,
-            graphic_results: list[GraphicResult],
-            addon_prompt: str | None,
-            show_sql: bool,
-            total_start: float,
-            unsupported_message: str | None = None,
-    ) -> AsyncIterator[str]:
-        """Stream narrative analysis: metadata → LLM tokens → done, then persist."""
-        analysis_stage = start_stage(stages, "result_analysis")
-        total_ms = int((time.monotonic() - total_start) * 1000)
-
-        yield self._build_metadata_event(
-            session_id, sanitized_sql, graphic_results, rows_count, total_ms, stages, query_result, show_sql
-        )
-
-        prefix = unsupported_message or ""
-        if unsupported_message:
-            yield format_sse_chunk(unsupported_message)
-
-        has_data = rows_count > 0 and bool(query_result)
-        if not has_data:
-            full_narrative = await self._handle_no_data(analysis_stage, session_id, graphic_results, prefix)
-            yield format_sse_chunk(full_narrative)
-            yield format_sse_done()
-            return
-
-        narrative_out: list[str] = []
-        async for event in self._stream_llm_analysis(
-            analysis_stage, narrative_out, user_message, sanitized_sql,
-            query_result, rows_count, addon_prompt, prefix,
-        ):
-            yield event
-
-        full_narrative = narrative_out[0] if narrative_out else prefix
-        yield format_sse_done()
-        await self._persist_message(session_id, full_narrative, graphic_results)
-
-    def _build_metadata_event(
-            self,
-            session_id: UUID,
-            sanitized_sql: str,
-            graphic_results: list[GraphicResult],
-            rows_count: int,
-            total_ms: int,
-            stages: list[PipelineStageInfo],
-            query_result: list[dict],
-            show_sql: bool,
-    ) -> str:
-        metadata_resp = ChatResponse(
-            session_id=session_id,
-            message="",
-            generated_sql=sanitized_sql if show_sql else None,
-            graphics=[
-                GraphicItemResponse(
-                    kpi_name=r.kpi_name or None,
-                    chart_type=r.chart_type,
-                    image_url=r.image_url,
-                )
-                for r in graphic_results
-            ],
-            rows_returned=rows_count,
-            execution_time_ms=total_ms,
-            pipeline_stages=stages,
-            query_result=query_result,
-        )
-        payload = metadata_resp.model_dump(mode="json")
-        metadata = {k: v for k, v in payload.items() if k != "message"}
-        return format_sse_metadata(metadata)
-
-    async def _handle_no_data(
-            self,
-            analysis_stage,
-            session_id: UUID,
-            graphic_results: list[GraphicResult],
-            prefix: str,
-    ) -> str:
-        fallback = prefix + "Mohon maaf, tidak ada data valid untuk pertanyaan anda atau pertanyaan anda diluar konteks domain sistem ini."
-        complete_stage(analysis_stage, "success", "Tidak ada data ditemukan.")
-        await self._persist_message(session_id, fallback, graphic_results)
-        return fallback
-
-    async def _stream_llm_analysis(
-            self,
-            analysis_stage,
-            narrative_out: list[str],
-            user_message: str,
-            sanitized_sql: str,
-            query_result: list[dict],
-            rows_count: int,
-            addon_prompt: str | None,
-            prefix: str,
-    ) -> AsyncIterator[str]:
-        """Yield SSE token chunks; append the full narrative to narrative_out for the caller."""
-        analysis_prompt = build_analysis_prompt(
-            user_query=user_message,
-            executed_sql=sanitized_sql,
-            query_result=query_result,
-            rows_count=rows_count,
-            addon_prompt=addon_prompt,
-        )
-
-        accumulated = ""
-        try:
-            async for token in self.llm_service.analyze_result_stream(analysis_prompt):
-                accumulated += token
-                yield format_sse_chunk(token)
-                await asyncio.sleep(0)
-            complete_stage(analysis_stage, "success", "Analisis naratif berhasil dibuat.")
-        except HTTPException as e:
-            if e.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
-                raise
-            complete_stage(analysis_stage, "degraded", "Dilewati karena rate limit.")
-            accumulated = (
-                "Data berhasil diambil, namun analisis AI belum tersedia "
-                "karena kuota/rate limit LLM tercapai. Silakan coba lagi nanti."
-            )
-            yield format_sse_chunk(accumulated)
-
-        narrative_out.append(prefix + accumulated)
-
-    async def _persist_message(
-            self,
-            session_id: UUID,
-            message: str,
-            graphic_results: list[GraphicResult],
-    ) -> None:
-        graphics_payload = build_graphics_payload(graphic_results)
-        await self.create_chatbot_message(
-            session_id=session_id,
-            message=message,
-            graphics=graphics_payload,
-        )
-        await self.db.commit()
 
     # ------------------------------------------------------------------
     # Pipeline stages
@@ -529,43 +438,87 @@ class ChatService:
             complete_stage(stage, "degraded", str(error))
             return []
 
+    async def _stream_narrative_analysis(
+            self,
+            stages: list[PipelineStageInfo],
+            session_id: UUID,
+            user_message: str,
+            sanitized_sql: str,
+            query_result: list[dict],
+            rows_count: int,
+            graphic_results: list[GraphicResult],
+            addon_prompt: str | None,
+            show_sql: bool,
+            total_start: float,
+            unsupported_message: str | None = None,
+    ) -> AsyncIterator[str]:
+        """Stream narrative analysis: metadata → LLM tokens → done, then persist."""
+        analysis_stage = start_stage(stages, "result_analysis")
+        total_ms = int((time.monotonic() - total_start) * 1000)
 
-    async def create_user_message(self, session_id: UUID, message: str):
-        return await self.message_repo.create(
-            session_id=session_id,
-            message=message,
-            is_sender_chatbot=False,
+        yield _build_metadata_event(
+            session_id, sanitized_sql, graphic_results, rows_count, total_ms, stages, query_result, show_sql
         )
 
-    async def create_chatbot_message(
-        self,
-        session_id: UUID,
-        message: str,
-        graphics: list[dict] | None = None,
-    ):
-        chat_message = await self.message_repo.create(
-            session_id=session_id,
-            message=message,
-            is_sender_chatbot=True,
+        prefix = unsupported_message or ""
+        if unsupported_message:
+            yield format_sse_chunk(unsupported_message)
+
+        has_data = rows_count > 0 and bool(query_result)
+        if not has_data:
+            full_narrative = await _handle_no_data(analysis_stage, prefix)
+            await self._persist_chatbot_message(session_id, full_narrative, graphic_results)
+            yield format_sse_chunk(full_narrative)
+            yield format_sse_done()
+            return
+
+        narrative_out: list[str] = []
+        async for event in self._stream_llm_analysis(
+            analysis_stage, narrative_out, user_message, sanitized_sql,
+            query_result, rows_count, addon_prompt, prefix,
+        ):
+            yield event
+
+        full_narrative = narrative_out[0] if narrative_out else prefix
+        yield format_sse_done()
+        await self._persist_chatbot_message(session_id, full_narrative, graphic_results)
+
+    async def _stream_llm_analysis(
+            self,
+            analysis_stage,
+            narrative_out: list[str],
+            user_message: str,
+            sanitized_sql: str,
+            query_result: list[dict],
+            rows_count: int,
+            addon_prompt: str | None,
+            prefix: str,
+    ) -> AsyncIterator[str]:
+        """Yield SSE token chunks; append the full narrative to narrative_out for the caller."""
+        analysis_prompt = build_analysis_prompt(
+            user_query=user_message,
+            executed_sql=sanitized_sql,
+            query_result=query_result,
+            rows_count=rows_count,
+            addon_prompt=addon_prompt,
         )
-        if graphics:
-            await self.message_repo.create_graphics(
-                message_id=chat_message.message_id,
-                graphics=graphics,
-            )
-        return chat_message
 
-    async def verify_session(self, session_id: UUID, user_id: UUID) -> None:
-        existing_session = await self.session_service.session_repo.get_by_id(session_id)
-        if existing_session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Sesi tidak lagi tersedia atau sudah dihapus oleh pengguna.",
+        accumulated = ""
+        try:
+            async for token in self.llm_service.analyze_result_stream(analysis_prompt):
+                accumulated += token
+                yield format_sse_chunk(token)
+                await asyncio.sleep(0)
+            complete_stage(analysis_stage, "success", "Analisis naratif berhasil dibuat.")
+        except HTTPException as e:
+            if e.status_code != status.HTTP_429_TOO_MANY_REQUESTS:
+                raise
+            complete_stage(analysis_stage, "degraded", "Dilewati karena rate limit.")
+            accumulated = (
+                "Data berhasil diambil, namun analisis AI belum tersedia "
+                "karena kuota/rate limit LLM tercapai. Silakan coba lagi nanti."
             )
-        if str(existing_session.user_id) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke sesi ini.",
-            )
+            yield format_sse_chunk(accumulated)
 
+        narrative_out.append(prefix + accumulated)
 

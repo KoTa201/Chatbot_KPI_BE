@@ -10,7 +10,6 @@ from uuid import UUID
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from model.PasswordReset import PasswordReset
-from datetime import datetime
 
 from model.User import RoleEnum, User
 from model.RevokedToken import RevokedToken          # ← model baru
