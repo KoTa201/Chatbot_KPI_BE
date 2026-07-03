@@ -139,7 +139,7 @@ class ChatService:
                 return
 
             sanitized_sql = validation.sanitized_sql or ""
-            logger.debug("Sanitized SQL: %s", sanitized_sql)
+            logger.error("Sanitized SQL: %s", sanitized_sql)
 
             # Stage 5: SQL Execution
             query_result, rows_count = await self._run_sql_execution_stage(stages, sanitized_sql, pipeline)
@@ -312,7 +312,7 @@ class ChatService:
     ) -> str:
         stage = start_stage(stages, "nl_to_sql")
         try:
-            column_statistics = await self.column_statistics_service.build_nl_to_sql_statistics()
+            column_statistics = await self.column_statistics_service.get_statistics_text()
             nl_prompt = build_nl_to_sql_prompt(
                 user_query=user_message,
                 user_id=user_id,

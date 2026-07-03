@@ -15,12 +15,15 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import HTTPException
+
+from exceptions import AppError, InternalError, ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
 from repository.kpiTrackerRepository import KPITrackerRepository
 from schema.kpiTrackerSchema import TrackerSourceItem   # input schema — boleh tetap
+from service.columnStatisticsService import ColumnStatisticsService
 from service.googleSheetService import GoogleSheetService
 from utils.helper.parser.parser import parse_dataframe
 from utils.userLookUp import UserLookupUtil
@@ -129,6 +132,10 @@ class TrackerIngestionService:
                 totals.grand_total_rows,
             )
 
+            # Refresh cache statistik kolom NL-to-SQL di akhir ingestion.
+            # Best-effort: kegagalan tidak membatalkan ingestion yang sudah sukses.
+            await self._refresh_column_statistics()
+
             return {
                 "spreadsheet_url":        sheet_url,
                 "total_sheets_processed": len(sheet_results),
@@ -139,12 +146,12 @@ class TrackerIngestionService:
                 "sheets":                 sheet_results,   # list[dict]
             }
 
-        except HTTPException:
+        except (AppError, HTTPException):
             if run_log_id:
                 await self.log_repo.update_status(
                     log_id=run_log_id,
                     status="failed",
-                    errors="HTTPException saat ingestion KPI Tracker.",
+                    errors="Error saat ingestion KPI Tracker.",
                 )
             raise
 
@@ -154,9 +161,17 @@ class TrackerIngestionService:
                 await self.log_repo.update_status(
                     log_id=run_log_id, status="failed", errors=str(e)
                 )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error saat ingest KPI Tracker: {str(e)}",
+            raise InternalError(f"Error saat ingest KPI Tracker: {str(e)}")
+
+    async def _refresh_column_statistics(self) -> None:
+        """Best-effort refresh cache statistik NL-to-SQL. Tidak raise jika gagal."""
+        try:
+            await ColumnStatisticsService(self.db).refresh_statistics()
+            self.logger.info("[TrackerIngestion] Cache statistik NL-to-SQL di-refresh")
+        except Exception:
+            self.logger.warning(
+                "[TrackerIngestion] Gagal refresh cache statistik NL-to-SQL",
+                exc_info=True,
             )
 
     async def ingest_batch(
@@ -593,13 +608,10 @@ class TrackerIngestionService:
             raise
         except Exception as e:
             err_str = str(e).strip()
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Gagal mengakses spreadsheet: {err_str}"
-                    if err_str
-                    else f"Gagal mengakses spreadsheet ({type(e).__name__})."
-                ),
+            raise InternalError(
+                f"Gagal mengakses spreadsheet: {err_str}"
+                if err_str
+                else f"Gagal mengakses spreadsheet ({type(e).__name__})."
             )
 
     def _parse_records(
@@ -619,7 +631,7 @@ class TrackerIngestionService:
                 sheet_name=active_sheet_name,
             )
         except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise ValidationError(str(e))
 
     async def _cleanup_existing_period(
         self,

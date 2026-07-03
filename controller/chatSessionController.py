@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from databaseConfig import get_db
+from exceptions import translate_app_errors
 from service.authService import get_current_user
 from service.chatSessionService import ChatSessionService
 from schema.sessionSchema import SessionResponse, UpdateSessionTitleRequest, SessionDetailResponse, \
@@ -25,6 +26,7 @@ class ChatSessionController:
         return [SessionResponse.model_validate(s) for s in sessions]
 
 
+    @translate_app_errors
     async def handle_get_session_detail(
         self,
         session_id: UUID,
@@ -33,6 +35,7 @@ class ChatSessionController:
         session_detail = await self.service.get_session_detail(session_id=session_id, user_id=current_user.id)
         return SessionDetailResponse.model_validate(session_detail)
 
+    @translate_app_errors
     async def handle_delete_session(
         self,
         session_id: UUID,
@@ -41,6 +44,7 @@ class ChatSessionController:
         response = await self.service.delete_session(session_id=session_id, user_id=current_user.id)
         SessionDeleteResponse.model_validate(response)
 
+    @translate_app_errors
     async def handle_update_session_title(
         self,
         session_id: UUID,

@@ -339,7 +339,7 @@ async def _build_db_schema_context(db: Any, base_schema: str) -> str:
     from service.columnStatisticsService import ColumnStatisticsService
 
     try:
-        statistics = await ColumnStatisticsService(db).build_nl_to_sql_statistics()
+        statistics = await ColumnStatisticsService(db).get_statistics_text()
         if statistics:
             return f"{base_schema}\n\nCOLUMN STATISTICS:\n{statistics}"
     except Exception as error:

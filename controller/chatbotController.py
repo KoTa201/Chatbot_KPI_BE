@@ -11,6 +11,7 @@ from schema.chatbotSchema import (
     ChatbotResponse,
     MessageResponse,
 )
+from exceptions import translate_app_errors
 from service.chatbotService import ChatbotService
 from utils.pagination import validate_limit, validate_page
 
@@ -49,14 +50,17 @@ class ChatbotController:
             total_pages=chatbots["total_pages"],
         )
 
+    @translate_app_errors
     async def get_chatbot(self, chatbot_id: UUID) -> ChatbotResponse:
         chatbot = await self.service.get_by_id(chatbot_id)
         return ChatbotResponse.model_validate(chatbot)
 
+    @translate_app_errors
     async def create_chatbot(self, payload: ChatbotCreate) -> ChatbotResponse:
         chatbot = await self.service.create(payload)
         return ChatbotResponse.model_validate(chatbot)
 
+    @translate_app_errors
     async def update_chatbot(
         self,
         chatbot_id: UUID,
@@ -65,6 +69,7 @@ class ChatbotController:
         chatbot = await self.service.update(chatbot_id, payload)
         return ChatbotResponse.model_validate(chatbot)
 
+    @translate_app_errors
     async def delete_chatbot(
         self,
         chatbot_id: UUID,

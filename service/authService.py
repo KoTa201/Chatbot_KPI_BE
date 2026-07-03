@@ -20,6 +20,7 @@ from uuid import UUID
 import random
 import secrets
 
+from exceptions import BadRequestError, ForbiddenError, UnauthorizedError
 from model.PasswordReset import PasswordReset
 from service.emailService import EmailService
 
@@ -231,10 +232,8 @@ class AuthService:
 
         # Cek denylist — deteksi token reuse
         if await repo.is_token_revoked(refresh_token):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Refresh token sudah digunakan atau dicabut. Silakan login ulang.",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise UnauthorizedError(
+                "Refresh token sudah digunakan atau dicabut. Silakan login ulang."
             )
 
         # Revoke token lama sebelum menerbitkan yang baru
@@ -243,16 +242,9 @@ class AuthService:
         # Ambil user terbaru (role bisa berubah sejak token dibuat)
         user = await repo.get_by_id(user_id)
         if user is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User tidak ditemukan.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise UnauthorizedError("User tidak ditemukan.")
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Akun tidak aktif.",
-            )
+            raise ForbiddenError("Akun tidak aktif.")
 
         new_access, access_exp = self.create_access_token(
             user_id=user.id,
@@ -295,16 +287,9 @@ class AuthService:
         user = await repo.get_by_username_or_email(identifier)
 
         if not user or not self.verify_password(password, user.hashed_password):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Username/email atau password salah.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+            raise UnauthorizedError("Username/email atau password salah.")
         if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Akun tidak aktif. Hubungi administrator.",
-            )
+            raise ForbiddenError("Akun tidak aktif. Hubungi administrator.")
         return user
 
     async def request_password_reset(self, email: str) -> str:
@@ -315,10 +300,8 @@ class AuthService:
         """
         user = await self.repo.get_by_username_or_email(email)
         if not user or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"User dengan email {email} tidak ditemukan atau tidak aktif.",
-                headers={"WWW-Authenticate": "Bearer"},
+            raise UnauthorizedError(
+                f"User dengan email {email} tidak ditemukan atau tidak aktif."
             )
 
         pin = f"{random.SystemRandom().randint(0, 999_999):06d}"
@@ -345,10 +328,7 @@ class AuthService:
         Verifikasi PIN. Jika valid, kembalikan reset_token (JWT pendek sekali pakai).
         PIN langsung ditandai used_at agar tidak bisa dipakai ulang.
         """
-        _INVALID = HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Kode tidak valid atau sudah kedaluwarsa.",
-        )
+        _INVALID = BadRequestError("Kode tidak valid atau sudah kedaluwarsa.")
 
         user = await self.repo.get_by_username_or_email(email)
         if not user:
@@ -390,23 +370,14 @@ class AuthService:
                 reset_token, self.reset_secret_key, algorithms=[self.algorithm]
             )
         except JWTError:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Reset token tidak valid atau sudah kedaluwarsa.",
-            )
+            raise UnauthorizedError("Reset token tidak valid atau sudah kedaluwarsa.")
 
         if payload.get("type") != self.reset_token_type:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token bukan reset token.",
-            )
+            raise UnauthorizedError("Token bukan reset token.")
 
         user = await self.repo.get_by_id(UUID(payload["sub"]))
         if not user or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User tidak ditemukan atau tidak aktif.",
-            )
+            raise UnauthorizedError("User tidak ditemukan atau tidak aktif.")
 
         user.hashed_password = self.hash_password(new_password)
         await self.repo.save(user)

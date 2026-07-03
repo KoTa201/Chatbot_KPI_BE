@@ -1,9 +1,8 @@
 from typing import Optional
 from uuid import UUID
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from starlette import status
 
+from exceptions import ConflictError, NotFoundError
 from model.Chatbot import Chatbot, AuthorityEnum
 from repository.chatbotRepository import ChatbotRepository
 from schema.chatbotSchema import (
@@ -72,10 +71,7 @@ class ChatbotService:
     async def get_active_chatbot_for_role(self, user_role: str):
         chatbot = await self.repo.get_active_by_authority(user_role)
         if chatbot is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.",
-            )
+            raise NotFoundError(f"Tidak ada chatbot aktif yang dikonfigurasi untuk authority user ini.")
         return chatbot
 
     # ─── Helper ───────────────────────────────────────────────────────────────
@@ -83,19 +79,13 @@ class ChatbotService:
     async def _get_or_404(self, chatbot_id: UUID) -> Chatbot:
         chatbot = await self.repo.get_by_id(chatbot_id)
         if not chatbot:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Chatbot id={chatbot_id} tidak ditemukan."
-            )
+            raise NotFoundError(f"Chatbot id={chatbot_id} tidak ditemukan.")
         return chatbot
 
     async def _check_chatbot_name_unique(self, chatbot_name: str, exclude_id: Optional[UUID] = None) -> None:
         existing = await self.repo.get_by_chatbot_name(chatbot_name)
         if existing and existing.id != exclude_id:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Chatbot name '{chatbot_name}' is already used."
-            )
+            raise ConflictError(f"Chatbot name '{chatbot_name}' is already used.")
 
     async def _enforce_single_active_per_authority(
         self,

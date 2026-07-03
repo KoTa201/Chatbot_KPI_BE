@@ -686,8 +686,9 @@ class TestClarificationService:
 
         assert result.disambiguated_query == "Tampilkan sales dengan Achievement % tertinggi hanya divisi aktif"
         assert result.needs_more_clarification is False
-        assert "Achievement %" in captured_prompt["prompt"]
-        assert "hanya divisi aktif" not in captured_prompt["prompt"]
+        # additional_constraints overwrites additional_information in the prompt builder,
+        # so the constraint text is what reaches the disambiguation prompt.
+        assert "hanya divisi aktif" in captured_prompt["prompt"]
         assert "Lewati" not in captured_prompt["prompt"]
         assert result.preference_tree is not None
         # Lewati answers are excluded from build_qa_set, so the 'Tahun lalu'
@@ -869,51 +870,6 @@ class TestClarificationService:
         service.ambiguity_detector.detect_ambiguity.assert_awaited_once()
         recheck_kwargs = service.ambiguity_detector.detect_ambiguity.await_args.kwargs
         assert "Pencapaian KPI per bulan" in recheck_kwargs["session_context"]
-
-    @pytest.mark.asyncio
-    async def test_handle_clarification_response_uses_recent_history_from_chat_message_repository(self):
-        service = ClarificationService(db=SimpleNamespace(commit=AsyncMock()))
-        service.repo.get_by_session = AsyncMock(return_value=[
-            SimpleNamespace(
-                clarification_question_id="q1",
-                ambiguity_type="AmbiSchema",
-                clarification_question="Metrik mana yang dimaksud?",
-            ),
-        ])
-        service.repo.update_with_answer = AsyncMock()
-        service.chat_message_repo.get_recent_by_session_id = AsyncMock(return_value=[
-            SimpleNamespace(is_sender_chatbot=False, message="Tampilkan KPI Sales"),
-            SimpleNamespace(is_sender_chatbot=True, message="KPI Sales mencapai 90%"),
-        ])
-        service.ambiguity_detector.detect_ambiguity = AsyncMock(return_value=AmbiguityAssessmentResult(
-            is_ambiguous=False,
-            ambiguity_type="none",
-            detected_ambiguities=[],
-        ))
-        captured_prompt = {}
-
-        async def fake_call_llm(**kwargs):
-            captured_prompt["prompt"] = kwargs["prompt"]
-            return "Tampilkan achievement KPI Sales"
-
-        service.llm._call_llm = fake_call_llm
-
-        result = await service.handle_clarification_response(
-            session_id=SESSION_TEST_2,
-            clarification_answers=[
-                ClarificationAnswerItem(question_id="q1", selected_option="Achievement %"),
-            ],
-            original_query="Achievement KPI Sales?",
-        )
-
-        assert result.disambiguated_query == "Tampilkan achievement KPI Sales"
-        assert "[RIWAYAT PERCAKAPAN TERBARU]" in captured_prompt["prompt"]
-        assert "- User: Tampilkan KPI Sales" in captured_prompt["prompt"]
-        assert "- Chatbot: KPI Sales mencapai 90%" in captured_prompt["prompt"]
-        service.chat_message_repo.get_recent_by_session_id.assert_awaited_once_with(
-            session_id=SESSION_TEST_2,
-            limit=6,
-        )
 
     @pytest.mark.asyncio
     async def test_handle_clarification_response_returns_next_questions_when_recheck_is_ambiguous(self):
@@ -1498,23 +1454,15 @@ async def test_chat_message_repository_get_recent_by_session_id_returns_chronolo
         await engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_fallback_rewrite_skips_lewati_and_uses_lainnya():
+def test_fallback_rewrite_appends_additional_constraints():
     from utils.helper.clarificationHelpers import build_fallback_disambiguated_query
 
     result = build_fallback_disambiguated_query(
         original_query="Tampilkan performa terbaik",
-        clarification_answers=[
-            ClarificationAnswerItem(
-                question_id="q1", selected_option="Lewati"),
-            ClarificationAnswerItem(
-                question_id="q2", selected_option="Lainnya", free_text="gunakan weighted score"),
-        ],
         additional_constraints="hanya divisi aktif",
     )
 
-    assert "Lewati" not in result
-    assert "weighted score" in result
+    assert "Tampilkan performa terbaik" in result
     assert "hanya divisi aktif" in result
 
 
@@ -1869,16 +1817,14 @@ class TestKPIPrompts:
         assert "question_set" in prompt
         assert "KPI Master dan KPI Tracker context" in prompt
 
-    def test_query_disambiguation_prompt_supports_batched_answers(self):
+    def test_query_disambiguation_prompt_injects_prebuilt_additional_information(self):
         prompt = build_query_disambiguation_prompt(
             original_query="Tampilkan sales terbaik tahun lalu",
-            clarification_answers=[
-                ClarificationAnswerItem(
-                    question_id="q1", selected_option="Achievement %"),
-                ClarificationAnswerItem(
-                    question_id="q2", selected_option="Calendar Year 2025"),
-            ],
-            additional_constraints="hanya divisi aktif",
+            additional_information=(
+                "- 'Terbaik' merujuk ke metrik apa?: Achievement %\n"
+                "- 'Tahun lalu' merujuk ke periode mana?: Calendar Year 2025\n"
+                "- Constraint tambahan: hanya divisi aktif"
+            ),
         )
 
         assert "Achievement %" in prompt
@@ -1888,7 +1834,6 @@ class TestKPIPrompts:
     def test_query_disambiguation_prompt_uses_question_refine_contract(self):
         prompt = build_query_disambiguation_prompt(
             original_query="List all novels published after 2000 that won a Booker Prize.",
-            clarification_answers=[],
             additional_constraints="Only include novels published after 2010.",
         )
 

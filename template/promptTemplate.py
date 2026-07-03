@@ -389,6 +389,19 @@ def build_analysis_prompt(
           cukup satu-dua kalimat soal gap, Penyebab "-".
         - Klasifikasi hambatan internal/eksternal hanya berdasarkan apa yang
           tersurat di KETERANGAN, bukan asumsi siapa yang "salah".
+        -Selain membandingkan nilai REALISASI, analisis juga isi KETERANGAN pada setiap periode untuk mengidentifikasi pola perkembangan, misalnya:
+            - Progres stagnan: realisasi tidak berubah selama beberapa periode atau KETERANGAN menunjukkan aktivitas yang sama berulang (mis. "masih menunggu approval", "belum ada update", "ongoing") selama ≥2 periode.
+            - Progres lambat: ada peningkatan realisasi, tetapi sangat kecil dibanding jumlah periode yang telah berlalu. Sebutkan berlangsung selama berapa periode/bulan.
+            - Progres konsisten: realisasi meningkat secara bertahap pada sebagian besar periode.
+            - Progres akseleratif: peningkatan signifikan dalam satu atau beberapa periode setelah sebelumnya lambat.
+            - Progres fluktuatif: realisasi naik lalu turun, atau status berubah-ubah antar periode.
+            - Kendala berulang: identifikasi apabila KETERANGAN pada beberapa periode menunjukkan akar masalah yang sama (mis. approval, vendor, dependency tim lain, resource, revisi, dll.).
+            - Perubahan penyebab: jika penyebab pada KETERANGAN berubah antar periode, jelaskan perkembangan tersebut secara kronologis.
+        -Saat membuat insight:
+            - Jangan hanya menyebut angka berubah atau tidak berubah.
+            - Kaitkan perubahan REALISASI dengan isi KETERANGAN pada setiap periode.
+            - Sebutkan durasi pola jika memungkinkan (mis. "stagnan selama 3 bulan", "progres lambat selama 2 periode", "kendala approval muncul pada 4 periode berturut-turut").
+            - Jika tidak ditemukan pola yang jelas, jangan dipaksakan.
 
         LARANGAN:
         - Jangan ulangi angka realisasi/target yang sudah tersaji di bagian data utama.
@@ -792,22 +805,12 @@ def build_clarification_choice_generation_prompt(
 
 def build_query_disambiguation_prompt(
         original_query: str,
-        clarification_answers: list,
         additional_constraints: str | None = None,
         additional_information: str | None = None,
 ) -> str:
-    if additional_information is None:
-        answer_lines = []
-        for answer in clarification_answers:
-            selected = getattr(answer, "selected_option", None) or answer.get("selected_option")
-            free_text = getattr(answer, "free_text", None) if not isinstance(answer, dict) else answer.get("free_text")
-            question_id = getattr(answer, "question_id", None) or answer.get("question_id")
-            effective_answer = free_text if selected == "Lainnya" and free_text else selected
-            if effective_answer == "Lewati":
-                continue
-            answer_lines.append(f"- {question_id}: {effective_answer}")
-        if additional_constraints:
-            answer_lines.append(f"- Constraint tambahan: {additional_constraints}")
+    answer_lines = []
+    if additional_constraints:
+        answer_lines.append(f"- Constraint tambahan: {additional_constraints}")
         additional_information = "\n".join(answer_lines) if answer_lines else "Tidak ada informasi tambahan."
 
     return f'''## Task

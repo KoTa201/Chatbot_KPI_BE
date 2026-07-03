@@ -28,11 +28,20 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
+
+from exceptions import (
+    AppError,
+    BadRequestError,
+    InternalError,
+    NotFoundError,
+    ValidationError,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
 from repository.kpiMasterRepository import KPIMasterRepository
+from service.columnStatisticsService import ColumnStatisticsService
 from service.kpiMasterService import KPIMasterService
 from utils.userLookUp import UserLookupUtil
 
@@ -116,10 +125,7 @@ class KPIMasterIngestionService:
                     ingested_count=0,
                     errors="Tidak ada records valid setelah parsing.",
                 )
-                raise HTTPException(
-                    status_code=422,
-                    detail="Sheet tidak menghasilkan records valid.",
-                )
+                raise ValidationError("Sheet tidak menghasilkan records valid.")
 
             # Inject group_id ke setiap record
             for record in records:
@@ -146,7 +152,7 @@ class KPIMasterIngestionService:
                     ingested_count=0,
                     errors=detail,
                 )
-                raise HTTPException(status_code=422, detail=detail)
+                raise ValidationError(detail)
 
             # ── STEP 6: Upsert KPI Master + sync junction table ───────
             ingested_count = await self.kpi_repo.upsert_by_group(records)
@@ -171,6 +177,12 @@ class KPIMasterIngestionService:
                 status,
             )
 
+            # ── STEP 8: Refresh cache statistik kolom NL-to-SQL ───────
+            # Statistik hanya berubah saat ada data baru — compute sekali di
+            # akhir ingestion, bukan tiap request inference. Kegagalan di sini
+            # tidak boleh membatalkan ingestion yang sudah sukses commit.
+            await self._refresh_column_statistics()
+
             return {
                 "status":           status,
                 "count":            ingested_count,
@@ -181,19 +193,16 @@ class KPIMasterIngestionService:
                 "unresolved_users": unresolved_names,
             }
 
-        except HTTPException:
+        except (AppError, HTTPException):
             if log_id:
-                await self._mark_log_failed(log_id, "HTTPException saat proses ingestion.")
+                await self._mark_log_failed(log_id, "Error saat proses ingestion.")
             raise
 
         except Exception as e:
             logger.error("[ingest_kpi_master] Unexpected error: %s", traceback.format_exc())
             if log_id:
                 await self._mark_log_failed(log_id, str(e))
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error tidak terduga saat ingestion: {str(e)}",
-            )
+            raise InternalError(f"Error tidak terduga saat ingestion: {str(e)}")
 
     async def update_and_reingest(
         self,
@@ -209,19 +218,13 @@ class KPIMasterIngestionService:
 
         existing_group = await self.group_repo.get_by_id(group_id)
         if existing_group is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"KPI {group_id} tidak ditemukan.",
-            )
+            raise NotFoundError(f"KPI {group_id} tidak ditemukan.")
 
         try:
             effective_sheet_url = sheet_url if sheet_url is not None else existing_group.sheet_url
             effective_tahun = tahun if tahun is not None else existing_group.tahun
             if effective_tahun is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Tahun wajib diisi untuk KPI Master.",
-                )
+                raise BadRequestError("Tahun wajib diisi untuk KPI Master.")
 
             logger.info(
                 "[update_and_reingest] Fetching sheet for group_id=%s: %s",
@@ -261,10 +264,7 @@ class KPIMasterIngestionService:
                     ingested_count=0,
                     errors="Tidak ada records valid setelah parsing.",
                 )
-                raise HTTPException(
-                    status_code=422,
-                    detail="Sheet tidak menghasilkan records valid.",
-                )
+                raise ValidationError("Sheet tidak menghasilkan records valid.")
 
             for record in records:
                 record["group_id"] = group_id
@@ -300,9 +300,9 @@ class KPIMasterIngestionService:
                 "unresolved_users": unresolved_names,
             }
 
-        except HTTPException:
+        except (AppError, HTTPException):
             if log_id:
-                await self._mark_log_failed(log_id, "HTTPException saat update_and_reingest.")
+                await self._mark_log_failed(log_id, "Error saat update_and_reingest.")
             raise
 
         except Exception as e:
@@ -311,9 +311,8 @@ class KPIMasterIngestionService:
             )
             if log_id:
                 await self._mark_log_failed(log_id, str(e))
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error tidak terduga saat update_and_reingest: {str(e)}",
+            raise InternalError(
+                f"Error tidak terduga saat update_and_reingest: {str(e)}"
             )
 
     # ================================================================ #
@@ -371,14 +370,14 @@ class KPIMasterIngestionService:
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error fetching sheet: {str(e)}")
+            raise InternalError(f"Error fetching sheet: {str(e)}")
 
     def _parse(self, df, spreadsheet_id: str, sheet_name: str, tahun: int):
         try:
             from utils.helper.parser.kpiMasterParser import parse_kpi_master_dataframe
             return parse_kpi_master_dataframe(df, spreadsheet_id, sheet_name, tahun=tahun)
         except ValueError as e:
-            raise HTTPException(status_code=422, detail=str(e))
+            raise ValidationError(str(e))
 
     # ================================================================ #
     #  PRIVATE: Log helpers                                             #
@@ -409,3 +408,14 @@ class KPIMasterIngestionService:
             )
         except Exception:
             logger.warning("[ingest_kpi_master] Gagal update log %s ke 'failed'", log_id)
+
+    async def _refresh_column_statistics(self) -> None:
+        """Best-effort refresh cache statistik NL-to-SQL. Tidak raise jika gagal."""
+        try:
+            await ColumnStatisticsService(self.db).refresh_statistics()
+            logger.info("[ingest_kpi_master] Cache statistik NL-to-SQL di-refresh")
+        except Exception:
+            logger.warning(
+                "[ingest_kpi_master] Gagal refresh cache statistik NL-to-SQL",
+                exc_info=True,
+            )

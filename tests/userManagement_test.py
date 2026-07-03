@@ -942,7 +942,7 @@ class TestAuthServiceUnit:
     @pytest.mark.asyncio
     async def test_rotate_tokens_reuse_ditolak(self):
         """rotate_tokens harus menolak refresh token yang terdeteksi reuse/revoked."""
-        from fastapi import HTTPException
+        from exceptions import UnauthorizedError
         from service.authService import AuthService
         from unittest.mock import MagicMock
         svc = AuthService(repo=MagicMock())
@@ -951,6 +951,6 @@ class TestAuthServiceUnit:
 
         _, refresh = _make_tokens()
 
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(UnauthorizedError) as exc:
             await svc.rotate_tokens(refresh, mock_repo)
         assert exc.value.status_code == 401

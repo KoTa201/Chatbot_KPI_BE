@@ -12,3 +12,4 @@ from .ClarificationAnswerOption import ClarificationAnswerOption
 from .PasswordReset import PasswordReset
 from .RevokedToken import RevokedToken
 from .SchedulerConfig import SchedulerConfigModel
+from .NlSqlStatsCache import NlSqlStatsCache

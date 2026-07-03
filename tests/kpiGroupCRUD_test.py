@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from exceptions import NotFoundError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.kpiGroupService import KPIGroupService
@@ -423,11 +424,11 @@ async def test_get_kpi_group_not_found():
         service.repo, "get_by_id",
         new_callable=AsyncMock, return_value=None
     ):
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await service.get_group(not_found_id)
 
         assert exc_info.value.status_code == 404
-        assert "tidak ditemukan" in exc_info.value.detail.lower()
+        assert "tidak ditemukan" in exc_info.value.message.lower()
 
 
 @pytest.mark.asyncio
@@ -695,7 +696,7 @@ async def test_update_kpi_group_not_found():
         service.repo, "get_by_id",
         new_callable=AsyncMock, return_value=None
     ):
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(NotFoundError) as exc_info:
             await service.update_group(not_found_id, payload)
 
         assert exc_info.value.status_code == 404

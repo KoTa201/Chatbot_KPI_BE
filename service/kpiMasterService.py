@@ -16,9 +16,9 @@ agar controller tidak perlu dimodifikasi.
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from exceptions import AppError, BadRequestError, InternalError
 from model.KPIMaster import KPIMaster
 from repository.kpiMasterRepository import KPIMasterRepository
 
@@ -59,12 +59,10 @@ class KPIMasterService:
             {"status", "count", "message"}
         """
         if not records:
-            raise HTTPException(
-                status_code=400, detail="Records list tidak boleh kosong")
+            raise BadRequestError("Records list tidak boleh kosong")
 
         if len(records) > 10_000:
-            raise HTTPException(
-                status_code=400, detail="Maksimal 10000 records per request")
+            raise BadRequestError("Maksimal 10000 records per request")
 
         for idx, record in enumerate(records):
             try:
@@ -73,9 +71,8 @@ class KPIMasterService:
                     record, ["group_id", "tahun", "kpi_name", "category"]
                 )
                 self._validate_tahun(record["tahun"])
-            except HTTPException as e:
-                raise HTTPException(
-                    status_code=400, detail=f"Record {idx}: {e.detail}")
+            except BadRequestError as e:
+                raise BadRequestError(f"Record {idx}: {e.message}")
 
         logger.info(f"Upserting {len(records)} KPI Master records")
 
@@ -86,14 +83,11 @@ class KPIMasterService:
                 "count":   count,
                 "message": f"Berhasil upsert {count} KPI Master records",
             }
-        except HTTPException:
+        except AppError:
             raise
         except Exception as e:
             logger.error(f"Error upserting KPI Master records: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Gagal upsert KPI Master records: {str(e)}",
-            )
+            raise InternalError(f"Gagal upsert KPI Master records: {str(e)}")
 
     # ================================================================ #
     #  PRIVATE Helpers                                                 #
@@ -104,19 +98,16 @@ class KPIMasterService:
     ) -> None:
         for field in required:
             if field not in data or not data[field]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Field '{field}' adalah required dan tidak boleh kosong",
+                raise BadRequestError(
+                    f"Field '{field}' adalah required dan tidak boleh kosong"
                 )
 
     def _validate_tahun(self, tahun: int) -> None:
         if not isinstance(tahun, int):
-            raise HTTPException(
-                status_code=400, detail="Tahun harus berupa integer")
+            raise BadRequestError("Tahun harus berupa integer")
 
         current_year = 2026
         if tahun < 2000 or tahun > current_year + 5:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Tahun harus antara 2000 dan {current_year + 5}",
+            raise BadRequestError(
+                f"Tahun harus antara 2000 dan {current_year + 5}"
             )

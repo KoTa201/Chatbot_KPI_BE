@@ -130,15 +130,9 @@ class ClarificationService:
         preference_tree = PreferenceTree()
         await preference_tree.update_tree(session_qa_set)
         additional_information = preference_tree.build_additional_information()
-        additional_information = await self._build_recent_conversation_information(
-            session_id=session_id,
-            source_query=source_query,
-            additional_information=additional_information,
-        )
 
         disambiguated_query = await self._disambiguate_query(
             original_query=source_query,
-            clarification_answers=clarification_answers,
             additional_constraints=additional_constraints,
             additional_information=additional_information,
         )
@@ -209,7 +203,6 @@ class ClarificationService:
     async def _disambiguate_query(
         self,
         original_query: str,
-        clarification_answers: list[ClarificationAnswerItem],
         additional_constraints: str | None = None,
         additional_information: str | None = None,
     ) -> str:
@@ -222,7 +215,6 @@ class ClarificationService:
         try:
             prompt = build_query_disambiguation_prompt(
                 original_query=original_query,
-                clarification_answers=clarification_answers,
                 additional_constraints=additional_constraints,
                 additional_information=additional_information,
             )
@@ -247,7 +239,7 @@ class ClarificationService:
                 f"Using smart fallback strategy"
             )
             return build_fallback_disambiguated_query(
-                original_query, clarification_answers, additional_constraints
+                original_query,  additional_constraints
             )
 
     async def _build_recent_conversation_information(
