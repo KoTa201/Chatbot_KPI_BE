@@ -1,10 +1,10 @@
 import logging
 from uuid import UUID
 
-from fastapi import HTTPException, status
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from exceptions import BadRequestError, ConflictError, NotFoundError
 from schema.authSchema import (
     MessageResponse,
     UpdateUserRequest,
@@ -28,11 +28,10 @@ class UserService:
 
     async def create_user(self, payload: UserCreateRequest) -> User:
         if await self.repo.email_exists(payload.email):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Email '{payload.email}' sudah digunakan oleh user lain.",
+            raise ConflictError(
+                f"Email '{payload.email}' sudah digunakan oleh user lain."
             )
-            
+
         user = User(
             username=payload.username,
             email=payload.email,
@@ -93,9 +92,8 @@ class UserService:
 
         if payload.email and payload.email != user.email:
             if await self.repo.email_exists(payload.email):
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Email '{payload.email}' sudah digunakan oleh user lain.",
+                raise ConflictError(
+                    f"Email '{payload.email}' sudah digunakan oleh user lain."
                 )
 
         update_data = payload.model_dump(exclude_unset=True)
@@ -108,10 +106,7 @@ class UserService:
         user = await self._get_user_or_404(user_id)
 
         if user.role == RoleEnum.admin:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Admin tidak dapat menghapus dirinya sendiri.",
-            )
+            raise BadRequestError("Admin tidak dapat menghapus dirinya sendiri.")
 
         await self.repo.delete_user(user)
         return {"message": f"User id={user_id} berhasil dihapus permanen.", "success": True}
@@ -119,8 +114,5 @@ class UserService:
     async def _get_user_or_404(self, user_id: UUID) -> User:
         user = await self.repo.get_by_id(user_id)
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"User dengan ID {user_id} tidak ditemukan.",
-            )
+            raise NotFoundError(f"User dengan ID {user_id} tidak ditemukan.")
         return user

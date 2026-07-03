@@ -150,7 +150,6 @@ def filter_unanswered_ambiguities(
 
 def build_fallback_disambiguated_query(
     original_query: str,
-    clarification_answers: list[ClarificationAnswerItem],
     additional_constraints: str | None = None,
 ) -> str:
     """Deterministic fallback for query disambiguation when LLM is unavailable.
@@ -160,16 +159,6 @@ def build_fallback_disambiguated_query(
     """
     query = original_query.strip()
     additions: list[str] = []
-    for answer in clarification_answers:
-        if answer.selected_option == SKIP_OPTION:
-            continue
-        if answer.selected_option == FREE_TEXT_OPTION:
-            if answer.free_text and answer.free_text.strip():
-                additions.append(answer.free_text.strip())
-            continue
-        stripped = answer.selected_option.strip()
-        if stripped:
-            additions.append(stripped)
     if additional_constraints and additional_constraints.strip():
         additions.append(additional_constraints.strip())
     if not additions:

@@ -8,16 +8,12 @@ Perubahan dari versi sebelumnya:
   - Interface publik (method signatures, request/response types) TIDAK BERUBAH.
 """
 
-from typing import Optional
-from uuid import UUID
-
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from schema.kpiGroupSchema import KPIGroupListResponse, KPIGroupUpdate
 from schema.kpiMasterSchema import (
     IngestionResponse,
     IngestKPIMasterRequest,
 )
+from exceptions import translate_app_errors
 from service.kpiMasterIngestionService import KPIMasterIngestionService
 from service.kpiMasterService import KPIMasterService
 
@@ -32,6 +28,7 @@ class KPIMasterController:
             db=self.db,
         )
 
+    @translate_app_errors
     async def ingest_kpi_master(
         self, request: IngestKPIMasterRequest
     ) -> IngestionResponse:

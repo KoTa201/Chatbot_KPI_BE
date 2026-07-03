@@ -16,6 +16,7 @@ from schema.authSchema import (
     UserCreateRequest,
     UserResponse,
 )
+from exceptions import translate_app_errors
 from service.userService import UserService
 from utils.pagination import validate_limit, validate_page
 
@@ -32,6 +33,7 @@ class UserController:
 
     # ─── Admin user management endpoints ──────────────────────────────
 
+    @translate_app_errors
     async def create_user(
         self, payload: UserCreateRequest
     ) -> UserResponse:
@@ -83,6 +85,7 @@ class UserController:
             "users": [UserResponse.model_validate(u) for u in result["users"]],
         }
 
+    @translate_app_errors
     async def get_user_by_id(
         self, user_id: UUID
     ) -> UserResponse:
@@ -93,6 +96,7 @@ class UserController:
         # -- validasi & mapping output --
         return UserResponse.model_validate(result)
 
+    @translate_app_errors
     async def update_user(
         self, user_id: UUID, payload: UpdateUserRequest
     ) -> UserResponse:
@@ -111,6 +115,7 @@ class UserController:
         # -- validasi & mapping output --
         return UserResponse.model_validate(result)
 
+    @translate_app_errors
     async def delete_user(
         self, user_id: UUID
     ) -> MessageResponse:

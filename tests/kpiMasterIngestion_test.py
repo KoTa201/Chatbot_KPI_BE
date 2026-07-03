@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
+from exceptions import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.kpiMasterIngestionService import KPIMasterIngestionService
@@ -149,11 +150,11 @@ async def test_ingest_kpi_master_fails_when_pic_user_unresolved():
             return_value=(parsed_records, ["User Tidak Ada"]),
         ),
     ):
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             await service.ingest_kpi_master(sheet_url=SHEET_URL, tahun=TAHUN)
 
     assert exc_info.value.status_code == 422
-    assert "User tidak ditemukan untuk: User Tidak Ada" in exc_info.value.detail
+    assert "User tidak ditemukan untuk: User Tidak Ada" in exc_info.value.message
     kpi_repo.upsert_by_group.assert_not_awaited()
 
     failed_updates = [
@@ -175,11 +176,11 @@ async def test_ingest_kpi_master_fails_when_parser_returns_no_valid_records():
         patch.object(service, "_fetch_sheet", return_value=(object(), SPREADSHEET_ID, SHEET_NAME)),
         patch.object(service, "_parse", return_value=([], ["Baris 2 invalid"])),
     ):
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             await service.ingest_kpi_master(sheet_url=SHEET_URL, tahun=TAHUN)
 
     assert exc_info.value.status_code == 422
-    assert exc_info.value.detail == "Sheet tidak menghasilkan records valid."
+    assert exc_info.value.message == "Sheet tidak menghasilkan records valid."
     kpi_repo.upsert_by_group.assert_not_awaited()
     log_repo.update_status.assert_any_await(
         log_id=LOG_ID,

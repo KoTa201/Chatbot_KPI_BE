@@ -1,8 +1,8 @@
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
 
+from exceptions import ForbiddenError, NotFoundError
 from model import ChatSession
 from repository.chatSessionRepository import ChatSessionRepository
 from repository.chatMessageRepository import ChatSessionDetailRecord, ChatMessageRepository
@@ -11,6 +11,7 @@ from schema.sessionSchema import (
     SessionGraphicItem,
     SessionMessageResponse,
 )
+from starlette import status
 
 
 class ChatSessionService:
@@ -117,10 +118,7 @@ class ChatSessionService:
             session: ChatSession | None,
     ) -> ChatSession :  # ← narrowed return type
         if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session tidak ditemukan.",
-            )
+            raise NotFoundError("Session tidak ditemukan.")
         return session  # ← return it
 
     @staticmethod
@@ -128,10 +126,7 @@ class ChatSessionService:
             session: ChatSessionDetailRecord | None,
     ) -> ChatSessionDetailRecord :  # ← narrowed return type
         if session is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session tidak ditemukan.",
-            )
+            raise NotFoundError("Session tidak ditemukan.")
         return session  # ← return it
 
     @staticmethod
@@ -142,8 +137,5 @@ class ChatSessionService:
             else session.session.user_id
         )
         if str(session_user_id) != str(user_id):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Anda tidak memiliki akses ke session ini.",
-            )
+            raise ForbiddenError("Anda tidak memiliki akses ke session ini.")
 

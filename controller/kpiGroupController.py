@@ -18,6 +18,7 @@ from schema.kpiGroupSchema import (
     MessageResponse,
     GroupTypeEnum,
 )
+from exceptions import translate_app_errors
 from service.kpiGroupService import KPIGroupService
 from utils.pagination import calculate_total_pages, validate_limit, validate_page
 
@@ -65,18 +66,21 @@ class KPIGroupController:
 
     # ─── Get one ──────────────────────────────────────────────────────────────
 
+    @translate_app_errors
     async def get_group(self, group_id: UUID) -> KPIGroupResponse:
         group = await self.service.get_group(group_id=group_id)
         return self._build_response(group, include_records=True)
 
     # ─── Create ───────────────────────────────────────────────────────────────
 
+    @translate_app_errors
     async def create_group(self, payload: KPIGroupCreate) -> KPIGroupResponse:
         group = await self.service.create_group(payload=payload)
         return self._build_response(group, include_records=False)
 
     # ─── Update ───────────────────────────────────────────────────────────────
 
+    @translate_app_errors
     async def update_group(
         self,
         group_id: UUID,
@@ -87,6 +91,7 @@ class KPIGroupController:
 
     # ─── Delete ───────────────────────────────────────────────────────────────
 
+    @translate_app_errors
     async def delete_group(self, group_id: UUID) -> MessageResponse:
         response = await self.service.delete_group(group_id=group_id)
         return MessageResponse(message=response["message"])

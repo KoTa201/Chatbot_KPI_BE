@@ -7,7 +7,8 @@ FastAPI - Structured RAG Ingestion KPI Tracker
 from contextlib import asynccontextmanager
 from pathlib import Path
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 import model
@@ -83,6 +84,18 @@ app.include_router(
     kpi_group_router.router, prefix="/api/v1/kpi", tags=["KPI Groups"])
 app.include_router(chat_router.router,
                    prefix="/api/v1/chat", tags=["Chatbot KPI"])
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # HTTPException is handled by FastAPI natively; this only catches
+    # unexpected errors from services so they return a clean 500 instead
+    # of leaking a stack trace.
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Terjadi kesalahan pada server. Silakan coba lagi."},
+    )
 
 
 @app.get("/", tags=["Health"])

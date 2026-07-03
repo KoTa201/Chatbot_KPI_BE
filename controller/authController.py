@@ -11,10 +11,10 @@ Aturan utama:
 - Update & delete user hanya bisa dilakukan oleh admin.
 """
 
-from uuid import UUID
-
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from exceptions import translate_app_errors
 from schema.authSchema import (
     LoginRequest,
     MessageResponse,
@@ -41,6 +41,7 @@ class AuthController:
     #  POST /auth/login                                                    #
     # ------------------------------------------------------------------ #
 
+    @translate_app_errors
     async def login(self, payload: LoginRequest) -> TokenResponse:
         """
         Verifikasi credential dan kembalikan access token + refresh token.
@@ -72,6 +73,7 @@ class AuthController:
     #  POST /auth/refresh                                                  #
     # ------------------------------------------------------------------ #
 
+    @translate_app_errors
     async def refresh(self, payload: RefreshRequest) -> TokenResponse:
         """
         Tukar refresh token lama dengan pasangan access + refresh token baru.
@@ -89,6 +91,7 @@ class AuthController:
             refresh_expires_in=refresh_exp,
         )
 
+    @translate_app_errors
     async def forgot_password(
         self, payload: ForgotPasswordRequest
     ) -> MessageResponse:
@@ -105,6 +108,7 @@ class AuthController:
         # -- mapping output --
         return MessageResponse(message=message)
 
+    @translate_app_errors
     async def verify_reset_pin(
         self, payload: VerifyResetPinRequest
     ) -> ResetTokenResponse:
@@ -124,6 +128,7 @@ class AuthController:
         # -- mapping output --
         return ResetTokenResponse(reset_token=reset_token, expires_in=expires_in)
 
+    @translate_app_errors
     async def reset_password(
         self, payload: ResetPasswordRequest
     ) -> MessageResponse:
@@ -152,6 +157,7 @@ class AuthController:
     #  POST /auth/logout                                                   #
     # ------------------------------------------------------------------ #
 
+    @translate_app_errors
     async def logout(self, payload: RefreshRequest) -> MessageResponse:
         """
         Revoke refresh token agar tidak bisa dipakai ulang.

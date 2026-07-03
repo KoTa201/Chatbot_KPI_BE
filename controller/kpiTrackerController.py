@@ -13,11 +13,9 @@ Methods:
 Note: get_ingestion_logs dipindahkan ke IngestionLogController
 """
 
-from typing import Optional
-
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from exceptions import translate_app_errors
 from schema.kpiTrackerSchema import (
     BatchTrackerIngestionRequest,
     BatchTrackerIngestionResponse,
@@ -37,6 +35,7 @@ class KPITrackerController:
     #  INGESTION                                                       #
     # ================================================================ #
 
+    @translate_app_errors
     async def ingest_all_sheets_from_google_sheets(
         self,
         request: IngestAllSheetsRequest,
@@ -61,6 +60,7 @@ class KPITrackerController:
             sheets=raw["sheets"],
         )
 
+    @translate_app_errors
     async def ingest_batch_from_google_sheets(
         self,
         request: BatchTrackerIngestionRequest,

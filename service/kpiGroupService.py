@@ -4,9 +4,9 @@ service/kpiGroupService.py
 
 from uuid import UUID
 
-from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from exceptions import NotFoundError
 from model.KPIGroup import KPIGroup
 from repository.ingestionLogRepository import IngestionLogRepository
 from repository.kpiGroupRepository import KPIGroupRepository
@@ -158,8 +158,5 @@ class KPIGroupService:
     async def _get_or_404(self, group_id: UUID) -> KPIGroup:
         group = await self.repo.get_by_id(group_id)
         if not group:
-            raise HTTPException(
-                status_code=404,
-                detail=f"KPI Group dengan id '{group_id}' tidak ditemukan.",
-            )
+            raise NotFoundError(f"KPI Group dengan id '{group_id}' tidak ditemukan.")
         return group

@@ -86,7 +86,7 @@ def _create_chat_service(monkeypatch) -> ChatService:
         def __init__(self, db):
             self.db = db
 
-        async def build_nl_to_sql_statistics(self):
+        async def get_statistics_text(self):
             return ""
 
     monkeypatch.setattr(chat_service_module, "ColumnStatisticsService", FakeColumnStatisticsService)
