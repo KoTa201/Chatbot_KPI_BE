@@ -501,6 +501,7 @@ class ChatService:
             query_result=query_result,
             rows_count=rows_count,
             addon_prompt=addon_prompt,
+            has_graphics=bool(graphic_results),
         )
 
         accumulated = ""

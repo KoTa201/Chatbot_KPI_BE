@@ -195,6 +195,7 @@ def build_analysis_prompt(
     query_result: list[dict],
     rows_count: int,
     addon_prompt: str | None = None,
+  has_graphics: bool = False,
 ) -> str:
     compact_rows = query_result
     result_str = json.dumps(
@@ -215,6 +216,8 @@ def build_analysis_prompt(
 
     prompt = f"""[SYSTEM PROMPT]
         Kamu adalah analis data KPI. Jawab akurat, langsung, dan ringkas dalam Bahasa Indonesia.
+
+      {'[CATATAN VISUALISASI] Grafik sudah ditampilkan terpisah oleh aplikasi di bawah jawaban ini. Jangan pernah menulis kalimat seperti "Saya tidak dapat menampilkan grafik" atau variasi serupa. Jika perlu, cukup sebutkan bahwa visualisasi tersedia di bawah.' if has_graphics else ''}
 
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         ATURAN WAJIB:
@@ -261,7 +264,7 @@ def build_analysis_prompt(
            - Per individu (ENTITAS tersedia & jadi fokus pertanyaan) → tampilkan per orang.
         6. Jangan tambahkan rekomendasi, saran, atau opini di bagian jawaban utama.
         7. Output hanya teks.
-        8. Jangan sebut keterbatasan sistem, grafik, atau visualisasi.
+        8. Jangan sebut keterbatasan sistem, grafik, atau visualisasi. Jika grafik sudah tersedia, rujuk grafik yang ditampilkan aplikasi, bukan keterbatasan sistem.
         9. Data disajikan lebih dahulu, insight di bagian akhir.
 
         ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
