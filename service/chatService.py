@@ -475,7 +475,7 @@ class ChatService:
         narrative_out: list[str] = []
         async for event in self._stream_llm_analysis(
             analysis_stage, narrative_out, user_message, sanitized_sql,
-            query_result, rows_count, addon_prompt, prefix,
+            query_result, rows_count, graphic_results, addon_prompt, prefix,
         ):
             yield event
 
@@ -491,6 +491,7 @@ class ChatService:
             sanitized_sql: str,
             query_result: list[dict],
             rows_count: int,
+            graphic_results: list[GraphicResult],
             addon_prompt: str | None,
             prefix: str,
     ) -> AsyncIterator[str]:
