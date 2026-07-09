@@ -9,7 +9,7 @@ import re
 from typing import Optional
 from uuid import UUID
 
-from fastapi import Request, status
+from fastapi import HTTPException, Request, status
 from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -191,6 +191,8 @@ class JWTMiddleware(BaseHTTPMiddleware):
 
         try:
             return await call_next(request)
+        except HTTPException:
+            raise
         except Exception as exc:
             # Catch unhandled exceptions so they don't bypass CORSMiddleware.
             # Without this, exceptions escape BaseHTTPMiddleware and reach

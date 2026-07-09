@@ -177,7 +177,7 @@ class GoogleSheetService:
         spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
 
         try:
-            spreadsheet = client.open_by_key(spreadsheet_id)
+            spreadsheet = self._open_spreadsheet(client, spreadsheet_id)
             return [
                 {"index": i, "title": ws.title, "id": ws.id}
                 for i, ws in enumerate(spreadsheet.worksheets())
@@ -293,6 +293,14 @@ class GoogleSheetService:
     ) -> gspread.Spreadsheet:
         try:
             return client.open_by_key(spreadsheet_id)
+        except PermissionError:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Spreadsheet tidak dapat diakses oleh service account. "
+                    "Pastikan spreadsheet sudah di-share ke email service account sebagai Viewer atau Editor."
+                ),
+            )
         except gspread.exceptions.SpreadsheetNotFound:
             raise HTTPException(
                 status_code=404,

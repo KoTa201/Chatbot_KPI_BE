@@ -99,6 +99,7 @@ class KPIGroupService:
         existing = await self._get_or_404(group_id)
 
         update_fields = payload.model_dump(exclude_none=True)
+        has_reingest_request = existing.group_type == "master" and not update_fields
 
         if "sheet_url" in update_fields:
             update_fields["sheet_url"] = str(update_fields["sheet_url"])
@@ -112,7 +113,7 @@ class KPIGroupService:
             and update_fields["tahun"] != existing.tahun
         )
 
-        if sheet_url_changed or (existing.group_type == "master" and tahun_changed):
+        if sheet_url_changed or (existing.group_type == "master" and (tahun_changed or has_reingest_request)):
             if existing.group_type == "master":
                 kpi_repo = KPIMasterRepository(self.db)
                 kpi_service = KPIMasterService(repository=kpi_repo)
@@ -127,7 +128,7 @@ class KPIGroupService:
                 await svc.update_and_reingest(
                     group_id=group_id,
                     sheet_url=update_fields["sheet_url"] if sheet_url_changed else None,
-                    tahun=payload.tahun,
+                    tahun=payload.tahun if tahun_changed else existing.tahun,
                 )
             elif existing.group_type == "tracker":
                 kpi_repo = KPITrackerRepository(self.db)
