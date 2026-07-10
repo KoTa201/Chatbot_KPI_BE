@@ -93,6 +93,7 @@ class IngestionLogService:
             "ingested": log.ingested_count,
             "failed": log.failed_count,
             "status": log.status,
+            "errors": log.errors,
             "source_type": source_type,
             "source_id": log.kpi_group_id,
             "created_at": log.created_at,
