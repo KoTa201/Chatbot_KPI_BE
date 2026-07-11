@@ -58,14 +58,14 @@ class ChatbotService:
                 exclude_id=chatbot_id,
             )
 
-        return await self.repo.update(payload)
+        return await self.repo.update(existing, payload)
 
-    async def delete(self, chatbot_id: UUID, hard: bool = False) -> dict:
-        await self._get_or_404(chatbot_id)
+    async def delete(self, chatbot_id: UUID, hard: bool = True) -> dict:
+        existing = await self._get_or_404(chatbot_id)
         if hard:
-            await self.repo.hard_delete()
+            await self.repo.hard_delete(existing)
             return {"message": f"Chatbot id={chatbot_id} berhasil dihapus permanen.", "success": True}
-        await self.repo.soft_delete()
+        await self.repo.soft_delete(existing)
         return {"message": f"Chatbot id={chatbot_id} berhasil dinonaktifkan.", "success": True}
 
     async def get_active_chatbot_for_role(self, user_role: str):

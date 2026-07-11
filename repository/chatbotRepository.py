@@ -12,14 +12,12 @@ from schema.chatbotSchema import ChatbotCreate, ChatbotUpdate
 class ChatbotRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db: AsyncSession = db
-        self.chatbot: Chatbot
 
     async def get_by_id(self, chatbot_id: UUID) -> Optional[Chatbot]:
         result = await self.db.execute(
             select(Chatbot).where(Chatbot.id == chatbot_id)
         )
-        self.chatbot = result.scalars().first()
-        return self.chatbot
+        return result.scalars().first()
 
     async def get_by_chatbot_name(self, chatbot_name: str) -> Optional[Chatbot]:
         result = await self.db.execute(
@@ -77,11 +75,11 @@ class ChatbotRepository:
         return chatbots, total
 
     async def create(self, payload: ChatbotCreate) -> Chatbot:
-        self.chatbot: Chatbot = Chatbot(**payload.model_dump())
-        self.db.add(self.chatbot)
+        chatbot = Chatbot(**payload.model_dump())
+        self.db.add(chatbot)
         await self.db.commit()
-        await self.db.refresh(self.chatbot)
-        return self.chatbot
+        await self.db.refresh(chatbot)
+        return chatbot
 
     async def deactivate_active_by_authority(
         self,
@@ -99,8 +97,7 @@ class ChatbotRepository:
         await self.db.execute(stmt)
         self.db.expire_all()
 
-    async def update(self, payload: ChatbotUpdate) -> Chatbot:
-        assert self.chatbot is not None
+    async def update(self, chatbot: Chatbot, payload: ChatbotUpdate) -> Chatbot:
         # Only set attributes that are explicitly provided and not None.
         # This prevents accidental NULL assignment to non-nullable columns
         # like `authority` when callers pass { authority: null }.
@@ -109,21 +106,18 @@ class ChatbotRepository:
                 # Skip explicit nulls to preserve existing DB values for
                 # non-nullable fields unless caller truly intends to clear them.
                 continue
-            setattr(self.chatbot, field, value)
-        self.db.add(self.chatbot)
+            setattr(chatbot, field, value)
+        self.db.add(chatbot)
         await self.db.commit()
-        await self.db.refresh(self.chatbot)
-        return self.chatbot
+        await self.db.refresh(chatbot)
+        return chatbot
 
-    async def soft_delete(self) -> Chatbot:
-        assert self.chatbot is not None
-        self.chatbot.is_active = False
+    async def soft_delete(self, chatbot: Chatbot) -> Chatbot:
+        chatbot.is_active = False
         await self.db.commit()
-        await self.db.refresh(self.chatbot)
-        return self.chatbot
+        await self.db.refresh(chatbot)
+        return chatbot
 
-    async def hard_delete(self) -> None:
-        assert self.chatbot is not None
-        await self.db.delete(self.chatbot)
+    async def hard_delete(self, chatbot: Chatbot) -> None:
+        await self.db.delete(chatbot)
         await self.db.commit()
-        self.chatbot: Chatbot | None = None

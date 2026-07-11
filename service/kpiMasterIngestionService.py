@@ -2,17 +2,6 @@
 service/kpiMasterIngestionService.py
 Orchestrator ingestion KPI Master dari Google Sheets.
 
-Changelog v4 (many-to-many):
-  - _inject_user_ids() kini menggunakan UserLookupUtil.all_ids_in_text()
-    sehingga SEMUA nama di responsibility_persons (comma-separated) di-resolve
-    ke list[UUID], bukan hanya nama pertama.
-  - Record menerima key "user_ids" (list[UUID]) sebagai pengganti "user_id".
-  - Repository upsert_by_group() mengelola sync ke junction table
-    kpi_master_users secara otomatis.
-  - Perilaku unresolved: sama seperti v3
-      * ingest_kpi_master  → fail (HTTP 422) jika ada nama tidak ditemukan.
-      * update_and_reingest → lenient; nama yang tidak ditemukan dicatat di log.
-
 Alur "trigger-like" saat ingest:
   1. KPIGroup di-upsert berdasarkan sheet_id.
   2. IngestionLog dibuat dengan status 'running'.
@@ -75,19 +64,8 @@ class KPIMasterIngestionService:
     ) -> dict:
         """
         Ingest KPI Master dari Google Sheets.
-
-        Side effects (otomatis, tanpa input dari caller):
-          - KPIGroup di-upsert.
-          - IngestionLog dibuat dan diupdate.
-          - user_ids (list) di-resolve dari semua nama di responsibility_persons.
-          - Junction table kpi_master_users di-sync oleh repository.
-
-        Returns:
-            {"status", "count", "message", "group_id", "log_id",
-             "data", "unresolved_users"}
         """
         log_id = None
-        group_id = None
 
         try:
             # ── STEP 1: Fetch sheet ──────────────────────────────────

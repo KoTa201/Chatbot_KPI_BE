@@ -39,14 +39,8 @@ class AuthService:
         db: AsyncSession | None = None,
         repo: UserRepository | None = None,
     ):
-        if repo is not None:
-            self.repo: UserRepository = repo
-        elif isinstance(db, UserRepository):
-            self.repo: UserRepository = db
-        elif db is not None:
-            self.repo: UserRepository = UserRepository(db)
-        else:
-            raise ValueError("AuthService requires db or repo")
+
+        self.repo: UserRepository = UserRepository(db)
         self.secret_key: str = settings.SECRET_KEY
         self.refresh_secret_key: str = settings.REFRESH_SECRET_KEY
         self.reset_secret_key: str = settings.RESET_SECRET_KEY
@@ -70,15 +64,6 @@ class AuthService:
         role: RoleEnum,
         expires_delta: Optional[timedelta] = None,
     ) -> tuple[str, int]:
-        """
-        Buat JWT access token dengan payload lengkap:
-        - sub: user_id (UUID)
-        - username: username
-        - role: role
-        - type: "access"
-        - exp: waktu kadaluarsa
-        - jti: random token id
-        """
         expire_seconds = (
             int(expires_delta.total_seconds())
             if expires_delta
@@ -101,15 +86,6 @@ class AuthService:
         return token, expire_seconds
 
     def decode_access_token(self, token: str) -> dict:
-        """
-        Decode dan validasi access token.
-
-        Menolak token yang:        
-        - signature tidak valid
-        - expiry sudah lewat
-        - type bukan "access"
-        - jti tidak ada
-        """
         try:
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
         except JWTError:
@@ -148,14 +124,6 @@ class AuthService:
         user_id: UUID,
         expires_delta: Optional[timedelta] = None,
     ) -> tuple[str, int]:
-        """
-        Buat JWT refresh token berumur panjang.
-        Refresh token hanya menyimpan `sub` dan `type` — tanpa data sensitif
-        seperti role, agar payload sekecil mungkin.
-
-        Returns:
-            (token_string, expires_in_seconds)
-        """
         expire_seconds = (
             int(expires_delta.total_seconds())
             if expires_delta
@@ -170,18 +138,13 @@ class AuthService:
             "exp": expire_at,
             "jti": str(uuid.uuid4()),
         }
-        # Gunakan secret terpisah agar refresh token tidak bisa
-        # dipalsukan dengan secret yang bocor dari access token.
+
         token = jwt.encode(
             payload, self.refresh_secret_key, algorithm=self.algorithm
         )
         return token, expire_seconds
 
     def decode_refresh_token(self, token: str) -> dict:
-        """
-        Decode dan validasi JWT refresh token.
-        Raise HTTP 401 jika token tidak valid, kadaluarsa, atau bukan refresh token.
-        """
         try:
             payload = jwt.decode(
                 token, self.refresh_secret_key, algorithms=[self.algorithm]
@@ -210,21 +173,6 @@ class AuthService:
         refresh_token: str,
         repo: UserRepository,
     ) -> tuple[str, int, str, int]:
-        """
-        Implementasi Refresh Token Rotation:
-        1. Decode & validasi refresh token lama.
-        2. Periksa apakah token sudah direvoke (ada di denylist repo).
-        3. Revoke token lama (simpan ke denylist).
-        4. Ambil data user terbaru dari DB.
-        5. Terbitkan pasangan access + refresh token baru.
-
-        Returns:
-            (new_access_token, access_exp, new_refresh_token, refresh_exp)
-
-        Raises:
-            HTTP 401 — token tidak valid / sudah direvoke.
-            HTTP 403 — akun tidak aktif.
-        """
         repo = repo or self.repo
         payload = self.decode_refresh_token(refresh_token)
 
@@ -259,11 +207,6 @@ class AuthService:
         self,
         refresh_token: str,
     ) -> None:
-        """
-        Revoke refresh token secara eksplisit (dipakai saat logout).
-        Token yang sudah ada di denylist diabaikan tanpa error.
-        """
-        # Tetap decode untuk validasi signature & expiry, ambil user_id
         payload = self.decode_refresh_token(refresh_token)
         user_id = UUID(payload["sub"])
         await self.repo.revoke_token(refresh_token, user_id)
@@ -278,11 +221,6 @@ class AuthService:
         password: str,
         repo: UserRepository | None = None,
     ) -> User:
-        """
-        Verifikasi credential. Field `identifier` bisa berupa username atau email.
-        Raise HTTP 401 jika credential salah atau user tidak ditemukan.
-        Raise HTTP 403 jika akun tidak aktif.
-        """
         repo = repo or self.repo
         user = await repo.get_by_username_or_email(identifier)
 
@@ -293,11 +231,6 @@ class AuthService:
         return user
 
     async def request_password_reset(self, email: str) -> str:
-        """
-        Buat PIN 6 digit, simpan hash-nya ke DB, kirim ke email user.
-        Selalu kembalikan pesan sukses generik — jangan bocorkan
-        apakah email terdaftar atau tidak (cegah user enumeration).
-        """
         user = await self.repo.get_by_username_or_email(email)
         if not user or not user.is_active:
             raise UnauthorizedError(
@@ -324,10 +257,6 @@ class AuthService:
         return "Jika email terdaftar, kode reset akan dikirim dalam beberapa saat."
 
     async def verify_reset_pin(self, email: str, pin: str) -> tuple[str, int]:
-        """
-        Verifikasi PIN. Jika valid, kembalikan reset_token (JWT pendek sekali pakai).
-        PIN langsung ditandai used_at agar tidak bisa dipakai ulang.
-        """
         _INVALID = BadRequestError("Kode tidak valid atau sudah kedaluwarsa.")
 
         user = await self.repo.get_by_username_or_email(email)
@@ -360,11 +289,6 @@ class AuthService:
         return reset_token, expire_seconds
 
     async def reset_password(self, reset_token: str, new_password: str) -> str:
-        """
-        Verifikasi reset_token lalu simpan password baru.
-        Token hanya berlaku sekali — setelah dipakai tidak ada mekanisme
-        reuse karena PIN sudah di-mark used_at pada tahap verify.
-        """
         try:
             payload = jwt.decode(
                 reset_token, self.reset_secret_key, algorithms=[self.algorithm]
