@@ -33,7 +33,6 @@ class LLMService:
         self.api_key: str = (settings.LLM_API_KEY or "").strip()
         self.base_url: str = (
             settings.LLM_BASE_URL or "").strip().rstrip("/")
-        # Inisialisasi client OpenAI (LLM kompatibel)
         self.client: AsyncOpenAI = AsyncOpenAI(
             base_url=self.base_url if self.base_url else None,
             api_key=self.api_key,
@@ -48,19 +47,6 @@ class LLMService:
         max_tokens: int = 500,
         model: str | None = None,
     ) -> str:
-        """
-        Generic method untuk memanggil LLM dengan prompt dan parameter custom.
-        Digunakan oleh services lain seperti ClarificationQuestionGeneratorService.
-
-        Args:
-            prompt: Pertanyaan/prompt untuk LLM
-            temperature: Tingkat kreativitas (0.0-1.0)
-            max_tokens: Maksimal token output
-            model: Model yang digunakan (default: LLM_MODEL_ANALYSIS)
-
-        Returns:
-            Respons text dari LLM
-        """
         if model is None:
             model = settings.LLM_MODEL_ANALYSIS
 
@@ -72,10 +58,6 @@ class LLMService:
         )
 
     async def generate_sql(self, prompt: str) -> str:
-        """
-        Stage 1: Konversi prompt NL-to-SQL.
-        Temperature rendah (0.1) untuk konsistensi output SQL.
-        """
         raw = await self._call_llm(
             model=settings.LLM_MODEL_NL_TO_SQL,
             prompt=prompt,
@@ -87,27 +69,9 @@ class LLMService:
         logger.debug("Raw SQL output from LLM: %s", raw)
         return clean_sql_output(raw)
 
-    async def analyze_result(self, prompt: str) -> str:
-        """
-        Stage 4: Analisis hasil query menjadi narasi Bahasa Indonesia.
-        Temperature lebih tinggi (0.4) untuk narasi yang natural.
-        """
-        return await self._call_llm(
-            model=settings.LLM_MODEL_ANALYSIS,
-            prompt=prompt,
-            temperature=0.4,
-            max_output_tokens=3000,
-        )
-
     async def analyze_result_stream(self, prompt: str) -> AsyncIterator[str]:
-        """
-        Stage 4 (streaming): Yield token chunks satu per satu dari LLM.
-        Menggunakan stream=True agar respon muncul secara token-by-token.
-        """
         model = settings.LLM_MODEL_ANALYSIS
         self._ensure_runtime_config(model)
-        # Reuse the shared payload builder so gpt-5/reasoning models are handled
-        # the same way as non-streaming calls (max_completion_tokens, no temperature).
         payload = build_payload(
             model=model,
             prompt=prompt,

@@ -61,10 +61,6 @@ class ChatService:
         self.guardrails_service: SQLGuardrailsService = SQLGuardrailsService()
         self.graphic_service: GraphicService = GraphicService()
 
-    # ------------------------------------------------------------------
-    # Main entry point
-    # -----------------------------------------------------------------
-
     async def process_query_stream(
         self,
         user_message: str,
@@ -226,7 +222,7 @@ class ChatService:
             )
 
     # ------------------------------------------------------------------
-    # Extracted pipeline sub-flows
+    # Pipeline stages
     # ------------------------------------------------------------------
 
     async def _handle_clarification_stage(
@@ -239,13 +235,7 @@ class ChatService:
         user_chat_message_id: UUID | str | None,
         session_context: str | None
     ) -> AsyncIterator[str] | None:
-        """Handle ambiguity detection stage.
 
-        Returns:
-            AsyncIterator[str] if clarification questions should be sent to user
-                (caller must yield from it and return).
-            None if no clarification needed — pipeline should continue.
-        """
         stage = start_stage(stages, "Ambiguity Detection")
 
         clarification_response = await self.clarification_service.process_user_query(
@@ -295,10 +285,6 @@ class ChatService:
 
         complete_stage(stage, "completed", "No clarification needed")
         return None
-
-    # ------------------------------------------------------------------
-    # Pipeline stages
-    # ------------------------------------------------------------------
 
     async def _run_nl_to_sql_stage(
         self,
