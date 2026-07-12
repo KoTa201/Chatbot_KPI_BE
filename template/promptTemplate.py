@@ -173,12 +173,14 @@ def build_nl_to_sql_prompt(
     - km.target/achieve/partial/fail = threshold definisi, BUKAN nilai realisasi.
       Dilarang membandingkan kt.realisasi dengan nilai-nilai ini via =, IN, atau string.
     - Untuk pertanyaan kinerja, sertakan: km.kpi_name, kt.realisasi, km.target,
-      kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu (misal Adiansyah, Andi, dll.), wajib sertakan juga nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
+      kt.keterangan, kt.bulan_num. Jika pertanyaan menanyakan orang/karyawan/individu tertentu atau meminta perbandingan/penilaian karyawan secara umum, wajib sertakan nama lengkap karyawan (`u.full_name`) pada SELECT clause agar LLM dapat mengidentifikasi subjeknya di data mentah. Tambah km.achieve/partial/fail hanya jika
       pertanyaan eksplisit minta threshold/status/kategori.
 
-    CAST NUMERIK — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", dll.
+    CAST NUMERIK & PERBANDINGAN TARGET — kt.realisasi dan km.target bertipe TEXT, bisa berisi "TRL 7", ">90%", "20 jam", dll.
     - DILARANG KERAS melakukan cast langsung ::NUMERIC atau CAST(... AS NUMERIC) pada kt.realisasi/km.target.
     - JANGAN cast ke NUMERIC dalam bentuk apapun (::NUMERIC, CAST(... AS NUMERIC), dsb.)
+    - JANGAN membandingkan `kt.realisasi` dengan `km.target` secara matematis (seperti `<`, `>`, `<=`, `>=`) di dalam clause WHERE atau mencoba mengekstrak angka dari string tersebut menggunakan substring/regex di SQL.
+    - Jika pertanyaan meminta perbandingan pencapaian terhadap target (seperti "di bawah target", "tidak mencapai target", "melebihi target", "di atas target"), maka Anda harus men-SELECT data detail per baris (`u.full_name`, `km.kpi_name`, `kt.realisasi`, `km.target`, `kt.bulan_num`) secara utuh untuk seluruh karyawan/divisi/periode terkait TANPA memfilter perbandingannya di WHERE clause. Biarkan model analisis pada tahap berikutnya yang melakukan filter dan perhitungan performa tersebut secara cerdas.
     - JANGAN lakukan kalkulasi persentase (/ target * 100) di query ini
 
     [CONTEXT]
@@ -528,12 +530,36 @@ def build_scope_policy_assessment_prompt(
         Question: "Siapa yang KPI-nya lebih baik antara Budi dan Sari?"
         Output: {{"is_out_of_scope": false, "reason": "allowed"}}
 
+        Addon constraint: "Tidak ada constraint addon tambahan."
+        Question: "Bagaimana Ringkasan performa seluruh karyawan tahun 2025"
+        Output: {{"is_out_of_scope": false, "reason": "allowed"}}
+
+        Addon constraint: "Tidak ada constraint addon tambahan."
+        Question: "Bagaimana Ringkasan performa karyawan tahun 2025"
+        Output: {{"is_out_of_scope": false, "reason": "allowed"}}
+
+        Addon constraint: "Tidak ada constraint addon tambahan."
+        Question: "visualisasikan tren grafik karyawan Andi berdasarkan capaiannya"
+        Output: {{"is_out_of_scope": false, "reason": "allowed"}}
+
+        Addon constraint: "Tidak ada constraint addon tambahan."
+        Question: "buatkan chart atau grafik perbandingan pencapaian target"
+        Output: {{"is_out_of_scope": false, "reason": "allowed"}}
+
       Addon constraint: "Dilarang membandingkan kpi antar karyawan"
       Question: "Bandingkan KPI saya dengan KPI Adiansyah"
       Output: {{"is_out_of_scope": true, "reason": "addon_policy_violation"}}
 
       Session context: user previously asked "bandingkan KPI karyawan A vs B bulan ini" and received KPI comparison data.
       Question: "siapa yang lebih baik?"
+      Output: {{"is_out_of_scope": false, "reason": "allowed"}}
+
+      Session context: user previously asked "tampilkan data KPI karyawan Romli" and received a table or list of KPIs.
+      Question: "visualisasikan"
+      Output: {{"is_out_of_scope": false, "reason": "allowed"}}
+
+      Session context: user previously asked "Bagaimana progress KPI saya?" and received status information.
+      Question: "tampilkan grafik"
       Output: {{"is_out_of_scope": false, "reason": "allowed"}}
 
     ════════════════════════════════════════════
