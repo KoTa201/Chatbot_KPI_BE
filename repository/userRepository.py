@@ -20,8 +20,6 @@ class UserRepository:
 
     def __init__(self, db: AsyncSession):
         self.db: AsyncSession = db
-        self.user: User | None = None
-        self.token: RevokedToken | None = None
 
     # ------------------------------------------------------------------ #
     #  Create                                                              #
@@ -29,11 +27,10 @@ class UserRepository:
 
     async def create_user(self, user: User) -> User | None:
         """Insert user baru. Kembalikan instance yang sudah ter-refresh (id terisi)."""
-        self.user: User | None = user
-        self.db.add(self.user)
+        self.db.add(user)
         await self.db.commit()
-        await self.db.refresh(self.user)
-        return self.user
+        await self.db.refresh(user)
+        return user
 
     # ------------------------------------------------------------------ #
     #  Read                                                                #
@@ -43,8 +40,7 @@ class UserRepository:
         result = await self.db.execute(
             select(User).where(User.id == user_id)
         )
-        self.user: User | None = result.scalar_one_or_none()
-        return self.user
+        return result.scalar_one_or_none()
 
     async def get_by_username_or_email(self, identifier: str) -> Optional[User]:
         if "@" in identifier:
@@ -124,21 +120,18 @@ class UserRepository:
     # ------------------------------------------------------------------ #
 
     async def save(self, user: User) -> User:
-        self.user: User | None = user
-        self.db.add(self.user)
+        self.db.add(user)
         await self.db.commit()
-        await self.db.refresh(self.user)
-        return self.user
+        await self.db.refresh(user)
+        return user
 
     # ------------------------------------------------------------------ #
     #  Delete                                                              #
     # ------------------------------------------------------------------ #
 
     async def delete_user(self, user: User) -> None:
-        self.user: User | None = user
-        await self.db.delete(self.user)
+        await self.db.delete(user)
         await self.db.commit()
-        self.user: User | None = None
 
     # ------------------------------------------------------------------ #
     #  Existence checks                                                    #
@@ -168,8 +161,7 @@ class UserRepository:
         """
         already_revoked = await self.is_token_revoked(token)
         if not already_revoked:
-            self.token: RevokedToken = RevokedToken(token=token, user_id=user_id)
-            self.db.add(self.token)
+            self.db.add(RevokedToken(token=token, user_id=user_id))
             await self.db.commit()
 
     async def is_token_revoked(self, token: str) -> bool:

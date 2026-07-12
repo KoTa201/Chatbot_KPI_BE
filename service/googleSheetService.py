@@ -36,6 +36,24 @@ HEADER_KEYWORDS = [
     "keterangan", "satuan target", "tanggal", "deskripsi",
 ]
 
+# Nama tab -> (Bulan, nomor). Nama penuh + singkatan ID/EN.
+TAB_BULAN_ALIASES: dict[str, tuple[str, int]] = {
+    "januari": ("Januari", 1),    "februari": ("Februari", 2),
+    "maret": ("Maret", 3),        "april": ("April", 4),
+    "mei": ("Mei", 5),            "juni": ("Juni", 6),
+    "juli": ("Juli", 7),          "agustus": ("Agustus", 8),
+    "september": ("September", 9), "oktober": ("Oktober", 10),
+    "november": ("November", 11), "desember": ("Desember", 12),
+    "jan": ("Januari", 1),  "feb": ("Februari", 2),
+    "mar": ("Maret", 3),    "apr": ("April", 4),
+    "may": ("Mei", 5),      "jun": ("Juni", 6),
+    "jul": ("Juli", 7),     "aug": ("Agustus", 8),
+    "sep": ("September", 9), "oct": ("Oktober", 10),
+    "nov": ("November", 11), "dec": ("Desember", 12),
+    "agu": ("Agustus", 8),  "okt": ("Oktober", 10),
+    "des": ("Desember", 12),
+}
+
 
 class GoogleSheetService:
     def __init__(self):
@@ -55,13 +73,6 @@ class GoogleSheetService:
     ) -> tuple:
         """
         Ambil data dari satu sheet sebagai DataFrame + metadata.
-
-        Args:
-            header: If None, return all rows as raw DataFrame with integer columns
-                    (no header detection). Useful for KPI Master sheets.
-
-        Returns:
-            (DataFrame, spreadsheet_id, sheet_name_aktif, meta: dict)
         """
         client = self._get_client()
         spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
@@ -80,27 +91,6 @@ class GoogleSheetService:
     ) -> list[dict]:
         """
         Ingest SEMUA sheet/tab dalam satu spreadsheet sekaligus.
-
-        Args:
-            sheet_url   : URL Google Sheets.
-            skip_on_error: Jika True, sheet yang gagal di-parse dilewati
-                           dan dicatat di field 'error'. Jika False,
-                           exception langsung dilempar.
-
-        Returns:
-            List of dict, satu item per sheet:
-            [
-                {
-                    "sheet_index"   : int,
-                    "sheet_name"    : str,
-                    "sheet_id"      : int,
-                    "spreadsheet_id": str,
-                    "df"            : pd.DataFrame,  # None jika error
-                    "meta"          : dict,           # None jika error
-                    "error"         : str | None,
-                },
-                ...
-            ]
         """
         client = self._get_client()
         spreadsheet_id = self._extract_spreadsheet_id(sheet_url)
@@ -110,7 +100,7 @@ class GoogleSheetService:
             worksheets = spreadsheet.worksheets()
         except gspread.exceptions.APIError as e:
             status_code = getattr(getattr(e, "response", None), "status_code", None)
-            detail = str(e).strip() or f"HTTP {status_code}" if status_code else "API error"
+            detail = str(e).strip() or (f"HTTP {status_code}" if status_code else "API error")
             raise HTTPException(
                 status_code=502,
                 detail=(
@@ -189,7 +179,7 @@ class GoogleSheetService:
             )
 
     # ------------------------------------------------------------------ #
-    #  Core worksheet processor (dipakai oleh fetch_sheet & fetch_all)    #
+    #  Core worksheet processor                                          #
     # ------------------------------------------------------------------ #
 
     def _process_worksheet(
@@ -234,18 +224,17 @@ class GoogleSheetService:
         return df, spreadsheet_id, worksheet.title, {}
 
     # ------------------------------------------------------------------ #
-    #  Auth                                                                #
+    #  Auth                                                              #
     # ------------------------------------------------------------------ #
 
     def _get_client(self) -> gspread.Client:
         if self._client is None:
-            self._client: Optional[gspread.Client] = self._build_client()
+            self._client = self._build_client()
         return self._client
 
     def _build_client(self) -> gspread.Client:
         try:
             raw = self.google_credentials_path.strip()
-            # ponytail: inline JSON in env, else treat as file path (back-compat)
             if raw.startswith("{"):
                 creds = Credentials.from_service_account_info(
                     json.loads(raw), scopes=SCOPES)
@@ -375,30 +364,11 @@ class GoogleSheetService:
         Returns:
             (bulan_str, bulan_num) atau (None, None) jika tidak ditemukan.
         """
-        _TAB_ALIASES: dict[str, tuple[str, int]] = {
-            # Nama penuh
-            "januari": ("Januari", 1),   "februari": ("Februari", 2),
-            "maret": ("Maret", 3),        "april": ("April", 4),
-            "mei": ("Mei", 5),            "juni": ("Juni", 6),
-            "juli": ("Juli", 7),          "agustus": ("Agustus", 8),
-            "september": ("September", 9), "oktober": ("Oktober", 10),
-            "november": ("November", 11), "desember": ("Desember", 12),
-            # Singkatan Inggris
-            "jan": ("Januari", 1),  "feb": ("Februari", 2),
-            "mar": ("Maret", 3),    "apr": ("April", 4),
-            "may": ("Mei", 5),      "jun": ("Juni", 6),
-            "jul": ("Juli", 7),     "aug": ("Agustus", 8),
-            "sep": ("September", 9), "oct": ("Oktober", 10),
-            "nov": ("November", 11), "dec": ("Desember", 12),
-            # Singkatan Indonesia
-            "agu": ("Agustus", 8),  "okt": ("Oktober", 10),
-            "des": ("Desember", 12),
-        }
         normalized = tab_name.strip().lower()
         # Coba exact match terlebih dulu, lalu partial match
-        if normalized in _TAB_ALIASES:
-            return _TAB_ALIASES[normalized]
-        for key, val in _TAB_ALIASES.items():
+        if normalized in TAB_BULAN_ALIASES:
+            return TAB_BULAN_ALIASES[normalized]
+        for key, val in TAB_BULAN_ALIASES.items():
             if re.search(r'\b' + re.escape(key) + r'\b', normalized):
                 return val
         return None, None

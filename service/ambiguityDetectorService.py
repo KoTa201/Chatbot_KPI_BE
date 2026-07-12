@@ -31,17 +31,11 @@ logger = logging.getLogger(__name__)
 # Type alias for shared LLM call kwargs
 # ---------------------------------------------------------------------------
 
-
-
 class AmbiguityDetectorService:
     """Service untuk deteksi ambiguitas query pengguna menggunakan LLM."""
 
     def __init__(self) -> None:
         self.llm: LLMService = LLMService()
-
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
 
     async def detect_ambiguity(
         self,
@@ -53,16 +47,6 @@ class AmbiguityDetectorService:
     ) -> AmbiguityAssessmentResult:
         """
         Deteksi ambiguitas query pengguna menggunakan LLM.
-
-        Args:
-            user_query: Pertanyaan dari pengguna
-            user_role: Role pengguna (Owner, kepala_divisi, Karyawan)
-            kpi_context: Konteks KPI tambahan
-            addon_prompt: Optional addon prompt constraint
-            session_context: Konteks sesi pengguna
-
-        Returns:
-            AmbiguityAssessmentResult dengan score, tipe, dan interpretasi
         """
         logger.info("[AmbiguityDetector] Detecting ambiguity for query: %s", user_query)
 
@@ -86,9 +70,6 @@ class AmbiguityDetectorService:
     async def _run_scope_policy_check(self, **llm_kwargs) -> AmbiguityAssessmentResult | None:
         """
         Jalankan scope/policy precheck.
-
-        Returns:
-            AmbiguityAssessmentResult jika query harus dihentikan, None jika lolos.
         """
         has_addon_prompt = bool((llm_kwargs.get("addon_prompt") or "").strip())
 
@@ -107,9 +88,6 @@ class AmbiguityDetectorService:
     async def _run_ambiguity_check(self, **llm_kwargs) -> AmbiguityAssessmentResult:
         """
         Jalankan ambiguity assessment utama.
-
-        Returns:
-            AmbiguityAssessmentResult dari LLM, atau non-ambiguous fallback jika gagal.
         """
         try:
             result = await self._assess_ambiguity_with_llm(**llm_kwargs)
@@ -192,9 +170,6 @@ class AmbiguityDetectorService:
     ) -> AmbiguityAssessmentResult:
         """
         Panggil LLM untuk menilai ambiguitas query.
-
-        Raises:
-            RuntimeError: jika response tidak bisa di-parse atau LLM call gagal.
         """
         prompt = build_ambiguity_assessment_prompt(
             user_query,
