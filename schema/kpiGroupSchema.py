@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 from enum import Enum
-from pydantic import AnyHttpUrl, BaseModel, Field, model_validator, AliasChoices
+from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
 
 
 # ─── Konstanta group_type ─────────────────────────────────────────────────────
@@ -160,14 +160,12 @@ class KPIGroupListResponse(BaseModel):
     """List endpoint tidak menyertakan records — hanya metadata grup."""
     total:       int
     page:        int
-    limit: int = Field(
-        ..., validation_alias=AliasChoices("limit", "page_size"), serialization_alias="page_size"
-    )
+    limit:       int
     total_pages: int
     data:        list[KPIGroupResponse]
 
     model_config = {
-        "populate_by_name": True,
+        "from_attributes": True,
     }
 
 

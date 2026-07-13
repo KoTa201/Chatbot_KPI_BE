@@ -112,7 +112,6 @@ class KPIGroupRouter:
         page:       int = Query(default=1, ge=1,
                                 description="Nomor halaman"),
         limit:  int = Query(default=10, ge=1, le=100,
-                            alias="page_size",
                             description="Jumlah item per halaman"),
         tahun: Optional[int] = Query(
             default=None,
